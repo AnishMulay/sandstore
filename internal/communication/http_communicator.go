@@ -32,6 +32,15 @@ func (c *HTTPCommunicator) Address() string {
 	return c.listenAddress
 }
 
+func (c *HTTPCommunicator) Receive(ctx context.Context) (Message, error) {
+	select {
+	case msg := <-c.messageChan:
+		return msg, nil
+	case <-ctx.Done():
+		return Message{}, ctx.Err()
+	}
+}
+
 func (c *HTTPCommunicator) Send(ctx context.Context, to string, msgType string, payload []byte) error {
 	c.clientsLock.RLock()
 	client, ok := c.clients[to]
