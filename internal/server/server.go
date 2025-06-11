@@ -15,3 +15,13 @@ type Server struct {
 	cancel       context.CancelFunc
 	wg           sync.WaitGroup
 }
+
+func NewServer(communicator communication.Communicator) *Server {
+	ctx, cancel := context.WithCancel(context.Background())
+	return &Server{
+		communicator: communicator,
+		handlers:     make(map[string]communication.MessageHandler),
+		ctx:          ctx,
+		cancel:       cancel,
+	}
+}
