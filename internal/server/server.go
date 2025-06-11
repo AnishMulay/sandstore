@@ -25,3 +25,9 @@ func NewServer(communicator communication.Communicator) *Server {
 		cancel:       cancel,
 	}
 }
+
+func (s *Server) RegisterHandler(messageType string, handler communication.MessageHandler) {
+	s.handlersLock.Lock()
+	defer s.handlersLock.Unlock()
+	s.handlers[messageType] = handler
+}
