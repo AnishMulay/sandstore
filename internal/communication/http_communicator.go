@@ -1,13 +1,14 @@
 package communication
 
-type HTTPCommunicator struct {
-	Addr       string
-	incomingCh chan Message
-}
+import (
+	"net/http"
+	"sync"
+)
 
-func NewHTTPCommunicator(addr string) *HTTPCommunicator {
-	return &HTTPCommunicator{
-		Addr:       addr,
-		incomingCh: make(chan Message, 100),
-	}
+type HTTPCommunicator struct {
+	listenAddress string
+	httpServer    *http.Server
+	messageChan   chan Message
+	clients       map[string]*http.Client
+	clientsLock   sync.RWMutex
 }
