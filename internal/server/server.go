@@ -51,6 +51,16 @@ func (s *Server) messageLoop() {
 	}
 }
 
+func (s *Server) Start() error {
+	if err := s.communicator.Start(); err != nil {
+		return err
+	}
+	s.wg.Add(1)
+	go s.messageLoop()
+	log.Printf("Server started, listening on %s", s.communicator.Address())
+	return nil
+}
+
 func (s *Server) handleMessage(msg communication.Message) {
 	s.handlersLock.RLock()
 	handler, exists := s.handlers[msg.Type]
