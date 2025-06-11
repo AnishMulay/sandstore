@@ -3,6 +3,7 @@ package communication
 import (
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"sync"
 )
@@ -21,6 +22,24 @@ func NewHTTPCommunicator(listenAddress string) *HTTPCommunicator {
 		messageChan:   make(chan Message),
 		clients:       make(map[string]*http.Client),
 	}
+}
+
+func (c *HTTPCommunicator) Start() error {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/message", c.handleMessage)
+
+	c.httpServer = &http.Server{
+		Addr:    c.listenAddress,
+		Handler: mux,
+	}
+
+	go func() {
+		if err := c.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("HTTP server error: %v", err)
+		}
+	}()
+
+	return nil
 }
 
 func (c *HTTPCommunicator) handleMessage(w http.ResponseWriter, r *http.Request) {
