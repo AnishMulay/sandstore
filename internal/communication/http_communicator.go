@@ -1,8 +1,10 @@
 package communication
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -24,6 +26,55 @@ func NewHTTPCommunicator(listenAddress string) *HTTPCommunicator {
 		messageChan:   make(chan Message),
 		clients:       make(map[string]*http.Client),
 	}
+}
+
+func (c *HTTPCommunicator) Address() string {
+	return c.listenAddress
+}
+
+func (c *HTTPCommunicator) Send(ctx context.Context, to string, msgType string, payload []byte) error {
+	c.clientsLock.RLock()
+	client, ok := c.clients[to]
+	c.clientsLock.RUnlock()
+
+	if !ok {
+		client = &http.Client{
+			Timeout: 5 * time.Second,
+		}
+		c.clientsLock.Lock()
+		c.clients[to] = client
+		c.clientsLock.Unlock()
+	}
+
+	msg := Message{
+		From:    c.listenAddress,
+		Type:    msgType,
+		Payload: payload,
+	}
+
+	jsonData, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", fmt.Sprintf("http://%s/message", to), bytes.NewReader(jsonData))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("failed to send message: %s", body)
+	}
+
+	return nil
 }
 
 func (c *HTTPCommunicator) Start() error {
