@@ -1,5 +1,7 @@
 package communication
 
+import "context"
+
 type Message struct {
 	From    string
 	Type    string
@@ -8,7 +10,8 @@ type Message struct {
 
 type Communicator interface {
 	Start() error
-	Send(to string, message Message) error
-	Receive() (<-chan Message, error)
+	Receive(ctx context.Context) (Message, error)
+	Send(ctx context.Context, to string, msgType string, payload []byte) error
 	Stop() error
+	Address() string
 }
