@@ -61,6 +61,16 @@ func (s *Server) Start() error {
 	return nil
 }
 
+func (s *Server) Stop() error {
+	s.cancel()
+	s.wg.Wait()
+	if err := s.communicator.Stop(); err != nil {
+		return err
+	}
+	log.Printf("Server stopped")
+	return nil
+}
+
 func (s *Server) handleMessage(msg communication.Message) {
 	s.handlersLock.RLock()
 	handler, exists := s.handlers[msg.Type]
