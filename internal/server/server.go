@@ -34,6 +34,23 @@ func (s *Server) RegisterHandler(messageType string, handler communication.Messa
 	s.handlers[messageType] = handler
 }
 
+func (s *Server) messageLoop() {
+	defer s.wg.Done()
+	for {
+		select {
+		case <-s.ctx.Done():
+			return
+		default:
+			msg, err := s.communicator.Receive(s.ctx)
+			if err != nil {
+				log.Printf("Error receiving message: %v", err)
+				continue
+			}
+			go s.handleMessage(msg)
+		}
+	}
+}
+
 func (s *Server) handleMessage(msg communication.Message) {
 	s.handlersLock.RLock()
 	handler, exists := s.handlers[msg.Type]
