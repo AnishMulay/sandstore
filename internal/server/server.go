@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"log"
 	"sync"
+	"time"
 
 	"github.com/AnishMulay/sandstore/internal/communication"
 )
@@ -31,3 +33,31 @@ func (s *Server) RegisterHandler(messageType string, handler communication.Messa
 	defer s.handlersLock.Unlock()
 	s.handlers[messageType] = handler
 }
+
+func (s *Server) handleMessage(msg communication.Message) {
+	s.handlersLock.RLock()
+	handler, exists := s.handlers[msg.Type]
+	s.handlersLock.RUnlock()
+
+	if !exists {
+		log.Printf("No handler registered for message type: %s", msg.Type)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(s.ctx, defaultHandlerTimeout)
+	defer cancel()
+
+	response, err := handler(ctx, msg)
+	if err != nil {
+		log.Printf("Error handling message: %v", err)
+		return
+	}
+
+	if response != nil {
+		if err := s.communicator.Send(ctx, msg.From, "response", response); err != nil {
+			log.Printf("Error sending response: %v", err)
+		}
+	}
+}
+
+const defaultHandlerTimeout = 30 * time.Second
