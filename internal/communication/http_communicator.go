@@ -12,3 +12,11 @@ type HTTPCommunicator struct {
 	clients       map[string]*http.Client
 	clientsLock   sync.RWMutex
 }
+
+func NewHTTPCommunicator(listenAddress string) *HTTPCommunicator {
+	return &HTTPCommunicator{
+		listenAddress: listenAddress,
+		messageChan:   make(chan Message),
+		clients:       make(map[string]*http.Client),
+	}
+}
