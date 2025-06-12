@@ -134,6 +134,7 @@ func (c *HTTPCommunicator) handleMessage(w http.ResponseWriter, r *http.Request)
 
 	select {
 	case c.messageChan <- msg:
+		w.WriteHeader(http.StatusOK)
 	default:
 		http.Error(w, "Message channel is full", http.StatusServiceUnavailable)
 	}
