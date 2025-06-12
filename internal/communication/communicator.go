@@ -10,8 +10,10 @@ type Message struct {
 
 type Communicator interface {
 	Start() error
-	Receive(ctx context.Context) (Message, error)
-	Send(ctx context.Context, to string, msgType string, payload []byte) error
+	ReceiveSync(ctx context.Context) (Message, error)
+	SendSync(ctx context.Context, to string, msgType string, payload []byte) error
+	SendAsync(ctx context.Context, to string, msgType string, payload []byte) error
+	ReceiveAsync(ctx context.Context) (Message, error)
 	Stop() error
 	Address() string
 }

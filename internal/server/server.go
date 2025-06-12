@@ -41,7 +41,7 @@ func (s *Server) messageLoop() {
 		case <-s.ctx.Done():
 			return
 		default:
-			msg, err := s.communicator.Receive(s.ctx)
+			msg, err := s.communicator.ReceiveSync(s.ctx)
 			if err != nil {
 				log.Printf("Error receiving message: %v", err)
 				continue
@@ -91,7 +91,7 @@ func (s *Server) handleMessage(msg communication.Message) {
 	}
 
 	if response != nil {
-		if err := s.communicator.Send(ctx, msg.From, "response", response); err != nil {
+		if err := s.communicator.SendSync(ctx, msg.From, "response", response); err != nil {
 			log.Printf("Error sending response: %v", err)
 		}
 	}

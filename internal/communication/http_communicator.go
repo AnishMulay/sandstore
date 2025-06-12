@@ -32,7 +32,7 @@ func (c *HTTPCommunicator) Address() string {
 	return c.listenAddress
 }
 
-func (c *HTTPCommunicator) Receive(ctx context.Context) (Message, error) {
+func (c *HTTPCommunicator) ReceiveSync(ctx context.Context) (Message, error) {
 	select {
 	case msg := <-c.messageChan:
 		return msg, nil
@@ -41,7 +41,12 @@ func (c *HTTPCommunicator) Receive(ctx context.Context) (Message, error) {
 	}
 }
 
-func (c *HTTPCommunicator) Send(ctx context.Context, to string, msgType string, payload []byte) error {
+func (c *HTTPCommunicator) ReceiveAsync(ctx context.Context) (Message, error) {
+	// Currently implemented the same as ReceiveSync for minimal changes
+	return c.ReceiveSync(ctx)
+}
+
+func (c *HTTPCommunicator) SendSync(ctx context.Context, to string, msgType string, payload []byte) error {
 	c.clientsLock.RLock()
 	client, ok := c.clients[to]
 	c.clientsLock.RUnlock()
@@ -83,6 +88,20 @@ func (c *HTTPCommunicator) Send(ctx context.Context, to string, msgType string, 
 		return fmt.Errorf("failed to send message: %s", body)
 	}
 
+	return nil
+}
+
+func (c *HTTPCommunicator) SendAsync(ctx context.Context, to string, msgType string, payload []byte) error {
+	// Currently implemented as a wrapper around SendSync that launches a goroutine
+	go func() {
+		// Using a background context since the original might expire
+		newCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := c.SendSync(newCtx, to, msgType, payload); err != nil {
+			log.Printf("Async message send error: %v", err)
+		}
+	}()
 	return nil
 }
 
