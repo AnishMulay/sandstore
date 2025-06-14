@@ -9,7 +9,23 @@ type Message struct {
 	Payload []byte
 }
 
-type MessageHandler func(msg Message) (*Message, error)
+type SandCode string
+
+const (
+	CodeOK          SandCode = "OK"
+	CodeBadRequest  SandCode = "BAD_REQUEST"
+	CodeNotFound    SandCode = "NOT_FOUND"
+	CodeInternal    SandCode = "INTERNAL"
+	CodeUnavailable SandCode = "UNAVAILABLE"
+)
+
+type Response struct {
+	Code    SandCode
+	Body    []byte
+	Headers map[string]string // Optional, used only in HTTP
+}
+
+type MessageHandler func(msg Message) (*Response, error)
 
 type Communicator interface {
 	Start(handler MessageHandler) error

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 
 	"github.com/AnishMulay/sandstore/internal/communication"
@@ -22,19 +23,40 @@ func NewServer(communicator communication.Communicator) *Server {
 	}
 }
 
-func (s *Server) handleMessage(msg communication.Message) (*communication.Message, error) {
+func (s *Server) handleMessage(msg communication.Message) (*communication.Response, error) {
 	log.Printf("Received message of type: %s from: %s", msg.Type, msg.From)
 
 	switch msg.Type {
 	case "ping":
 		log.Printf("Responding to ping from %s", msg.From)
-		return &communication.Message{
+		// Create a Message to maintain backward compatibility with client
+		responseMsg := &communication.Message{
 			Type:    "pong",
 			Payload: []byte("pong"),
+		}
+		
+		// Convert to JSON for the response body
+		jsonData, err := json.Marshal(responseMsg)
+		if err != nil {
+			return &communication.Response{
+				Code: communication.CodeInternal,
+				Body: []byte("Error encoding response"),
+			}, nil
+		}
+		
+		return &communication.Response{
+			Code: communication.CodeOK,
+			Body: jsonData,
+			Headers: map[string]string{
+				"Content-Type": "application/json",
+			},
 		}, nil
 	default:
 		log.Printf("Unhandled message type: %s", msg.Type)
-		return nil, nil
+		return &communication.Response{
+			Code: communication.CodeOK,
+			Body: nil,
+		}, nil
 	}
 }
 

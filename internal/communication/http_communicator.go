@@ -95,7 +95,41 @@ func (c *HTTPCommunicator) Send(ctx context.Context, to string, msg Message) err
 		return fmt.Errorf("failed to send message: %s", string(body))
 	}
 
+	// Process the response body
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response body: %v", err)
+	}
+
+	// If there's a response body, try to parse it as a Message and handle it
+	if len(respBody) > 0 {
+		var respMsg Message
+		if err := json.Unmarshal(respBody, &respMsg); err == nil {
+			// If we successfully parsed a Message, call the handler
+			if c.handler != nil {
+				c.handler(respMsg)
+			}
+		}
+	}
+
 	return nil
+}
+
+func mapToHTTPCode(code SandCode) int {
+	switch code {
+	case CodeOK:
+		return http.StatusOK
+	case CodeBadRequest:
+		return http.StatusBadRequest
+	case CodeNotFound:
+		return http.StatusNotFound
+	case CodeInternal:
+		return http.StatusInternalServerError
+	case CodeUnavailable:
+		return http.StatusServiceUnavailable
+	default:
+		return http.StatusInternalServerError
+	}
 }
 
 func (c *HTTPCommunicator) handleHTTPMessage(w http.ResponseWriter, r *http.Request) {
@@ -127,16 +161,30 @@ func (c *HTTPCommunicator) handleHTTPMessage(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	respMsg, err := c.handler(msg)
+	resp, err := c.handler(msg)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Handler error: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	if respMsg != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(respMsg)
-		log.Printf("Sent response to %s: %v", msg.From, respMsg)
+	if resp != nil {
+		// Set custom headers if any (must be done before WriteHeader)
+		if resp.Headers != nil {
+			for key, value := range resp.Headers {
+				w.Header().Set(key, value)
+			}
+		}
+		
+		// Set HTTP status code based on SandCode
+		httpStatus := mapToHTTPCode(resp.Code)
+		w.WriteHeader(httpStatus)
+		
+		// Write body directly to response
+		if resp.Body != nil {
+			w.Write(resp.Body)
+		}
+		
+		log.Printf("Sent response to %s with code: %s", msg.From, resp.Code)
 	} else {
 		w.WriteHeader(http.StatusOK)
 	}
