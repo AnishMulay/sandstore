@@ -8,12 +8,12 @@ type Message struct {
 	Payload []byte
 }
 
+type MessageHandler func(msg Message) (*Message, error)
+
 type Communicator interface {
 	Start() error
-	ReceiveSync(ctx context.Context) (Message, error)
-	SendSync(ctx context.Context, to string, msgType string, payload []byte) error
-	SendAsync(ctx context.Context, to string, msgType string, payload []byte) error
-	ReceiveAsync(ctx context.Context) (Message, error)
+	Receive(ctx context.Context, handler MessageHandler) error
+	Send(ctx context.Context, to string, msg Message) error
 	Stop() error
 	Address() string
 }
