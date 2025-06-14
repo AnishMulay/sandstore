@@ -1,3 +1,4 @@
+// communication/interface.go
 package communication
 
 import "context"
@@ -11,8 +12,7 @@ type Message struct {
 type MessageHandler func(msg Message) (*Message, error)
 
 type Communicator interface {
-	Start() error
-	Receive(ctx context.Context, handler MessageHandler) error
+	Start(handler MessageHandler) error
 	Send(ctx context.Context, to string, msg Message) error
 	Stop() error
 	Address() string

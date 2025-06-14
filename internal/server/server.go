@@ -4,7 +4,6 @@ import (
 	"context"
 	"log"
 	"sync"
-	"time"
 
 	"github.com/AnishMulay/sandstore/internal/communication"
 )
@@ -15,7 +14,6 @@ type Server struct {
 	handlersLock sync.RWMutex
 	ctx          context.Context
 	cancel       context.CancelFunc
-	wg           sync.WaitGroup
 }
 
 func NewServer(communicator communication.Communicator) *Server {
@@ -34,36 +32,29 @@ func (s *Server) RegisterHandler(messageType string, handler communication.Messa
 	s.handlers[messageType] = handler
 }
 
-func (s *Server) messageLoop() {
-	defer s.wg.Done()
-	for {
-		select {
-		case <-s.ctx.Done():
-			return
-		default:
-			msg, err := s.communicator.ReceiveSync(s.ctx)
-			if err != nil {
-				log.Printf("Error receiving message: %v", err)
-				continue
-			}
-			go s.handleMessage(msg)
-		}
+func (s *Server) handleMessage(msg communication.Message) (*communication.Message, error) {
+	s.handlersLock.RLock()
+	handler, exists := s.handlers[msg.Type]
+	s.handlersLock.RUnlock()
+
+	if !exists {
+		log.Printf("No handler registered for message type: %s", msg.Type)
+		return nil, nil
 	}
+
+	return handler(msg)
 }
 
 func (s *Server) Start() error {
-	if err := s.communicator.Start(); err != nil {
+	if err := s.communicator.Start(s.handleMessage); err != nil {
 		return err
 	}
-	s.wg.Add(1)
-	go s.messageLoop()
 	log.Printf("Server started, listening on %s", s.communicator.Address())
 	return nil
 }
 
 func (s *Server) Stop() error {
 	s.cancel()
-	s.wg.Wait()
 	if err := s.communicator.Stop(); err != nil {
 		return err
 	}
@@ -71,30 +62,10 @@ func (s *Server) Stop() error {
 	return nil
 }
 
-func (s *Server) handleMessage(msg communication.Message) {
-	s.handlersLock.RLock()
-	handler, exists := s.handlers[msg.Type]
-	s.handlersLock.RUnlock()
-
-	if !exists {
-		log.Printf("No handler registered for message type: %s", msg.Type)
-		return
+func (s *Server) Send(ctx context.Context, to string, msgType string, payload []byte) error {
+	msg := communication.Message{
+		Type:    msgType,
+		Payload: payload,
 	}
-
-	ctx, cancel := context.WithTimeout(s.ctx, defaultHandlerTimeout)
-	defer cancel()
-
-	response, err := handler(ctx, msg)
-	if err != nil {
-		log.Printf("Error handling message: %v", err)
-		return
-	}
-
-	if response != nil {
-		if err := s.communicator.SendSync(ctx, msg.From, "response", response); err != nil {
-			log.Printf("Error sending response: %v", err)
-		}
-	}
+	return s.communicator.Send(ctx, to, msg)
 }
-
-const defaultHandlerTimeout = 30 * time.Second

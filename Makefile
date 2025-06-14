@@ -1,26 +1,54 @@
 # Variables
-BINARY_NAME=sandstore
-MAIN_PATH=./cmd/server
+SERVER_BINARY=server
+CLIENT_BINARY=client
+SERVER_PATH=./cmd/server
+CLIENT_PATH=./cmd/client
 
 # Default target
 .PHONY: all
 all: build
 
-# Build the application
+# Build both server and client
 .PHONY: build
-build:
-	go build -o $(BINARY_NAME) $(MAIN_PATH)
+build: build-server build-client
 
-# Run the application
-.PHONY: run
-run: build
-	./$(BINARY_NAME)
+# Build the server
+.PHONY: build-server
+build-server:
+	go build -o $(SERVER_BINARY) $(SERVER_PATH)
+
+# Build the client
+.PHONY: build-client
+build-client:
+	go build -o $(CLIENT_BINARY) $(CLIENT_PATH)
+
+# Run the server
+.PHONY: run-server
+run-server: build-server
+	./$(SERVER_BINARY)
+
+# Run the client
+.PHONY: run-client
+run-client: build-client
+	./$(CLIENT_BINARY)
+
+# Run both server and client for testing
+.PHONY: test-run
+test-run:
+	@echo "Starting server in background..."
+	@./$(SERVER_BINARY) & SERVER_PID=$$!; \
+	echo "Waiting for server to start..."; \
+	sleep 1; \
+	echo "Starting client..."; \
+	./$(CLIENT_BINARY); \
+	echo "Stopping server..."; \
+	kill $$SERVER_PID
 
 # Clean up binary files
 .PHONY: clean
 clean:
 	go clean
-	rm -f $(BINARY_NAME)
+	rm -f $(SERVER_BINARY) $(CLIENT_BINARY)
 
 # Test the application
 .PHONY: test

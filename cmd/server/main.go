@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"log"
 	"os"
 	"os/signal"
@@ -25,10 +24,17 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
 
-	srv.Stop()
+	if err := srv.Stop(); err != nil {
+		log.Printf("Error stopping server: %v", err)
+	}
 }
 
-func handlePing(ctx context.Context, msg communication.Message) ([]byte, error) {
+func handlePing(msg communication.Message) (*communication.Message, error) {
 	log.Printf("Received ping from %s", msg.From)
-	return []byte("pong"), nil
+
+	response := &communication.Message{
+		Type:    "pong",
+		Payload: []byte("pong"),
+	}
+	return response, nil
 }
