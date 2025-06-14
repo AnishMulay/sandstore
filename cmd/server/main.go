@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"log"
 	"os"
 	"os/signal"
@@ -11,7 +12,21 @@ import (
 )
 
 func main() {
-	comm := communication.NewHTTPCommunicator(":8080")
+	var useGRPC bool
+	var addr string
+	flag.BoolVar(&useGRPC, "grpc", false, "Use gRPC communicator instead of HTTP")
+	flag.StringVar(&addr, "addr", ":8080", "Address to listen on")
+	flag.Parse()
+
+	var comm communication.Communicator
+	if useGRPC {
+		comm = communication.NewGRPCCommunicator(addr)
+		log.Printf("Using gRPC communicator on %s", addr)
+	} else {
+		comm = communication.NewHTTPCommunicator(addr)
+		log.Printf("Using HTTP communicator on %s", addr)
+	}
+
 	srv := server.NewServer(comm)
 
 	if err := srv.Start(); err != nil {

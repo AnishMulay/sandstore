@@ -3,6 +3,7 @@ SERVER_BINARY=server
 CLIENT_BINARY=client
 SERVER_PATH=./cmd/server
 CLIENT_PATH=./cmd/client
+GRPC_PORT=8081
 
 # Default target
 .PHONY: all
@@ -31,6 +32,16 @@ run-server: build-server
 .PHONY: run-client
 run-client: build-client
 	./$(CLIENT_BINARY)
+
+# Run gRPC server
+.PHONY: run-grpc-server
+run-grpc-server: build-server
+	./$(SERVER_BINARY) -grpc -addr=:$(GRPC_PORT)
+
+# Run gRPC client
+.PHONY: run-grpc-client
+run-grpc-client: build-client
+	./$(CLIENT_BINARY) -grpc -server=localhost:$(GRPC_PORT)
 
 # Run both server and client for testing
 .PHONY: test-run
