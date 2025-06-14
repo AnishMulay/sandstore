@@ -136,6 +136,7 @@ func (c *HTTPCommunicator) handleHTTPMessage(w http.ResponseWriter, r *http.Requ
 	if respMsg != nil {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(respMsg)
+		log.Printf("Sent response to %s: %v", msg.From, respMsg)
 	} else {
 		w.WriteHeader(http.StatusOK)
 	}
