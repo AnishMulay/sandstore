@@ -50,6 +50,10 @@ func main() {
 func handleMessage(msg communication.Message) (*communication.Message, error) {
 	log.Printf("Received message from %s of type %s", msg.From, msg.Type)
 	
+	if msg.Type == "pong" {
+		log.Printf("Received pong response from server!")
+	}
+	
 	payload := string(msg.Payload)
 	log.Printf("Payload: %s", payload)
 	
