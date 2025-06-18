@@ -13,6 +13,6 @@ type FileMetadata struct {
 type MetadataService interface {
 	CreateFileMetadata(path string, size int64) error
 	GetFileMetadata(path string) (*FileMetadata, error)
-	DeleteFile(path string) error
+	DeleteFileMetadata(path string) error
 	ListDirectory(path string) ([]FileMetadata, error)
 }

@@ -151,3 +151,51 @@ func TestInMemoryMetadataService_GetFileMetadata(t *testing.T) {
 		})
 	}
 }
+
+func TestInMemoryMetadataService_DeleteFileMetadata(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		setupFn func(*InMemoryMetadataService)
+		wantErr error
+	}{
+		{
+			name: "delete existing file",
+			path: "/test/file.txt",
+			setupFn: func(ms *InMemoryMetadataService) {
+				_ = ms.CreateFileMetadata("/test/file.txt", 100)
+			},
+			wantErr: nil,
+		},
+		{
+			name:    "delete non-existent file",
+			path:    "/test/missing.txt",
+			setupFn: nil,
+			wantErr: ErrFileNotFound,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ms := NewInMemoryMetadataService()
+
+			if tt.setupFn != nil {
+				tt.setupFn(ms)
+			}
+
+			err := ms.DeleteFileMetadata(tt.path)
+
+			if err != tt.wantErr {
+				t.Errorf("DeleteFileMetadata() error = %v, want %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.wantErr == nil {
+				_, err := ms.GetFileMetadata(tt.path)
+				if err != ErrFileNotFound {
+					t.Errorf("File still exists after deletion, got error = %v, want %v", err, ErrFileNotFound)
+				}
+			}
+		})
+	}
+}

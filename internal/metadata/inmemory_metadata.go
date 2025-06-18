@@ -51,3 +51,16 @@ func (ms *InMemoryMetadataService) GetFileMetadata(path string) (*FileMetadata, 
 
 	return file, nil
 }
+
+func (ms *InMemoryMetadataService) DeleteFileMetadata(path string) error {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	if _, exists := ms.files[path]; !exists {
+		return ErrFileNotFound
+	}
+
+	delete(ms.files, path)
+
+	return nil
+}
