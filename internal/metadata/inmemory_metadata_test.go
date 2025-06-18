@@ -87,3 +87,67 @@ func TestInMemoryMetadataService_CreateFile(t *testing.T) {
 		})
 	}
 }
+
+func TestInMemoryMetadataService_GetFileMetadata(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		setupFn func(*InMemoryMetadataService)
+		wantErr error
+	}{
+		{
+			name: "get existing file",
+			path: "/test/file.txt",
+			setupFn: func(ms *InMemoryMetadataService) {
+				_ = ms.CreateFileMetadata("/test/file.txt", 100)
+			},
+			wantErr: nil,
+		},
+		{
+			name:    "get non-existent file",
+			path:    "/test/missing.txt",
+			setupFn: nil,
+			wantErr: ErrFileNotFound,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ms := NewInMemoryMetadataService()
+
+			if tt.setupFn != nil {
+				tt.setupFn(ms)
+			}
+
+			file, err := ms.GetFileMetadata(tt.path)
+
+			if err != tt.wantErr {
+				t.Errorf("GetFileMetadata() error = %v, want %v", err, tt.wantErr)
+				return
+			}
+
+			if tt.wantErr == nil {
+				if file == nil {
+					t.Errorf("GetFileMetadata() returned nil file with no error")
+					return
+				}
+
+				if file.Path != tt.path {
+					t.Errorf("GetFileMetadata() file.Path = %v, want %v", file.Path, tt.path)
+				}
+
+				if file.Size != 100 {
+					t.Errorf("GetFileMetadata() file.Size = %v, want %v", file.Size, 100)
+				}
+
+				if file.Permissions != "rw-r--r--" {
+					t.Errorf("GetFileMetadata() file.Permissions = %v, want %v", file.Permissions, "rw-r--r--")
+				}
+			} else {
+				if file != nil {
+					t.Errorf("GetFileMetadata() expected nil file with error, got %v", file)
+				}
+			}
+		})
+	}
+}

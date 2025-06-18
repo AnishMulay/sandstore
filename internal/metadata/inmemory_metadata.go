@@ -39,3 +39,15 @@ func (ms *InMemoryMetadataService) CreateFileMetadata(path string, size int64) e
 
 	return nil
 }
+
+func (ms *InMemoryMetadataService) GetFileMetadata(path string) (*FileMetadata, error) {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+
+	file, exists := ms.files[path]
+	if !exists {
+		return nil, ErrFileNotFound
+	}
+
+	return file, nil
+}
