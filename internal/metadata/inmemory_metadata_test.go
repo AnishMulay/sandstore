@@ -32,7 +32,7 @@ func TestInMemoryMetadataService_CreateFile(t *testing.T) {
 			wantErr: true,
 			errorIs: ErrFileAlreadyExists,
 			setupFn: func(ms *InMemoryMetadataService) {
-				_ = ms.CreateFile("/test/duplicate.txt", 50)
+				_ = ms.CreateFileMetadata("/test/duplicate.txt", 50)
 			},
 		},
 	}
@@ -45,7 +45,7 @@ func TestInMemoryMetadataService_CreateFile(t *testing.T) {
 				tt.setupFn(ms)
 			}
 
-			err := ms.CreateFile(tt.path, tt.size)
+			err := ms.CreateFileMetadata(tt.path, tt.size)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CreateFile() error = %v, wantErr %v", err, tt.wantErr)

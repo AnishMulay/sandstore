@@ -16,7 +16,7 @@ func NewInMemoryMetadataService() *InMemoryMetadataService {
 	}
 }
 
-func (ms *InMemoryMetadataService) CreateFile(path string, size int64) error {
+func (ms *InMemoryMetadataService) CreateFileMetadata(path string, size int64) error {
 	ms.mu.RLock()
 	_, exists := ms.files[path]
 	ms.mu.RUnlock()
