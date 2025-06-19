@@ -241,21 +241,17 @@ func TestInMemoryMetadataService_ListDirectory(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ms := NewInMemoryMetadataService()
 
-			// Setup test if needed
 			if tt.setupFn != nil {
 				tt.setupFn(ms)
 			}
 
-			// Execute the method being tested
 			files, err := ms.ListDirectory(tt.path)
 
-			// Check no error occurred
 			if err != nil {
 				t.Errorf("ListDirectory() error = %v, want nil", err)
 				return
 			}
 
-			// Check the count of returned files
 			if len(files) != tt.wantCount {
 				t.Errorf("ListDirectory() returned %d files, want %d", len(files), tt.wantCount)
 			}
