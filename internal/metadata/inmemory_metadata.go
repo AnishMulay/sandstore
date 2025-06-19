@@ -64,3 +64,17 @@ func (ms *InMemoryMetadataService) DeleteFileMetadata(path string) error {
 
 	return nil
 }
+
+func (ms *InMemoryMetadataService) ListDirectory(path string) ([]FileMetadata, error) {
+	ms.mu.RLock()
+	defer ms.mu.RUnlock()
+
+	var files []FileMetadata
+	for _, file := range ms.files {
+		if file.Path == path || (len(file.Path) > len(path) && file.Path[:len(path)] == path && file.Path[len(path):][0] == '/') {
+			files = append(files, *file)
+		}
+	}
+
+	return files, nil
+}
