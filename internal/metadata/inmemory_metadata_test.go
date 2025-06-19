@@ -199,3 +199,66 @@ func TestInMemoryMetadataService_DeleteFileMetadata(t *testing.T) {
 		})
 	}
 }
+
+func TestInMemoryMetadataService_ListDirectory(t *testing.T) {
+	tests := []struct {
+		name      string
+		path      string
+		setupFn   func(*InMemoryMetadataService)
+		wantCount int
+	}{
+		{
+			name: "list files in directory with files",
+			path: "/test",
+			setupFn: func(ms *InMemoryMetadataService) {
+				_ = ms.CreateFileMetadata("/test/file1.txt", 100)
+				_ = ms.CreateFileMetadata("/test/file2.txt", 200)
+				_ = ms.CreateFileMetadata("/other/file3.txt", 300)
+			},
+			wantCount: 2,
+		},
+		{
+			name: "list files in empty directory",
+			path: "/empty",
+			setupFn: func(ms *InMemoryMetadataService) {
+				_ = ms.CreateFileMetadata("/test/file1.txt", 100)
+			},
+			wantCount: 0,
+		},
+		{
+			name: "list files in nested directory",
+			path: "/test/sub",
+			setupFn: func(ms *InMemoryMetadataService) {
+				_ = ms.CreateFileMetadata("/test/file1.txt", 100)
+				_ = ms.CreateFileMetadata("/test/sub/file2.txt", 200)
+				_ = ms.CreateFileMetadata("/test/sub/nested/file3.txt", 300)
+			},
+			wantCount: 2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ms := NewInMemoryMetadataService()
+
+			// Setup test if needed
+			if tt.setupFn != nil {
+				tt.setupFn(ms)
+			}
+
+			// Execute the method being tested
+			files, err := ms.ListDirectory(tt.path)
+
+			// Check no error occurred
+			if err != nil {
+				t.Errorf("ListDirectory() error = %v, want nil", err)
+				return
+			}
+
+			// Check the count of returned files
+			if len(files) != tt.wantCount {
+				t.Errorf("ListDirectory() returned %d files, want %d", len(files), tt.wantCount)
+			}
+		})
+	}
+}
