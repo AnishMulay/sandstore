@@ -9,3 +9,9 @@ type FileChunk struct {
 	ModifiedAt time.Time
 	Checksum   string
 }
+
+type ChunkService interface {
+	WriteChunk(chunkID string, data []byte) error
+	ReadChunk(chunkID string) ([]byte, error)
+	DeleteChunk(chunkID string) error
+}
