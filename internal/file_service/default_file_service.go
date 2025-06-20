@@ -9,3 +9,10 @@ type DefaultFileService struct {
 	ms metadata_service.MetadataService
 	cs chunk_service.ChunkService
 }
+
+func NewDefaultFileService(ms metadata_service.MetadataService, cs chunk_service.ChunkService) *DefaultFileService {
+	return &DefaultFileService{
+		ms: ms,
+		cs: cs,
+	}
+}
