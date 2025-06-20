@@ -1,4 +1,4 @@
-package chunk
+package chunk_service
 
 import "time"
 
