@@ -57,3 +57,22 @@ func (fs *DefaultFileService) StoreFile(path string, data []byte) error {
 
 	return fs.ms.CreateFileMetadata(path, int64(len(data)), chunks)
 }
+
+func (fs *DefaultFileService) ReadFile(path string) ([]byte, error) {
+	metadata, err := fs.ms.GetFileMetadata(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get file metadata: %w", err)
+	}
+
+	var data []byte
+	for _, chunk := range metadata.Chunks {
+		chunkData, err := fs.cs.ReadChunk(chunk.ChunkID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read chunk: %w", err)
+		}
+
+		data = append(data, chunkData...)
+	}
+
+	return data, nil
+}
