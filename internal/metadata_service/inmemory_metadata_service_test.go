@@ -32,7 +32,7 @@ func TestInMemoryMetadataService_CreateFile(t *testing.T) {
 			wantErr: true,
 			errorIs: ErrFileAlreadyExists,
 			setupFn: func(ms *InMemoryMetadataService) {
-				_ = ms.CreateFileMetadata("/test/duplicate.txt", 50)
+				_ = ms.CreateFileMetadata("/test/duplicate.txt", 50, nil)
 			},
 		},
 	}
@@ -45,7 +45,7 @@ func TestInMemoryMetadataService_CreateFile(t *testing.T) {
 				tt.setupFn(ms)
 			}
 
-			err := ms.CreateFileMetadata(tt.path, tt.size)
+			err := ms.CreateFileMetadata(tt.path, tt.size, nil)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CreateFile() error = %v, wantErr %v", err, tt.wantErr)
@@ -99,7 +99,7 @@ func TestInMemoryMetadataService_GetFileMetadata(t *testing.T) {
 			name: "get existing file",
 			path: "/test/file.txt",
 			setupFn: func(ms *InMemoryMetadataService) {
-				_ = ms.CreateFileMetadata("/test/file.txt", 100)
+				_ = ms.CreateFileMetadata("/test/file.txt", 100, nil)
 			},
 			wantErr: nil,
 		},
@@ -163,7 +163,7 @@ func TestInMemoryMetadataService_DeleteFileMetadata(t *testing.T) {
 			name: "delete existing file",
 			path: "/test/file.txt",
 			setupFn: func(ms *InMemoryMetadataService) {
-				_ = ms.CreateFileMetadata("/test/file.txt", 100)
+				_ = ms.CreateFileMetadata("/test/file.txt", 100, nil)
 			},
 			wantErr: nil,
 		},
@@ -211,9 +211,9 @@ func TestInMemoryMetadataService_ListDirectory(t *testing.T) {
 			name: "list files in directory with files",
 			path: "/test",
 			setupFn: func(ms *InMemoryMetadataService) {
-				_ = ms.CreateFileMetadata("/test/file1.txt", 100)
-				_ = ms.CreateFileMetadata("/test/file2.txt", 200)
-				_ = ms.CreateFileMetadata("/other/file3.txt", 300)
+				_ = ms.CreateFileMetadata("/test/file1.txt", 100, nil)
+				_ = ms.CreateFileMetadata("/test/file2.txt", 200, nil)
+				_ = ms.CreateFileMetadata("/other/file3.txt", 300, nil)
 			},
 			wantCount: 2,
 		},
@@ -221,7 +221,7 @@ func TestInMemoryMetadataService_ListDirectory(t *testing.T) {
 			name: "list files in empty directory",
 			path: "/empty",
 			setupFn: func(ms *InMemoryMetadataService) {
-				_ = ms.CreateFileMetadata("/test/file1.txt", 100)
+				_ = ms.CreateFileMetadata("/test/file1.txt", 100, nil)
 			},
 			wantCount: 0,
 		},
@@ -229,9 +229,9 @@ func TestInMemoryMetadataService_ListDirectory(t *testing.T) {
 			name: "list files in nested directory",
 			path: "/test/sub",
 			setupFn: func(ms *InMemoryMetadataService) {
-				_ = ms.CreateFileMetadata("/test/file1.txt", 100)
-				_ = ms.CreateFileMetadata("/test/sub/file2.txt", 200)
-				_ = ms.CreateFileMetadata("/test/sub/nested/file3.txt", 300)
+				_ = ms.CreateFileMetadata("/test/file1.txt", 100, nil)
+				_ = ms.CreateFileMetadata("/test/sub/file2.txt", 200, nil)
+				_ = ms.CreateFileMetadata("/test/sub/nested/file3.txt", 300, nil)
 			},
 			wantCount: 2,
 		},
