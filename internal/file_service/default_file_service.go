@@ -76,3 +76,19 @@ func (fs *DefaultFileService) ReadFile(path string) ([]byte, error) {
 
 	return data, nil
 }
+
+func (fs *DefaultFileService) DeleteFile(path string) error {
+	metadata, err := fs.ms.GetFileMetadata(path)
+	if err != nil {
+		return fmt.Errorf("failed to get file metadata: %w", err)
+	}
+
+	for _, chunk := range metadata.Chunks {
+		err = fs.cs.DeleteChunk(chunk.ChunkID)
+		if err != nil {
+			return fmt.Errorf("failed to delete chunk: %w", err)
+		}
+	}
+
+	return fs.ms.DeleteFileMetadata(path)
+}
