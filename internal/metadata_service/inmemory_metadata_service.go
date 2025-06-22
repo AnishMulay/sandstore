@@ -3,6 +3,8 @@ package metadata_service
 import (
 	"sync"
 	"time"
+
+	"github.com/AnishMulay/sandstore/internal/chunk_service"
 )
 
 type InMemoryMetadataService struct {
@@ -16,7 +18,7 @@ func NewInMemoryMetadataService() *InMemoryMetadataService {
 	}
 }
 
-func (ms *InMemoryMetadataService) CreateFileMetadata(path string, size int64) error {
+func (ms *InMemoryMetadataService) CreateFileMetadata(path string, size int64, chunks []chunk_service.FileChunk) error {
 	ms.mu.RLock()
 	_, exists := ms.files[path]
 	ms.mu.RUnlock()
@@ -31,6 +33,7 @@ func (ms *InMemoryMetadataService) CreateFileMetadata(path string, size int64) e
 		CreatedAt:   time.Now(),
 		ModifiedAt:  time.Now(),
 		Permissions: "rw-r--r--",
+		Chunks:      chunks,
 	}
 
 	ms.mu.Lock()
