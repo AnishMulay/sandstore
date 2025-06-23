@@ -25,13 +25,13 @@ func NewDefaultServer(comm communication.Communicator, fs file_service.FileServi
 	}
 }
 
-func (s *DefaultServer) Start() {
-	s.comm.Start(s.handleMessage)
+func (s *DefaultServer) Start() error {
+	return s.comm.Start(s.handleMessage)
 }
 
-func (s *DefaultServer) Stop() {
-	s.comm.Stop()
+func (s *DefaultServer) Stop() error {
 	s.cancel()
+	return s.comm.Stop()
 }
 
 func (s *DefaultServer) handleMessage(msg communication.Message) (*communication.Response, error) {
