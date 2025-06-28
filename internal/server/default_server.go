@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/AnishMulay/sandstore/internal/communication"
@@ -43,9 +44,34 @@ func (s *DefaultServer) RegisterHandler(msgType string, handler func(msg communi
 }
 
 func (s *DefaultServer) handleMessage(msg communication.Message) (*communication.Response, error) {
-	fmt.Printf("Received message: %v\n", msg)
+	if handler, exists := s.handlers[msg.Type]; exists {
+		return handler(msg)
+	} else {
+		return &communication.Response{
+			Code: communication.CodeBadRequest,
+			Body: []byte(fmt.Sprintf("No handler registered for message type: %s", msg.Type)),
+		}, nil
+	}
+}
+
+func (s *DefaultServer) handleStore(msg communication.Message) (*communication.Response, error) {
+	var request communication.StoreFileRequest
+	if err := json.Unmarshal(msg.Payload, &request); err != nil {
+		return &communication.Response{
+			Code: communication.CodeBadRequest,
+			Body: []byte("Invalid store file request"),
+		}, nil
+	}
+
+	err := s.fs.StoreFile(request.Path, request.Data)
+	if err != nil {
+		return &communication.Response{
+			Code: communication.CodeInternal,
+			Body: []byte(fmt.Sprintf("Failed to store file: %v", err)),
+		}, nil
+	}
+
 	return &communication.Response{
 		Code: communication.CodeOK,
-		Body: []byte("OK"),
 	}, nil
 }

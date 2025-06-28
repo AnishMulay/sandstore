@@ -9,6 +9,12 @@ type Message struct {
 	Payload []byte
 }
 
+const (
+	MessageTypeStoreFile  = "store_file"
+	MessageTypeReadFile   = "read_file"
+	MessageTypeDeleteFile = "delete_file"
+)
+
 type StoreFileRequest struct {
 	Path string
 	Data []byte
