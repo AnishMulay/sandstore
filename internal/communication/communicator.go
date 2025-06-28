@@ -9,6 +9,11 @@ type Message struct {
 	Payload []byte
 }
 
+type StoreFileRequest struct {
+	Path string
+	Data []byte
+}
+
 type SandCode string
 
 const (
