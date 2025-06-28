@@ -9,10 +9,11 @@ import (
 )
 
 type DefaultServer struct {
-	comm   communication.Communicator
-	fs     file_service.FileService
-	ctx    context.Context
-	cancel context.CancelFunc
+	comm     communication.Communicator
+	fs       file_service.FileService
+	ctx      context.Context
+	cancel   context.CancelFunc
+	handlers map[string]func(msg communication.Message) (*communication.Response, error)
 }
 
 func NewDefaultServer(comm communication.Communicator, fs file_service.FileService) *DefaultServer {
@@ -32,6 +33,13 @@ func (s *DefaultServer) Start() error {
 func (s *DefaultServer) Stop() error {
 	s.cancel()
 	return s.comm.Stop()
+}
+
+func (s *DefaultServer) RegisterHandler(msgType string, handler func(msg communication.Message) (*communication.Response, error)) {
+	if s.handlers == nil {
+		s.handlers = make(map[string]func(msg communication.Message) (*communication.Response, error))
+	}
+	s.handlers[msgType] = handler
 }
 
 func (s *DefaultServer) handleMessage(msg communication.Message) (*communication.Response, error) {
