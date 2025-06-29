@@ -20,6 +20,10 @@ type StoreFileRequest struct {
 	Data []byte
 }
 
+type ReadFileRequest struct {
+	Path string
+}
+
 type SandCode string
 
 const (

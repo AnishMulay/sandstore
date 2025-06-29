@@ -75,3 +75,26 @@ func (s *DefaultServer) HandleStoreFileMessage(msg communication.Message) (*comm
 		Code: communication.CodeOK,
 	}, nil
 }
+
+func (s *DefaultServer) HandleReadFileMessage(msg communication.Message) (*communication.Response, error) {
+	var request communication.ReadFileRequest
+	if err := json.Unmarshal(msg.Payload, &request); err != nil {
+		return &communication.Response{
+			Code: communication.CodeBadRequest,
+			Body: []byte("Invalid read file request"),
+		}, nil
+	}
+
+	data, err := s.fs.ReadFile(request.Path)
+	if err != nil {
+		return &communication.Response{
+			Code: communication.CodeInternal,
+			Body: []byte(fmt.Sprintf("Failed to read file: %v", err)),
+		}, nil
+	}
+
+	return &communication.Response{
+		Code: communication.CodeOK,
+		Body: data,
+	}, nil
+}
