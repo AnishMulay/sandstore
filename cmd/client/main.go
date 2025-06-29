@@ -57,5 +57,50 @@ func main() {
 			log.Printf("Received file content: %s", string(resp.Body))
 		}
 	}
-	log.Println("Client finished")
+
+	deleteFileMsg := communication.Message{
+		From:    "8081",
+		Type:    communication.MessageTypeDeleteFile,
+		Payload: []byte(`{"path": "test_file.txt"}`),
+	}
+
+	log.Printf("Sending delete file message for path: %s", "test_file.txt")
+	_, err = comm.Send(ctx, serverAddr, deleteFileMsg)
+
+	if err != nil {
+		log.Printf("Failed to send delete file message: %v", err)
+	}
+
+	log.Printf("Delete file message sent successfully, response code: %s", resp.Code)
+	if err != nil {
+		log.Printf("Error occurred: %v", err)
+	} else {
+		log.Printf("File deleted successfully")
+	}
+
+	//check if the file is deleted by trying to get the file
+
+	readFileMsg = communication.Message{
+		From:    "8081",
+		Type:    communication.MessageTypeReadFile,
+		Payload: []byte(`{"path": "test_file.txt"}`),
+	}
+
+	log.Printf("Sending read file message for path: %s", "test_file.txt")
+
+	resp, err = comm.Send(ctx, serverAddr, readFileMsg)
+	if err != nil {
+		log.Printf("Failed to send read file message: %v", err)
+	}
+
+	if resp.Code == communication.CodeNotFound {
+		log.Printf("File not found, it has been successfully deleted.")
+	} else {
+		log.Printf("Read file message sent successfully, response code: %s", resp.Code)
+		if resp.Code == communication.CodeOK && resp.Body != nil {
+			log.Printf("Received file content: %s", string(resp.Body))
+		}
+	}
+
+	log.Printf("All operations completed successfully")
 }

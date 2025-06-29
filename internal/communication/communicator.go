@@ -24,6 +24,10 @@ type ReadFileRequest struct {
 	Path string
 }
 
+type DeleteFileRequest struct {
+	Path string
+}
+
 type SandCode string
 
 const (

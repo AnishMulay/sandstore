@@ -98,3 +98,25 @@ func (s *DefaultServer) HandleReadFileMessage(msg communication.Message) (*commu
 		Body: data,
 	}, nil
 }
+
+func (s *DefaultServer) HandleDeleteFileMessage(msg communication.Message) (*communication.Response, error) {
+	var request communication.DeleteFileRequest
+	if err := json.Unmarshal(msg.Payload, &request); err != nil {
+		return &communication.Response{
+			Code: communication.CodeBadRequest,
+			Body: []byte("Invalid delete file request"),
+		}, nil
+	}
+
+	err := s.fs.DeleteFile(request.Path)
+	if err != nil {
+		return &communication.Response{
+			Code: communication.CodeInternal,
+			Body: []byte(fmt.Sprintf("Failed to delete file: %v", err)),
+		}, nil
+	}
+
+	return &communication.Response{
+		Code: communication.CodeOK,
+	}, nil
+}
