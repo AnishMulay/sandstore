@@ -56,7 +56,7 @@ func (c *GRPCCommunicator) Stop() error {
 	return nil
 }
 
-func (c *GRPCCommunicator) Send(ctx context.Context, to string, msg Message) error {
+func (c *GRPCCommunicator) Send(ctx context.Context, to string, msg Message) (*Response, error) {
 	c.clientLock.RLock()
 	client, ok := c.clients[to]
 	c.clientLock.RUnlock()
@@ -64,7 +64,7 @@ func (c *GRPCCommunicator) Send(ctx context.Context, to string, msg Message) err
 	if !ok {
 		conn, err := grpc.NewClient(to, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
-			return err
+			return nil, fmt.Errorf("failed to create gRPC client: %w", err)
 		}
 		client = communicationpb.NewMessageServiceClient(conn)
 		c.clientLock.Lock()
@@ -77,8 +77,17 @@ func (c *GRPCCommunicator) Send(ctx context.Context, to string, msg Message) err
 		Type:    msg.Type,
 		Payload: msg.Payload,
 	}
-	_, err := client.SendMessage(ctx, req)
-	return err
+
+	resp, err := client.SendMessage(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send message: %w", err)
+	}
+
+	return &Response{
+		Code:    SandCode(resp.Code),
+		Body:    resp.Body,
+		Headers: resp.Headers,
+	}, nil
 }
 
 type grpcServer struct {
