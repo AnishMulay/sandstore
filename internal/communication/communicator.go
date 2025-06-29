@@ -44,7 +44,7 @@ type MessageHandler func(msg Message) (*Response, error)
 
 type Communicator interface {
 	Start(handler MessageHandler) error
-	Send(ctx context.Context, to string, msg Message) error
+	Send(ctx context.Context, to string, msg Message) (*Response, error)
 	Stop() error
 	Address() string
 }
