@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"log"
-	"time"
 
 	"github.com/AnishMulay/sandstore/internal/communication"
 )
@@ -11,33 +11,33 @@ import (
 func main() {
 	// Create HTTP communicator
 	comm := communication.NewHTTPCommunicator(":8081")
-	
-	// Test messages
-	messages := []communication.Message{
-		{
-			Type:    "test",
-			Payload: []byte("Hello from client!"),
-		},
-		{
-			Type:    "ping",
-			Payload: []byte("ping message"),
-		},
+
+	// Store file message with sample bytes
+	fileData := []byte("This is sample file content that will be chunked and stored in the sandstore system. It contains enough data to test the chunking mechanism properly.")
+
+	storeRequest := communication.StoreFileRequest{
+		Path: "test_file.txt",
+		Data: fileData,
 	}
-	
+
+	payload, _ := json.Marshal(storeRequest)
+
+	msg := communication.Message{
+		From:    "8081",
+		Type:    communication.MessageTypeStoreFile,
+		Payload: payload,
+	}
+
 	ctx := context.Background()
 	serverAddr := "localhost:8080"
-	
-	for i, msg := range messages {
-		log.Printf("Sending message %d: %s", i+1, msg.Type)
-		
-		if err := comm.Send(ctx, serverAddr, msg); err != nil {
-			log.Printf("Failed to send message %d: %v", i+1, err)
-		} else {
-			log.Printf("Message %d sent successfully", i+1)
-		}
-		
-		time.Sleep(1 * time.Second)
+
+	log.Printf("Sending store file message with %d bytes", len(fileData))
+
+	if err := comm.Send(ctx, serverAddr, msg); err != nil {
+		log.Printf("Failed to send store file message: %v", err)
+	} else {
+		log.Printf("Store file message sent successfully")
 	}
-	
+
 	log.Println("Client finished")
 }

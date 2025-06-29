@@ -54,7 +54,7 @@ func (s *DefaultServer) handleMessage(msg communication.Message) (*communication
 	}
 }
 
-func (s *DefaultServer) handleStore(msg communication.Message) (*communication.Response, error) {
+func (s *DefaultServer) HandleStoreFileMessage(msg communication.Message) (*communication.Response, error) {
 	var request communication.StoreFileRequest
 	if err := json.Unmarshal(msg.Payload, &request); err != nil {
 		return &communication.Response{

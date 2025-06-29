@@ -16,10 +16,11 @@ type DefaultFileService struct {
 	chunkSize int64
 }
 
-func NewDefaultFileService(ms metadata_service.MetadataService, cs chunk_service.ChunkService) *DefaultFileService {
+func NewDefaultFileService(ms metadata_service.MetadataService, cs chunk_service.ChunkService, chunkSize int64) *DefaultFileService {
 	return &DefaultFileService{
-		ms: ms,
-		cs: cs,
+		ms:        ms,
+		cs:        cs,
+		chunkSize: chunkSize,
 	}
 }
 
@@ -28,8 +29,11 @@ func (fs *DefaultFileService) StoreFile(path string, data []byte) error {
 	offset := 0
 	now := time.Now()
 
+	counter := 0
+
 	for offset < len(data) {
 		end := offset + int(fs.chunkSize)
+
 		if end > len(data) {
 			end = len(data)
 		}
@@ -52,7 +56,11 @@ func (fs *DefaultFileService) StoreFile(path string, data []byte) error {
 			Checksum:   checksum,
 		})
 
+		counter++
 		offset = end
+		if counter >= 5 {
+			select {}
+		}
 	}
 
 	return fs.ms.CreateFileMetadata(path, int64(len(data)), chunks)
