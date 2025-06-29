@@ -37,7 +37,7 @@ func TestDefaultFileService_StoreFile(t *testing.T) {
 			tempDir := t.TempDir()
 			ms := metadata_service.NewInMemoryMetadataService()
 			cs := chunk_service.NewLocalDiscChunkService(tempDir)
-			fs := NewDefaultFileService(ms, cs)
+			fs := NewDefaultFileService(ms, cs, int64(8*1024*1024))
 			fs.chunkSize = tt.chunkSize
 
 			err := fs.StoreFile(tt.path, tt.data)
@@ -114,7 +114,7 @@ func TestDefaultFileService_ReadFile(t *testing.T) {
 			tempDir := t.TempDir()
 			ms := metadata_service.NewInMemoryMetadataService()
 			cs := chunk_service.NewLocalDiscChunkService(tempDir)
-			fs := NewDefaultFileService(ms, cs)
+			fs := NewDefaultFileService(ms, cs, int64(8*1024*1024))
 			fs.chunkSize = tt.chunkSize
 
 			if tt.setupFn != nil {
@@ -181,7 +181,7 @@ func TestDefaultFileService_DeleteFile(t *testing.T) {
 			tempDir := t.TempDir()
 			ms := metadata_service.NewInMemoryMetadataService()
 			cs := chunk_service.NewLocalDiscChunkService(tempDir)
-			fs := NewDefaultFileService(ms, cs)
+			fs := NewDefaultFileService(ms, cs, int64(8*1024*1024)) // 8 MB default chunk size
 			fs.chunkSize = tt.chunkSize
 
 			if tt.setupFn != nil {
