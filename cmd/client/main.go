@@ -39,5 +39,18 @@ func main() {
 		log.Printf("Store file message sent successfully")
 	}
 
+	readFileMsg := communication.Message{
+		From:    "8081",
+		Type:    communication.MessageTypeReadFile,
+		Payload: []byte(`{"path": "test_file.txt"}`),
+	}
+
+	log.Printf("Sending read file message for path: %s", "test_file.txt")
+
+	if err := comm.Send(ctx, serverAddr, readFileMsg); err != nil {
+		log.Printf("Failed to send read file message: %v", err)
+	}
+
+	log.Printf("Read file message sent successfully")
 	log.Println("Client finished")
 }

@@ -29,6 +29,7 @@ func main() {
 
 	// Register handlers
 	srv.RegisterHandler(communication.MessageTypeStoreFile, srv.HandleStoreFileMessage)
+	srv.RegisterHandler(communication.MessageTypeReadFile, srv.HandleReadFileMessage)
 
 	log.Println("Starting server on :8080")
 	if err := srv.Start(); err != nil {

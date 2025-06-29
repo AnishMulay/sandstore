@@ -174,16 +174,16 @@ func (c *HTTPCommunicator) handleHTTPMessage(w http.ResponseWriter, r *http.Requ
 				w.Header().Set(key, value)
 			}
 		}
-		
+
 		// Set HTTP status code based on SandCode
 		httpStatus := mapToHTTPCode(resp.Code)
 		w.WriteHeader(httpStatus)
-		
+
 		// Write body directly to response
 		if resp.Body != nil {
 			w.Write(resp.Body)
 		}
-		
+
 		log.Printf("Sent response to %s with code: %s", msg.From, resp.Code)
 	} else {
 		w.WriteHeader(http.StatusOK)
