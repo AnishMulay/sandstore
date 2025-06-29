@@ -62,7 +62,7 @@ func (c *GRPCCommunicator) Send(ctx context.Context, to string, msg Message) err
 	c.clientLock.RUnlock()
 
 	if !ok {
-		conn, err := grpc.Dial(to, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		conn, err := grpc.NewClient(to, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
 			return err
 		}
