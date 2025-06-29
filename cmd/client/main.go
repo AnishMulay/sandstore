@@ -33,10 +33,11 @@ func main() {
 
 	log.Printf("Sending store file message with %d bytes", len(fileData))
 
-	if err := comm.Send(ctx, serverAddr, msg); err != nil {
+	resp, err := comm.Send(ctx, serverAddr, msg)
+	if err != nil {
 		log.Printf("Failed to send store file message: %v", err)
 	} else {
-		log.Printf("Store file message sent successfully")
+		log.Printf("Store file message sent successfully, response code: %s", resp.Code)
 	}
 
 	readFileMsg := communication.Message{
@@ -47,10 +48,14 @@ func main() {
 
 	log.Printf("Sending read file message for path: %s", "test_file.txt")
 
-	if err := comm.Send(ctx, serverAddr, readFileMsg); err != nil {
+	resp, err = comm.Send(ctx, serverAddr, readFileMsg)
+	if err != nil {
 		log.Printf("Failed to send read file message: %v", err)
+	} else {
+		log.Printf("Read file message sent successfully, response code: %s", resp.Code)
+		if resp.Code == communication.CodeOK && resp.Body != nil {
+			log.Printf("Received file content: %s", string(resp.Body))
+		}
 	}
-
-	log.Printf("Read file message sent successfully")
 	log.Println("Client finished")
 }
