@@ -57,7 +57,24 @@ func (c *HTTPCommunicator) Stop() error {
 	return c.httpServer.Shutdown(ctx)
 }
 
-func (c *HTTPCommunicator) Send(ctx context.Context, to string, msg Message) error {
+func mapFromHTTPCode(code int) SandCode {
+	switch code {
+	case http.StatusOK:
+		return CodeOK
+	case http.StatusBadRequest:
+		return CodeBadRequest
+	case http.StatusNotFound:
+		return CodeNotFound
+	case http.StatusInternalServerError:
+		return CodeInternal
+	case http.StatusServiceUnavailable:
+		return CodeUnavailable
+	default:
+		return CodeInternal // Default to internal error for unknown codes
+	}
+}
+
+func (c *HTTPCommunicator) Send(ctx context.Context, to string, msg Message) (*Response, error) {
 	c.clientLock.RLock()
 	client, ok := c.clients[to]
 	c.clientLock.RUnlock()
@@ -74,45 +91,37 @@ func (c *HTTPCommunicator) Send(ctx context.Context, to string, msg Message) err
 	msg.From = c.listenAddress
 	jsonData, err := json.Marshal(msg)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("failed to marshal message: %v", err)
 	}
 
 	url := fmt.Sprintf("http://%s/message", to)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("failed to create request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("failed to send request: %v", err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("failed to send message: %s", string(body))
-	}
-
-	// Process the response body
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("failed to read response body: %v", err)
+		return nil, fmt.Errorf("failed to read response body: %v", err)
 	}
 
-	// If there's a response body, try to parse it as a Message and handle it
-	if len(respBody) > 0 {
-		var respMsg Message
-		if err := json.Unmarshal(respBody, &respMsg); err == nil {
-			// If we successfully parsed a Message, call the handler
-			if c.handler != nil {
-				c.handler(respMsg)
-			}
-		}
+	headers := map[string]string{}
+	for key, values := range resp.Header {
+		headers[key] = values[0]
 	}
 
-	return nil
+	return &Response{
+		Code:    mapFromHTTPCode(resp.StatusCode),
+		Body:    respBody,
+		Headers: headers,
+	}, nil
 }
 
 func mapToHTTPCode(code SandCode) int {
