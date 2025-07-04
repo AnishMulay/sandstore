@@ -99,10 +99,12 @@ func (c *GRPCCommunicator) Send(ctx context.Context, to string, msg Message) (*R
 		Payload: payloadBytes,
 	}
 
+	log.Printf("Sending gRPC message type %s to %s", msg.Type, to)
 	resp, err := client.SendMessage(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send message: %w", err)
 	}
+	log.Printf("Received gRPC response with code: %s", resp.Code)
 
 	return &Response{
 		Code:    SandCode(resp.Code),
@@ -126,6 +128,8 @@ func (s *grpcServer) SendMessage(ctx context.Context, req *communicationpb.Messa
 		Type: req.Type,
 	}
 
+	log.Printf("Received gRPC message type %s from %s", req.Type, req.From)
+
 	// Deserialize payload from JSON bytes
 	if payloadType, exists := s.comm.payloadTypes[req.Type]; exists {
 		if len(req.Payload) > 0 {
@@ -138,10 +142,13 @@ func (s *grpcServer) SendMessage(ctx context.Context, req *communicationpb.Messa
 
 			// Dereference the pointer to get the actual value
 			msg.Payload = reflect.ValueOf(payloadPtr).Elem().Interface()
+			log.Printf("Successfully deserialized payload for type %s", req.Type)
 		} else {
 			// Empty payload - create zero value
 			msg.Payload = reflect.Zero(payloadType).Interface()
 		}
+	} else {
+		log.Printf("No payload type registered for message type: %s", req.Type)
 	}
 
 	resp, err := s.comm.handler(msg)
@@ -150,9 +157,11 @@ func (s *grpcServer) SendMessage(ctx context.Context, req *communicationpb.Messa
 	}
 
 	if resp == nil {
+		log.Printf("Sent gRPC response to %s with code: OK", req.From)
 		return &communicationpb.MessageResponse{Code: "OK"}, nil
 	}
 
+	log.Printf("Sent gRPC response to %s with code: %s", req.From, resp.Code)
 	return &communicationpb.MessageResponse{
 		Code:    string(resp.Code),
 		Body:    resp.Body,
