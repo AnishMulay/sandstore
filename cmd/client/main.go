@@ -8,8 +8,8 @@ import (
 )
 
 func main() {
-	// Create HTTP communicator
-	comm := communication.NewHTTPCommunicator(":8081")
+	// Create gRPC communicator
+	comm := communication.NewGRPCCommunicator(":8081")
 
 	// Store file message with sample bytes
 	fileData := []byte("This is sample file content that will be chunked and stored in the sandstore system. It contains enough data to test the chunking mechanism properly.")

@@ -22,8 +22,8 @@ func main() {
 
 	fs := file_service.NewDefaultFileService(ms, cs, chunkSize)
 
-	// Create HTTP communicator
-	comm := communication.NewHTTPCommunicator(":8080")
+	// Create gRPC communicator
+	comm := communication.NewGRPCCommunicator(":8080")
 
 	// Create server
 	srv := server.NewDefaultServer(comm, fs)
