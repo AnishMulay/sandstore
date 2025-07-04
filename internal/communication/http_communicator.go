@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"reflect"
 	"sync"
 	"time"
 )
@@ -18,13 +19,22 @@ type HTTPCommunicator struct {
 	handler       MessageHandler
 	clientLock    sync.RWMutex
 	clients       map[string]*http.Client
+	payloadTypes  map[string]reflect.Type
 }
 
 func NewHTTPCommunicator(listenAddress string) *HTTPCommunicator {
-	return &HTTPCommunicator{
+	c := &HTTPCommunicator{
 		listenAddress: listenAddress,
 		clients:       make(map[string]*http.Client),
+		payloadTypes:  make(map[string]reflect.Type),
 	}
+
+	// Register default payload types
+	c.payloadTypes[MessageTypeStoreFile] = reflect.TypeOf((*StoreFileRequest)(nil)).Elem()
+	c.payloadTypes[MessageTypeReadFile] = reflect.TypeOf((*ReadFileRequest)(nil)).Elem()
+	c.payloadTypes[MessageTypeDeleteFile] = reflect.TypeOf((*DeleteFileRequest)(nil)).Elem()
+
+	return c
 }
 
 func (c *HTTPCommunicator) Address() string {
@@ -154,15 +164,48 @@ func (c *HTTPCommunicator) handleHTTPMessage(w http.ResponseWriter, r *http.Requ
 	}
 	defer r.Body.Close()
 
-	var msg Message
-	if err := json.Unmarshal(body, &msg); err != nil {
+	// First unmarshal to get message type
+	var rawMsg struct {
+		From    string          `json:"From"`
+		Type    string          `json:"Type"`
+		Payload json.RawMessage `json:"Payload"`
+	}
+	if err := json.Unmarshal(body, &rawMsg); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
 
-	if msg.From == "" || msg.Type == "" {
+	if rawMsg.From == "" || rawMsg.Type == "" {
 		http.Error(w, "Missing required fields", http.StatusBadRequest)
 		return
+	}
+
+	// Create the final message
+	msg := Message{
+		From: rawMsg.From,
+		Type: rawMsg.Type,
+	}
+
+	// Deserialize payload based on message type
+	if payloadType, exists := c.payloadTypes[rawMsg.Type]; exists {
+		if len(rawMsg.Payload) > 0 {
+			// Create a new instance of the payload type
+			payloadPtr := reflect.New(payloadType).Interface()
+
+			if err := json.Unmarshal(rawMsg.Payload, payloadPtr); err != nil {
+				http.Error(w, fmt.Sprintf("Invalid payload for message type %s: %v", rawMsg.Type, err), http.StatusBadRequest)
+				return
+			}
+
+			// Dereference the pointer to get the actual value
+			msg.Payload = reflect.ValueOf(payloadPtr).Elem().Interface()
+			log.Printf("Successfully deserialized payload for type %s", rawMsg.Type)
+		} else {
+			// Empty payload - create zero value
+			msg.Payload = reflect.Zero(payloadType).Interface()
+		}
+	} else {
+		log.Printf("No payload type registered for message type: %s", rawMsg.Type)
 	}
 
 	if c.handler == nil {

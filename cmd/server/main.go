@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"reflect"
 	"syscall"
 
 	"github.com/AnishMulay/sandstore/internal/chunk_service"
@@ -27,10 +28,10 @@ func main() {
 	// Create server
 	srv := server.NewDefaultServer(comm, fs)
 
-	// Register handlers
-	srv.RegisterHandler(communication.MessageTypeStoreFile, srv.HandleStoreFileMessage)
-	srv.RegisterHandler(communication.MessageTypeReadFile, srv.HandleReadFileMessage)
-	srv.RegisterHandler(communication.MessageTypeDeleteFile, srv.HandleDeleteFileMessage)
+	// Register typed handlers
+	srv.RegisterTypedHandler(communication.MessageTypeStoreFile, reflect.TypeOf((*communication.StoreFileRequest)(nil)).Elem(), srv.HandleStoreFileMessage)
+	srv.RegisterTypedHandler(communication.MessageTypeReadFile, reflect.TypeOf((*communication.ReadFileRequest)(nil)).Elem(), srv.HandleReadFileMessage)
+	srv.RegisterTypedHandler(communication.MessageTypeDeleteFile, reflect.TypeOf((*communication.DeleteFileRequest)(nil)).Elem(), srv.HandleDeleteFileMessage)
 
 	log.Println("Starting server on :8080")
 	if err := srv.Start(); err != nil {

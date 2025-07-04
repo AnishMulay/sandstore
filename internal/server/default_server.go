@@ -2,28 +2,30 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"reflect"
 
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/file_service"
 )
 
 type DefaultServer struct {
-	comm     communication.Communicator
-	fs       file_service.FileService
-	ctx      context.Context
-	cancel   context.CancelFunc
-	handlers map[string]func(msg communication.Message) (*communication.Response, error)
+	comm         communication.Communicator
+	fs           file_service.FileService
+	ctx          context.Context
+	cancel       context.CancelFunc
+	handlers     map[string]func(msg communication.Message) (*communication.Response, error)
+	typedHandlers map[string]*TypedHandler
 }
 
 func NewDefaultServer(comm communication.Communicator, fs file_service.FileService) *DefaultServer {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &DefaultServer{
-		comm:   comm,
-		fs:     fs,
-		ctx:    ctx,
-		cancel: cancel,
+		comm:         comm,
+		fs:           fs,
+		ctx:          ctx,
+		cancel:       cancel,
+		typedHandlers: make(map[string]*TypedHandler),
 	}
 }
 
@@ -43,25 +45,42 @@ func (s *DefaultServer) RegisterHandler(msgType string, handler func(msg communi
 	s.handlers[msgType] = handler
 }
 
-func (s *DefaultServer) handleMessage(msg communication.Message) (*communication.Response, error) {
-	if handler, exists := s.handlers[msg.Type]; exists {
-		return handler(msg)
-	} else {
-		return &communication.Response{
-			Code: communication.CodeBadRequest,
-			Body: []byte(fmt.Sprintf("No handler registered for message type: %s", msg.Type)),
-		}, nil
+func (s *DefaultServer) RegisterTypedHandler(msgType string, payloadType reflect.Type, handler func(msg communication.Message) (*communication.Response, error)) {
+	s.typedHandlers[msgType] = &TypedHandler{
+		Handler:     handler,
+		PayloadType: payloadType,
 	}
 }
 
-func (s *DefaultServer) HandleStoreFileMessage(msg communication.Message) (*communication.Response, error) {
-	var request communication.StoreFileRequest
-	if err := json.Unmarshal(msg.Payload, &request); err != nil {
-		return &communication.Response{
-			Code: communication.CodeBadRequest,
-			Body: []byte("Invalid store file request"),
-		}, nil
+func (s *DefaultServer) handleMessage(msg communication.Message) (*communication.Response, error) {
+	// Check typed handlers first
+	if typedHandler, exists := s.typedHandlers[msg.Type]; exists {
+		// Type check the payload
+		if msg.Payload != nil {
+			actualType := reflect.TypeOf(msg.Payload)
+			if actualType != typedHandler.PayloadType {
+				return &communication.Response{
+					Code: communication.CodeBadRequest,
+					Body: []byte(fmt.Sprintf("Invalid payload type for %s: expected %s, got %s", msg.Type, typedHandler.PayloadType, actualType)),
+				}, nil
+			}
+		}
+		return typedHandler.Handler(msg)
 	}
+	
+	// Fall back to untyped handlers
+	if handler, exists := s.handlers[msg.Type]; exists {
+		return handler(msg)
+	}
+	
+	return &communication.Response{
+		Code: communication.CodeBadRequest,
+		Body: []byte(fmt.Sprintf("No handler registered for message type: %s", msg.Type)),
+	}, nil
+}
+
+func (s *DefaultServer) HandleStoreFileMessage(msg communication.Message) (*communication.Response, error) {
+	request := msg.Payload.(communication.StoreFileRequest)
 
 	err := s.fs.StoreFile(request.Path, request.Data)
 	if err != nil {
@@ -77,13 +96,7 @@ func (s *DefaultServer) HandleStoreFileMessage(msg communication.Message) (*comm
 }
 
 func (s *DefaultServer) HandleReadFileMessage(msg communication.Message) (*communication.Response, error) {
-	var request communication.ReadFileRequest
-	if err := json.Unmarshal(msg.Payload, &request); err != nil {
-		return &communication.Response{
-			Code: communication.CodeBadRequest,
-			Body: []byte("Invalid read file request"),
-		}, nil
-	}
+	request := msg.Payload.(communication.ReadFileRequest)
 
 	data, err := s.fs.ReadFile(request.Path)
 	if err != nil {
@@ -100,13 +113,7 @@ func (s *DefaultServer) HandleReadFileMessage(msg communication.Message) (*commu
 }
 
 func (s *DefaultServer) HandleDeleteFileMessage(msg communication.Message) (*communication.Response, error) {
-	var request communication.DeleteFileRequest
-	if err := json.Unmarshal(msg.Payload, &request); err != nil {
-		return &communication.Response{
-			Code: communication.CodeBadRequest,
-			Body: []byte("Invalid delete file request"),
-		}, nil
-	}
+	request := msg.Payload.(communication.DeleteFileRequest)
 
 	err := s.fs.DeleteFile(request.Path)
 	if err != nil {

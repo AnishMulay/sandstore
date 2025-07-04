@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"log"
 
 	"github.com/AnishMulay/sandstore/internal/communication"
@@ -20,12 +19,10 @@ func main() {
 		Data: fileData,
 	}
 
-	payload, _ := json.Marshal(storeRequest)
-
 	msg := communication.Message{
 		From:    "8081",
 		Type:    communication.MessageTypeStoreFile,
-		Payload: payload,
+		Payload: storeRequest,
 	}
 
 	ctx := context.Background()
@@ -43,7 +40,7 @@ func main() {
 	readFileMsg := communication.Message{
 		From:    "8081",
 		Type:    communication.MessageTypeReadFile,
-		Payload: []byte(`{"path": "test_file.txt"}`),
+		Payload: communication.ReadFileRequest{Path: "test_file.txt"},
 	}
 
 	log.Printf("Sending read file message for path: %s", "test_file.txt")
@@ -61,7 +58,7 @@ func main() {
 	deleteFileMsg := communication.Message{
 		From:    "8081",
 		Type:    communication.MessageTypeDeleteFile,
-		Payload: []byte(`{"path": "test_file.txt"}`),
+		Payload: communication.DeleteFileRequest{Path: "test_file.txt"},
 	}
 
 	log.Printf("Sending delete file message for path: %s", "test_file.txt")
@@ -83,7 +80,7 @@ func main() {
 	readFileMsg = communication.Message{
 		From:    "8081",
 		Type:    communication.MessageTypeReadFile,
-		Payload: []byte(`{"path": "test_file.txt"}`),
+		Payload: communication.ReadFileRequest{Path: "test_file.txt"},
 	}
 
 	log.Printf("Sending read file message for path: %s", "test_file.txt")

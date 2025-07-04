@@ -6,7 +6,7 @@ import "context"
 type Message struct {
 	From    string
 	Type    string
-	Payload []byte
+	Payload any
 }
 
 const (
