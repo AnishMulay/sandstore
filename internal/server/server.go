@@ -2,6 +2,7 @@ package server
 
 import (
 	"reflect"
+
 	"github.com/AnishMulay/sandstore/internal/communication"
 )
 
@@ -14,6 +15,5 @@ type TypedHandler struct {
 type Server interface {
 	Start() error
 	Stop() error
-	RegisterHandler(msgType string, handler func(msg communication.Message) (*communication.Response, error))
 	RegisterTypedHandler(msgType string, payloadType reflect.Type, handler func(msg communication.Message) (*communication.Response, error))
 }

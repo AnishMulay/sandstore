@@ -7,24 +7,27 @@ import (
 
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/file_service"
+	"github.com/AnishMulay/sandstore/internal/node_registry"
 )
 
 type DefaultServer struct {
-	comm         communication.Communicator
-	fs           file_service.FileService
-	ctx          context.Context
-	cancel       context.CancelFunc
+	comm          communication.Communicator
+	fs            file_service.FileService
+	ctx           context.Context
+	cancel        context.CancelFunc
 	typedHandlers map[string]*TypedHandler
+	nodeRegistry  node_registry.NodeRegistry
 }
 
-func NewDefaultServer(comm communication.Communicator, fs file_service.FileService) *DefaultServer {
+func NewDefaultServer(comm communication.Communicator, fs file_service.FileService, nr node_registry.NodeRegistry) *DefaultServer {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &DefaultServer{
-		comm:         comm,
-		fs:           fs,
-		ctx:          ctx,
-		cancel:       cancel,
+		comm:          comm,
+		fs:            fs,
+		ctx:           ctx,
+		cancel:        cancel,
 		typedHandlers: make(map[string]*TypedHandler),
+		nodeRegistry:  nr,
 	}
 }
 
@@ -36,8 +39,6 @@ func (s *DefaultServer) Stop() error {
 	s.cancel()
 	return s.comm.Stop()
 }
-
-
 
 func (s *DefaultServer) RegisterTypedHandler(msgType string, payloadType reflect.Type, handler func(msg communication.Message) (*communication.Response, error)) {
 	s.typedHandlers[msgType] = &TypedHandler{
@@ -60,7 +61,7 @@ func (s *DefaultServer) handleMessage(msg communication.Message) (*communication
 		}
 		return typedHandler.Handler(msg)
 	}
-	
+
 	return &communication.Response{
 		Code: communication.CodeBadRequest,
 		Body: []byte(fmt.Sprintf("No handler registered for message type: %s", msg.Type)),

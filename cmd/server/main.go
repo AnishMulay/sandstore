@@ -11,6 +11,7 @@ import (
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/file_service"
 	"github.com/AnishMulay/sandstore/internal/metadata_service"
+	"github.com/AnishMulay/sandstore/internal/node_registry"
 	"github.com/AnishMulay/sandstore/internal/server"
 )
 
@@ -25,8 +26,13 @@ func main() {
 	// Create gRPC communicator
 	comm := communication.NewGRPCCommunicator(":8080")
 
+	// Create node registry
+	nr := node_registry.NewInMemoryNodeRegistry([]node_registry.Node{
+		{ID: "node1", Address: "localhost:8081"},
+	})
+
 	// Create server
-	srv := server.NewDefaultServer(comm, fs)
+	srv := server.NewDefaultServer(comm, fs, nr)
 
 	// Register typed handlers
 	srv.RegisterTypedHandler(communication.MessageTypeStoreFile, reflect.TypeOf((*communication.StoreFileRequest)(nil)).Elem(), srv.HandleStoreFileMessage)
