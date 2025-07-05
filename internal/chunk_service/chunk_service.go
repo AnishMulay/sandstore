@@ -4,6 +4,7 @@ import "time"
 
 type FileChunk struct {
 	ChunkID    string
+	FileID     string
 	Size       int64
 	CreatedAt  time.Time
 	ModifiedAt time.Time

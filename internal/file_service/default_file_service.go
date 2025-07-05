@@ -28,6 +28,7 @@ func (fs *DefaultFileService) StoreFile(path string, data []byte) error {
 	var chunks []chunk_service.FileChunk
 	offset := 0
 	now := time.Now()
+	fileID := uuid.New().String()
 
 	counter := 0
 
@@ -50,6 +51,7 @@ func (fs *DefaultFileService) StoreFile(path string, data []byte) error {
 
 		chunks = append(chunks, chunk_service.FileChunk{
 			ChunkID:    chunkID,
+			FileID:     fileID,
 			Size:       int64(len(chunkData)),
 			CreatedAt:  now,
 			ModifiedAt: now,

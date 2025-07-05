@@ -7,6 +7,7 @@ import (
 )
 
 type FileMetadata struct {
+	FileID      string
 	Path        string
 	Size        int64
 	CreatedAt   time.Time
