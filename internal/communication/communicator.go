@@ -31,6 +31,11 @@ type DeleteFileRequest struct {
 	Path string
 }
 
+type StoreChunkRequest struct {
+	ChunkID string
+	Data    []byte
+}
+
 type SandCode string
 
 const (
