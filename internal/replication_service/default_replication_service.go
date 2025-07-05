@@ -14,6 +14,13 @@ type DefaultReplicationService struct {
 	comm         communication.Communicator
 }
 
+func NewDefaultReplicationService(nr node_registry.NodeRegistry, comm communication.Communicator) *DefaultReplicationService {
+	return &DefaultReplicationService{
+		nodeRegistry: nr,
+		comm:         comm,
+	}
+}
+
 func (rs *DefaultReplicationService) ReplicateChunk(chunkID string, data []byte, replicationFactor int) ([]chunk_service.ChunkReplica, error) {
 	nodes, err := rs.nodeRegistry.GetHealthyNodes()
 	if err != nil {
