@@ -10,9 +10,12 @@ type Message struct {
 }
 
 const (
-	MessageTypeStoreFile  = "store_file"
-	MessageTypeReadFile   = "read_file"
-	MessageTypeDeleteFile = "delete_file"
+	MessageTypeStoreFile   = "store_file"
+	MessageTypeReadFile    = "read_file"
+	MessageTypeDeleteFile  = "delete_file"
+	MessageTypeStoreChunk  = "store_chunk"
+	MessageTypeReadChunk   = "read_chunk"
+	MessageTypeDeleteChunk = "delete_chunk"
 )
 
 type StoreFileRequest struct {
