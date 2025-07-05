@@ -4,9 +4,9 @@ type InMemoryNodeRegistry struct {
 	nodes []Node
 }
 
-func NewInMemoryNodeRegistry() *InMemoryNodeRegistry {
+func NewInMemoryNodeRegistry(nodes []Node) *InMemoryNodeRegistry {
 	return &InMemoryNodeRegistry{
-		nodes: []Node{},
+		nodes: nodes,
 	}
 }
 

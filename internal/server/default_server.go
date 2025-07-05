@@ -14,7 +14,6 @@ type DefaultServer struct {
 	fs           file_service.FileService
 	ctx          context.Context
 	cancel       context.CancelFunc
-	handlers     map[string]func(msg communication.Message) (*communication.Response, error)
 	typedHandlers map[string]*TypedHandler
 }
 
@@ -38,12 +37,7 @@ func (s *DefaultServer) Stop() error {
 	return s.comm.Stop()
 }
 
-func (s *DefaultServer) RegisterHandler(msgType string, handler func(msg communication.Message) (*communication.Response, error)) {
-	if s.handlers == nil {
-		s.handlers = make(map[string]func(msg communication.Message) (*communication.Response, error))
-	}
-	s.handlers[msgType] = handler
-}
+
 
 func (s *DefaultServer) RegisterTypedHandler(msgType string, payloadType reflect.Type, handler func(msg communication.Message) (*communication.Response, error)) {
 	s.typedHandlers[msgType] = &TypedHandler{
@@ -53,7 +47,6 @@ func (s *DefaultServer) RegisterTypedHandler(msgType string, payloadType reflect
 }
 
 func (s *DefaultServer) handleMessage(msg communication.Message) (*communication.Response, error) {
-	// Check typed handlers first
 	if typedHandler, exists := s.typedHandlers[msg.Type]; exists {
 		// Type check the payload
 		if msg.Payload != nil {
@@ -66,11 +59,6 @@ func (s *DefaultServer) handleMessage(msg communication.Message) (*communication
 			}
 		}
 		return typedHandler.Handler(msg)
-	}
-	
-	// Fall back to untyped handlers
-	if handler, exists := s.handlers[msg.Type]; exists {
-		return handler(msg)
 	}
 	
 	return &communication.Response{
