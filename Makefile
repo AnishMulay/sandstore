@@ -2,6 +2,14 @@
 SERVER_BINARY=server
 CLIENT_BINARY=client
 
+# Generate protobuf files
+.PHONY: proto
+proto:
+	PATH=$(PATH):$(shell go env GOPATH)/bin protoc --go_out=gen --go_opt=paths=source_relative \
+		--go-grpc_out=gen --go-grpc_opt=paths=source_relative \
+		proto/communication/communication.proto
+
+
 # Build both server and client
 .PHONY: build
 build:

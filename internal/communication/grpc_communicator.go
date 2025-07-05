@@ -36,6 +36,9 @@ func NewGRPCCommunicator(addr string) *GRPCCommunicator {
 	c.payloadTypes[MessageTypeStoreFile] = reflect.TypeOf((*StoreFileRequest)(nil)).Elem()
 	c.payloadTypes[MessageTypeReadFile] = reflect.TypeOf((*ReadFileRequest)(nil)).Elem()
 	c.payloadTypes[MessageTypeDeleteFile] = reflect.TypeOf((*DeleteFileRequest)(nil)).Elem()
+	c.payloadTypes[MessageTypeStoreChunk] = reflect.TypeOf((*StoreChunkRequest)(nil)).Elem()
+	// c.payloadTypes[MessageTypeReadChunk] = reflect.TypeOf((*ReadChunkRequest)(nil)).Elem()
+	// c.payloadTypes[MessageTypeDeleteChunk] = reflect.TypeOf((*DeleteChunkRequest)(nil)).Elem()
 
 	return c
 }
