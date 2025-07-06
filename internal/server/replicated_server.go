@@ -171,3 +171,20 @@ func (s *ReplicatedServer) HandleDeleteChunkMessage(msg communication.Message) (
 		Code: communication.CodeOK,
 	}, nil
 }
+
+func (s *ReplicatedServer) HandleStoreMetadataMessage(msg communication.Message) (*communication.Response, error) {
+	request := msg.Payload.(communication.StoreMetadataRequest)
+	metadata := request.Metadata
+
+	err := s.ms.CreateFileMetadata(metadata.Path, metadata.Size, metadata.Chunks)
+	if err != nil {
+		return &communication.Response{
+			Code: communication.CodeInternal,
+			Body: []byte(fmt.Sprintf("Failed to store metadata: %v", err)),
+		}, nil
+	}
+
+	return &communication.Response{
+		Code: communication.CodeOK,
+	}, nil
+}

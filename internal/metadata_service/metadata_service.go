@@ -28,4 +28,5 @@ type MetadataService interface {
 	GetFileMetadata(path string) (*FileMetadata, error)
 	DeleteFileMetadata(path string) error
 	ListDirectory(path string) ([]FileMetadata, error)
+	UpdateFileMetadata(path string, metadata FileMetadata) error
 }

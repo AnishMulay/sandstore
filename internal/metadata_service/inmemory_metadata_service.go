@@ -81,3 +81,24 @@ func (ms *InMemoryMetadataService) ListDirectory(path string) ([]FileMetadata, e
 
 	return files, nil
 }
+
+func (ms *InMemoryMetadataService) UpdateFileMetadata(path string, metadata FileMetadata) error {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	if _, exists := ms.files[path]; !exists {
+		return ErrFileNotFound
+	}
+
+	// Update the file metadata
+	file := ms.files[path]
+	file.Size = metadata.Size
+	file.ModifiedAt = time.Now()
+	file.Permissions = metadata.Permissions
+	file.Chunks = metadata.Chunks
+	file.Replicas = metadata.Replicas
+
+	ms.files[path] = file
+
+	return nil
+}
