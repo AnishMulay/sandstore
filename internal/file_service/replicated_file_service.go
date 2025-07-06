@@ -5,20 +5,20 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/AnishMulay/sandstore/internal/chunk_replicator"
 	"github.com/AnishMulay/sandstore/internal/chunk_service"
 	"github.com/AnishMulay/sandstore/internal/metadata_service"
-	"github.com/AnishMulay/sandstore/internal/replication_service"
 	"github.com/google/uuid"
 )
 
 type ReplicatedFileService struct {
 	ms        metadata_service.MetadataService
 	cs        chunk_service.ChunkService
-	rs        replication_service.ReplicationService
+	rs        chunk_replicator.ReplicationService
 	chunkSize int64
 }
 
-func NewReplicatedFileService(ms metadata_service.MetadataService, cs chunk_service.ChunkService, rs replication_service.ReplicationService, chunkSize int64) *ReplicatedFileService {
+func NewReplicatedFileService(ms metadata_service.MetadataService, cs chunk_service.ChunkService, rs chunk_replicator.ReplicationService, chunkSize int64) *ReplicatedFileService {
 	return &ReplicatedFileService{
 		ms:        ms,
 		cs:        cs,

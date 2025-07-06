@@ -8,12 +8,12 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/AnishMulay/sandstore/internal/chunk_replicator"
 	"github.com/AnishMulay/sandstore/internal/chunk_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/file_service"
 	"github.com/AnishMulay/sandstore/internal/metadata_service"
 	"github.com/AnishMulay/sandstore/internal/node_registry"
-	"github.com/AnishMulay/sandstore/internal/replication_service"
 	"github.com/AnishMulay/sandstore/internal/server"
 )
 
@@ -24,7 +24,7 @@ func createServer(port string, otherNodes []node_registry.Node) *server.Replicat
 	chunkSize := int64(8 * 1024 * 1024)
 	comm := communication.NewGRPCCommunicator(port)
 	nr := node_registry.NewInMemoryNodeRegistry(otherNodes)
-	rs := replication_service.NewDefaultReplicationService(nr, comm)
+	rs := chunk_replicator.NewDefaultReplicationService(nr, comm)
 	fs := file_service.NewReplicatedFileService(ms, cs, rs, chunkSize)
 	srv := server.NewReplicatedServer(comm, fs, cs, ms, nr)
 

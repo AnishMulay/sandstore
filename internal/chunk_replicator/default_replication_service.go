@@ -1,4 +1,4 @@
-package replication_service
+package chunk_replicator
 
 import (
 	"context"
