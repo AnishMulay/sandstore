@@ -71,35 +71,7 @@ func (fs *ReplicatedFileService) StoreFile(path string, data []byte) error {
 		}
 	}
 
-	err := fs.ms.CreateFileMetadata(path, int64(len(data)), chunks)
-	if err != nil {
-		return fmt.Errorf("failed to store file metadata: %w", err)
-	}
-
-	metadata, err := fs.ms.GetFileMetadata(path)
-	if err != nil {
-		return fmt.Errorf("failed to get file metadata: %w", err)
-	}
-
-	replicas, err := fs.rs.ReplicateFileMetadata(fileID, *metadata, 2)
-	if err != nil {
-		return fmt.Errorf("failed to replicate file metadata: %w", err)
-	}
-
-	// Update the file metadata with the replicas
-	metadata.Replicas = replicas
-
-	err = fs.ms.UpdateFileMetadata(path, *metadata)
-	if err != nil {
-		return fmt.Errorf("failed to update file metadata with replicas: %w", err)
-	}
-
-	// print the entire metadata for this file
-	fmt.Printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-	fmt.Printf("File metadata Replicas for %s: %+v\n", path, metadata.Replicas)
-	fmt.Printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-
-	return nil
+	return fs.ms.CreateFileMetadata(path, int64(len(data)), chunks)
 }
 
 func (fs *ReplicatedFileService) ReadFile(path string) ([]byte, error) {
