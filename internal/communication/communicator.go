@@ -52,7 +52,7 @@ type DeleteChunkRequest struct {
 
 type StoreMetadataRequest struct {
 	FileID   string
-	metadata metadata_service.FileMetadata
+	Metadata metadata_service.FileMetadata
 }
 
 type DeleteMetadataRequest struct {

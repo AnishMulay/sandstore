@@ -6,6 +6,7 @@ import (
 
 	"github.com/AnishMulay/sandstore/internal/chunk_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
+	"github.com/AnishMulay/sandstore/internal/metadata_service"
 	"github.com/AnishMulay/sandstore/internal/node_registry"
 )
 
@@ -89,4 +90,48 @@ func (rs *DefaultReplicationService) DeleteReplicatedChunk(chunkID string, repli
 	}
 
 	return nil
+}
+
+func (rs *DefaultReplicationService) ReplicateFileMetadata(fileID string, metadata metadata_service.FileMetadata, replicationFactor int) ([]metadata_service.MetadataReplica, error) {
+	nodes, err := rs.nodeRegistry.GetHealthyNodes()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(nodes) < replicationFactor {
+		return nil, ErrInsufficientNodes
+	}
+
+	var replicas []metadata_service.MetadataReplica
+	targetNodes := nodes[:replicationFactor]
+
+	for _, node := range targetNodes {
+		msg := communication.Message{
+			From: rs.comm.Address(),
+			Type: communication.MessageTypeStoreMetadata,
+			Payload: communication.StoreMetadataRequest{
+				FileID:   fileID,
+				Metadata: metadata,
+			},
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		resp, err := rs.comm.Send(ctx, node.Address, msg)
+		if err != nil {
+			return nil, err
+		}
+
+		if resp.Code != communication.CodeOK {
+			return nil, ErrReplicationFailed
+		} else {
+			replicas = append(replicas, metadata_service.MetadataReplica{
+				NodeID:    node.ID,
+				Address:   node.Address,
+				CreatedAt: time.Now(), // fix this later, this isn't the right way to handle created at in a distributed system
+			})
+		}
+	}
+
+	return replicas, nil
 }
