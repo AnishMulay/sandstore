@@ -96,7 +96,6 @@ func (ms *InMemoryMetadataService) UpdateFileMetadata(path string, metadata File
 	file.ModifiedAt = time.Now()
 	file.Permissions = metadata.Permissions
 	file.Chunks = metadata.Chunks
-	file.Replicas = metadata.Replicas
 
 	ms.files[path] = file
 

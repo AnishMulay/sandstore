@@ -14,13 +14,6 @@ type FileMetadata struct {
 	ModifiedAt  time.Time
 	Permissions string
 	Chunks      []chunk_service.FileChunk
-	Replicas    []MetadataReplica
-}
-
-type MetadataReplica struct {
-	NodeID    string
-	Address   string
-	CreatedAt time.Time
 }
 
 type MetadataService interface {
