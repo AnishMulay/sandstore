@@ -14,11 +14,11 @@ import (
 type ReplicatedFileService struct {
 	ms        metadata_service.MetadataService
 	cs        chunk_service.ChunkService
-	rs        chunk_replicator.ReplicationService
+	rs        chunk_replicator.ChunkReplicator
 	chunkSize int64
 }
 
-func NewReplicatedFileService(ms metadata_service.MetadataService, cs chunk_service.ChunkService, rs chunk_replicator.ReplicationService, chunkSize int64) *ReplicatedFileService {
+func NewReplicatedFileService(ms metadata_service.MetadataService, cs chunk_service.ChunkService, rs chunk_replicator.ChunkReplicator, chunkSize int64) *ReplicatedFileService {
 	return &ReplicatedFileService{
 		ms:        ms,
 		cs:        cs,

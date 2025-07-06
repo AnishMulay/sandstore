@@ -24,7 +24,7 @@ func createServer(port string, otherNodes []node_registry.Node) *server.Replicat
 	chunkSize := int64(8 * 1024 * 1024)
 	comm := communication.NewGRPCCommunicator(port)
 	nr := node_registry.NewInMemoryNodeRegistry(otherNodes)
-	rs := chunk_replicator.NewDefaultReplicationService(nr, comm)
+	rs := chunk_replicator.NewDefaultChunkReplicator(nr, comm)
 	fs := file_service.NewReplicatedFileService(ms, cs, rs, chunkSize)
 	srv := server.NewReplicatedServer(comm, fs, cs, ms, nr)
 
