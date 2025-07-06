@@ -8,6 +8,7 @@ import (
 	"github.com/AnishMulay/sandstore/internal/chunk_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/file_service"
+	"github.com/AnishMulay/sandstore/internal/metadata_service"
 	"github.com/AnishMulay/sandstore/internal/node_registry"
 )
 
@@ -15,18 +16,20 @@ type ReplicatedServer struct {
 	comm          communication.Communicator
 	fs            file_service.FileService
 	cs            chunk_service.ChunkService
+	ms            metadata_service.MetadataService
 	ctx           context.Context
 	cancel        context.CancelFunc
 	typedHandlers map[string]*TypedHandler
 	nodeRegistry  node_registry.NodeRegistry
 }
 
-func NewReplicatedServer(comm communication.Communicator, fs file_service.FileService, cs chunk_service.ChunkService, nr node_registry.NodeRegistry) *ReplicatedServer {
+func NewReplicatedServer(comm communication.Communicator, fs file_service.FileService, cs chunk_service.ChunkService, ms metadata_service.MetadataService, nr node_registry.NodeRegistry) *ReplicatedServer {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ReplicatedServer{
 		comm:          comm,
 		fs:            fs,
 		cs:            cs,
+		ms:            ms,
 		ctx:           ctx,
 		cancel:        cancel,
 		typedHandlers: make(map[string]*TypedHandler),

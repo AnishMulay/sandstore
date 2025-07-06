@@ -26,7 +26,7 @@ func createServer(port string, otherNodes []node_registry.Node) *server.Replicat
 	nr := node_registry.NewInMemoryNodeRegistry(otherNodes)
 	rs := replication_service.NewDefaultReplicationService(nr, comm)
 	fs := file_service.NewReplicatedFileService(ms, cs, rs, chunkSize)
-	srv := server.NewReplicatedServer(comm, fs, cs, nr)
+	srv := server.NewReplicatedServer(comm, fs, cs, ms, nr)
 
 	srv.RegisterTypedHandler(communication.MessageTypeStoreFile, reflect.TypeOf((*communication.StoreFileRequest)(nil)).Elem(), srv.HandleStoreFileMessage)
 	srv.RegisterTypedHandler(communication.MessageTypeReadFile, reflect.TypeOf((*communication.ReadFileRequest)(nil)).Elem(), srv.HandleReadFileMessage)
