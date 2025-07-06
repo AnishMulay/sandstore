@@ -66,6 +66,27 @@ func (rs *DefaultReplicationService) ReplicateChunk(chunkID string, data []byte,
 	return replicas, nil
 }
 
-func (rs *DefaultReplicationService) DeleteReplicatedChunk(chunkID string) error {
+func (rs *DefaultReplicationService) DeleteReplicatedChunk(chunkID string, replicas []chunk_service.ChunkReplica) error {
+	for _, replica := range replicas {
+		msg := communication.Message{
+			From: rs.comm.Address(),
+			Type: communication.MessageTypeDeleteChunk,
+			Payload: communication.DeleteChunkRequest{
+				ChunkID: chunkID,
+			},
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		resp, err := rs.comm.Send(ctx, replica.Address, msg)
+		if err != nil {
+			return err
+		}
+
+		if resp.Code != communication.CodeOK {
+			return ErrDeletionFailed
+		}
+	}
+
 	return nil
 }

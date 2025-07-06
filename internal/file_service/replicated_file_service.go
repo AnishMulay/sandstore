@@ -100,6 +100,11 @@ func (fs *ReplicatedFileService) DeleteFile(path string) error {
 	}
 
 	for _, chunk := range metadata.Chunks {
+		err = fs.rs.DeleteReplicatedChunk(chunk.ChunkID, chunk.Replicas)
+		if err != nil {
+			return fmt.Errorf("failed to delete replicated chunk: %w", err)
+		}
+
 		err = fs.cs.DeleteChunk(chunk.ChunkID)
 		if err != nil {
 			return fmt.Errorf("failed to delete chunk: %w", err)

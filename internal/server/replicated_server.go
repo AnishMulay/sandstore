@@ -152,3 +152,19 @@ func (s *ReplicatedServer) HandleReadChunkMessage(msg communication.Message) (*c
 		Body: data,
 	}, nil
 }
+
+func (s *ReplicatedServer) HandleDeleteChunkMessage(msg communication.Message) (*communication.Response, error) {
+	request := msg.Payload.(communication.DeleteChunkRequest)
+
+	err := s.cs.DeleteChunk(request.ChunkID)
+	if err != nil {
+		return &communication.Response{
+			Code: communication.CodeInternal,
+			Body: []byte(fmt.Sprintf("Failed to delete chunk: %v", err)),
+		}, nil
+	}
+
+	return &communication.Response{
+		Code: communication.CodeOK,
+	}, nil
+}
