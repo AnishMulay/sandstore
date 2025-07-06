@@ -51,7 +51,6 @@ type DeleteChunkRequest struct {
 }
 
 type StoreMetadataRequest struct {
-	FileID   string
 	Metadata metadata_service.FileMetadata
 }
 
