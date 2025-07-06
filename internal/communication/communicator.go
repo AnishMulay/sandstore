@@ -1,7 +1,11 @@
 // communication/interface.go
 package communication
 
-import "context"
+import (
+	"context"
+
+	"github.com/AnishMulay/sandstore/internal/metadata_service"
+)
 
 type Message struct {
 	From    string
@@ -10,12 +14,14 @@ type Message struct {
 }
 
 const (
-	MessageTypeStoreFile   = "store_file"
-	MessageTypeReadFile    = "read_file"
-	MessageTypeDeleteFile  = "delete_file"
-	MessageTypeStoreChunk  = "store_chunk"
-	MessageTypeReadChunk   = "read_chunk"
-	MessageTypeDeleteChunk = "delete_chunk"
+	MessageTypeStoreFile      = "store_file"
+	MessageTypeReadFile       = "read_file"
+	MessageTypeDeleteFile     = "delete_file"
+	MessageTypeStoreChunk     = "store_chunk"
+	MessageTypeReadChunk      = "read_chunk"
+	MessageTypeDeleteChunk    = "delete_chunk"
+	MessageTypeStoreMetadata  = "store_metadata"
+	MessageTypeDeleteMetadata = "delete_metadata"
 )
 
 type StoreFileRequest struct {
@@ -42,6 +48,15 @@ type ReadChunkRequest struct {
 
 type DeleteChunkRequest struct {
 	ChunkID string
+}
+
+type StoreMetadataRequest struct {
+	FileID   string
+	metadata metadata_service.FileMetadata
+}
+
+type DeleteMetadataRequest struct {
+	FileID string
 }
 
 type SandCode string
