@@ -65,3 +65,7 @@ func (rs *DefaultReplicationService) ReplicateChunk(chunkID string, data []byte,
 
 	return replicas, nil
 }
+
+func (rs *DefaultReplicationService) DeleteReplicatedChunk(chunkID string) error {
+	return nil
+}

@@ -36,6 +36,14 @@ type StoreChunkRequest struct {
 	Data    []byte
 }
 
+type ReadChunkRequest struct {
+	ChunkID string
+}
+
+type DeleteChunkRequest struct {
+	ChunkID string
+}
+
 type SandCode string
 
 const (

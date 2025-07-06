@@ -135,3 +135,20 @@ func (s *ReplicatedServer) HandleStoreChunkMessage(msg communication.Message) (*
 		Code: communication.CodeOK,
 	}, nil
 }
+
+func (s *ReplicatedServer) HandleReadChunkMessage(msg communication.Message) (*communication.Response, error) {
+	request := msg.Payload.(communication.ReadChunkRequest)
+
+	data, err := s.cs.ReadChunk(request.ChunkID)
+	if err != nil {
+		return &communication.Response{
+			Code: communication.CodeInternal,
+			Body: []byte(fmt.Sprintf("Failed to read chunk: %v", err)),
+		}, nil
+	}
+
+	return &communication.Response{
+		Code: communication.CodeOK,
+		Body: data,
+	}, nil
+}
