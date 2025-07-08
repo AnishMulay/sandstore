@@ -2,7 +2,9 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"log"
 	"reflect"
 
 	"github.com/AnishMulay/sandstore/internal/chunk_service"
@@ -176,6 +178,11 @@ func (s *ReplicatedServer) HandleStoreMetadataMessage(msg communication.Message)
 	request := msg.Payload.(communication.StoreMetadataRequest)
 	metadata := request.Metadata
 
+	// Pretty print metadata before processing
+	allMetadataBefore, _ := s.ms.ListDirectory("/")
+	beforeJSON, _ := json.MarshalIndent(allMetadataBefore, "", "  ")
+	log.Printf("[Server %s] Metadata BEFORE store request:\n%s", s.comm.Address(), string(beforeJSON))
+
 	err := s.ms.CreateFileMetadata(metadata.Path, metadata.Size, metadata.Chunks)
 	if err != nil {
 		return &communication.Response{
@@ -183,6 +190,11 @@ func (s *ReplicatedServer) HandleStoreMetadataMessage(msg communication.Message)
 			Body: []byte(fmt.Sprintf("Failed to store metadata: %v", err)),
 		}, nil
 	}
+
+	// Pretty print metadata after processing
+	allMetadataAfter, _ := s.ms.ListDirectory("/")
+	afterJSON, _ := json.MarshalIndent(allMetadataAfter, "", "  ")
+	log.Printf("[Server %s] Metadata AFTER store request:\n%s", s.comm.Address(), string(afterJSON))
 
 	return &communication.Response{
 		Code: communication.CodeOK,

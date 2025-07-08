@@ -74,7 +74,9 @@ func (ms *InMemoryMetadataService) ListDirectory(path string) ([]FileMetadata, e
 
 	var files []FileMetadata
 	for _, file := range ms.files {
-		if file.Path == path || (len(file.Path) > len(path) && file.Path[:len(path)] == path && file.Path[len(path):][0] == '/') {
+		if path == "/" {
+			files = append(files, *file)
+		} else if file.Path == path || (len(file.Path) > len(path) && file.Path[:len(path)] == path && file.Path[len(path):][0] == '/') {
 			files = append(files, *file)
 		}
 	}

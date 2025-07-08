@@ -7,6 +7,7 @@ import (
 
 	"github.com/AnishMulay/sandstore/internal/chunk_replicator"
 	"github.com/AnishMulay/sandstore/internal/chunk_service"
+	"github.com/AnishMulay/sandstore/internal/metadata_replicator"
 	"github.com/AnishMulay/sandstore/internal/metadata_service"
 	"github.com/google/uuid"
 )
@@ -14,15 +15,17 @@ import (
 type ReplicatedFileService struct {
 	ms        metadata_service.MetadataService
 	cs        chunk_service.ChunkService
-	rs        chunk_replicator.ChunkReplicator
+	cr        chunk_replicator.ChunkReplicator
+	mr        metadata_replicator.MetadataReplicator
 	chunkSize int64
 }
 
-func NewReplicatedFileService(ms metadata_service.MetadataService, cs chunk_service.ChunkService, rs chunk_replicator.ChunkReplicator, chunkSize int64) *ReplicatedFileService {
+func NewReplicatedFileService(ms metadata_service.MetadataService, cs chunk_service.ChunkService, cr chunk_replicator.ChunkReplicator, mr metadata_replicator.MetadataReplicator, chunkSize int64) *ReplicatedFileService {
 	return &ReplicatedFileService{
 		ms:        ms,
 		cs:        cs,
-		rs:        rs,
+		cr:        cr,
+		mr:        mr,
 		chunkSize: chunkSize,
 	}
 }
@@ -52,7 +55,7 @@ func (fs *ReplicatedFileService) StoreFile(path string, data []byte) error {
 			return fmt.Errorf("failed to store chunk: %w", err)
 		}
 
-		replicas, err := fs.rs.ReplicateChunk(chunkID, chunkData, 2) // Assuming replication factor of 3
+		replicas, err := fs.cr.ReplicateChunk(chunkID, chunkData, 2) // Assuming replication factor of 3
 
 		chunks = append(chunks, chunk_service.FileChunk{
 			ChunkID:    chunkID,
@@ -71,7 +74,25 @@ func (fs *ReplicatedFileService) StoreFile(path string, data []byte) error {
 		}
 	}
 
-	return fs.ms.CreateFileMetadata(path, int64(len(data)), chunks)
+	err := fs.ms.CreateFileMetadata(path, int64(len(data)), chunks)
+	if err != nil {
+		return fmt.Errorf("failed to create file metadata: %w", err)
+	}
+
+	metadata := &metadata_service.FileMetadata{
+		Path:       path,
+		Size:       int64(len(data)),
+		Chunks:     chunks,
+		CreatedAt:  now,
+		ModifiedAt: now,
+	}
+
+	err = fs.mr.ReplicateMetadata(*metadata)
+	if err != nil {
+		return fmt.Errorf("failed to replicate metadata: %w", err)
+	}
+
+	return nil
 }
 
 func (fs *ReplicatedFileService) ReadFile(path string) ([]byte, error) {
@@ -100,7 +121,7 @@ func (fs *ReplicatedFileService) DeleteFile(path string) error {
 	}
 
 	for _, chunk := range metadata.Chunks {
-		err = fs.rs.DeleteReplicatedChunk(chunk.ChunkID, chunk.Replicas)
+		err = fs.cr.DeleteReplicatedChunk(chunk.ChunkID, chunk.Replicas)
 		if err != nil {
 			return fmt.Errorf("failed to delete replicated chunk: %w", err)
 		}
