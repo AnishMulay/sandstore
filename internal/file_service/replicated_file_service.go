@@ -76,8 +76,6 @@ func (fs *ReplicatedFileService) StoreFile(path string, data []byte) error {
 
 	err := fs.ms.CreateFileMetadata(path, int64(len(data)), chunks)
 
-	// return fs.ms.CreateFileMetadata(path, int64(len(data)), chunks)
-
 	if err != nil {
 		return fmt.Errorf("failed to create file metadata: %w", err)
 	}

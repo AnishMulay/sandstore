@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"reflect"
-	"time"
 
 	"github.com/AnishMulay/sandstore/internal/chunk_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
@@ -178,14 +177,6 @@ func (s *ReplicatedServer) HandleDeleteChunkMessage(msg communication.Message) (
 func (s *ReplicatedServer) HandleStoreMetadataMessage(msg communication.Message) (*communication.Response, error) {
 	request := msg.Payload.(communication.StoreMetadataRequest)
 	metadata := request.Metadata
-
-	fmt.Printf("----------------------------------------------------------\n")
-	fmt.Printf("[Server %s] File Metadata:\n", s.comm.Address())
-	fmt.Printf("[Server %s] Path: %s\n", s.comm.Address(), metadata.Path)
-	fmt.Printf("[Server %s] Size: %d bytes\n", s.comm.Address(), metadata.Size)
-	fmt.Printf("[Server %s] Created At: %s\n", s.comm.Address(), metadata.CreatedAt.Format(time.RFC3339))
-	fmt.Printf("[Server %s] Modified At: %s\n", s.comm.Address(), metadata.ModifiedAt.Format(time.RFC3339))
-	fmt.Printf("-----------------------------------------------------------\n")
 
 	err := s.ms.CreateFileMetadata(metadata.Path, metadata.Size, metadata.Chunks)
 	if err != nil {
