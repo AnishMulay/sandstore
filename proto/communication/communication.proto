@@ -45,3 +45,10 @@ message ReadChunkRequest {
 message DeleteChunkRequest {
   string chunk_id = 1;
 }
+
+message StoreMetadataRequest {
+  string file_path = 1;
+  repeated string chunk_ids = 2;
+  int64 file_size = 3;
+  int64 timestamp = 4;
+}

@@ -32,7 +32,7 @@ func (mr *PushBasedMetadataReplicator) ReplicateMetadata(metadata metadata_servi
 		msg := communication.Message{
 			From:    mr.comm.Address(),
 			Type:    communication.MessageTypeStoreMetadata,
-			Payload: metadata,
+			Payload: communication.StoreMetadataRequest{Metadata: metadata},
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
