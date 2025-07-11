@@ -44,16 +44,16 @@ func createServer(port string, otherNodes []node_registry.Node) *server.Replicat
 func main() {
 	servers := []*server.ReplicatedServer{
 		createServer(":8080", []node_registry.Node{
-			{ID: "node2", Address: "localhost:8081", Healthy: true},
-			{ID: "node3", Address: "localhost:8082", Healthy: true},
+			{ID: "8081", Address: "localhost:8081", Healthy: true},
+			{ID: "8082", Address: "localhost:8082", Healthy: true},
 		}),
 		createServer(":8081", []node_registry.Node{
-			{ID: "node1", Address: "localhost:8080", Healthy: true},
-			{ID: "node3", Address: "localhost:8082", Healthy: true},
+			{ID: "8080", Address: "localhost:8080", Healthy: true},
+			{ID: "8082", Address: "localhost:8082", Healthy: true},
 		}),
 		createServer(":8082", []node_registry.Node{
-			{ID: "node1", Address: "localhost:8080", Healthy: true},
-			{ID: "node2", Address: "localhost:8081", Healthy: true},
+			{ID: "8080", Address: "localhost:8080", Healthy: true},
+			{ID: "8081", Address: "localhost:8081", Healthy: true},
 		}),
 	}
 

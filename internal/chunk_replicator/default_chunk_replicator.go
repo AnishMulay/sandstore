@@ -2,6 +2,7 @@ package chunk_replicator
 
 import (
 	"context"
+	"net"
 	"time"
 
 	"github.com/AnishMulay/sandstore/internal/chunk_service"
@@ -33,6 +34,16 @@ func (cr *DefaultChunkReplicator) ReplicateChunk(chunkID string, data []byte, re
 
 	var replicas []chunk_service.ChunkReplica
 	targetNodes := nodes[:replicationFactor]
+
+	// this is a placeholder for now, future implementation will fix this to get the correct nodeID
+	_, port, _ := net.SplitHostPort(cr.comm.Address())
+
+	replicas = append(replicas, chunk_service.ChunkReplica{
+		NodeID:    port, // Use the current node's ID
+		Address:   cr.comm.Address(),
+		ChunkID:   chunkID,
+		CreatedAt: time.Now(),
+	})
 
 	for _, node := range targetNodes {
 		msg := communication.Message{
