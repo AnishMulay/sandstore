@@ -77,6 +77,31 @@ func (cr *DefaultChunkReplicator) ReplicateChunk(chunkID string, data []byte, re
 	return replicas, nil
 }
 
+func (cr *DefaultChunkReplicator) FetchReplicatedChunk(chunkID string, replicas []chunk_service.ChunkReplica) ([]byte, error) {
+	for _, replica := range replicas {
+		msg := communication.Message{
+			From: cr.comm.Address(),
+			Type: communication.MessageTypeReadChunk,
+			Payload: communication.ReadChunkRequest{
+				ChunkID: chunkID,
+			},
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		resp, err := cr.comm.Send(ctx, replica.Address, msg)
+		if err != nil {
+			continue
+		}
+
+		if resp.Code == communication.CodeOK {
+			return resp.Body, nil
+		}
+	}
+
+	return nil, ErrReplicatedChunkNotFound
+}
+
 func (cr *DefaultChunkReplicator) DeleteReplicatedChunk(chunkID string, replicas []chunk_service.ChunkReplica) error {
 	for _, replica := range replicas {
 		msg := communication.Message{
