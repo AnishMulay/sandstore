@@ -109,7 +109,11 @@ func (fs *ReplicatedFileService) ReadFile(path string) ([]byte, error) {
 	for _, chunk := range metadata.Chunks {
 		chunkData, err := fs.cs.ReadChunk(chunk.ChunkID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read chunk: %w", err)
+			fmt.Printf("chunk not found locally for chunk ID %s, attempting to fetch from replicas\n", chunk.ChunkID)
+			chunkData, err = fs.cr.FetchReplicatedChunk(chunk.ChunkID, chunk.Replicas)
+			if err != nil {
+				return nil, fmt.Errorf("failed to fetch replicated chunk: %w", err)
+			}
 		}
 
 		data = append(data, chunkData...)
