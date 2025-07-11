@@ -91,21 +91,6 @@ func (fs *ReplicatedFileService) StoreFile(path string, data []byte) error {
 		ModifiedAt: now,
 	}
 
-	fmt.Printf("File Metadata:\n")
-	fmt.Printf("Path: %s\n", metadata.Path)
-	fmt.Printf("Size: %d bytes\n", metadata.Size)
-	fmt.Printf("Created At: %s\n", metadata.CreatedAt.Format(time.RFC3339))
-	fmt.Printf("Modified At: %s\n", metadata.ModifiedAt.Format(time.RFC3339))
-	fmt.Printf("Chunks:\n")
-	for _, chunk := range metadata.Chunks {
-		fmt.Printf("  Chunk ID: %s\n", chunk.ChunkID)
-		fmt.Printf("  Size: %d bytes\n", chunk.Size)
-		fmt.Printf("  Checksum: %s\n", chunk.Checksum)
-		fmt.Printf("  Created At: %s\n", chunk.CreatedAt.Format(time.RFC3339))
-		fmt.Printf("  Modified At: %s\n", chunk.ModifiedAt.Format(time.RFC3339))
-		fmt.Printf("  Replicas: %v\n", chunk.Replicas)
-	}
-
 	err = fs.mr.ReplicateMetadata(*metadata)
 	if err != nil {
 		return fmt.Errorf("failed to replicate metadata: %w", err)
