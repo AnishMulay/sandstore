@@ -1,0 +1,20 @@
+2025-07-12T22:25:19Z [8080] DEBUG: Registering typed handler messageType=store_file payloadType=communication.StoreFileRequest 
+2025-07-12T22:25:19Z [8080] DEBUG: Registering typed handler payloadType=communication.ReadFileRequest messageType=read_file 
+2025-07-12T22:25:19Z [8080] DEBUG: Registering typed handler messageType=delete_file payloadType=communication.DeleteFileRequest 
+2025-07-12T22:25:19Z [8080] DEBUG: Registering typed handler messageType=store_chunk payloadType=communication.StoreChunkRequest 
+2025-07-12T22:25:19Z [8080] DEBUG: Registering typed handler messageType=read_chunk payloadType=communication.ReadChunkRequest 
+2025-07-12T22:25:19Z [8080] DEBUG: Registering typed handler messageType=delete_chunk payloadType=communication.DeleteChunkRequest 
+2025-07-12T22:25:19Z [8080] DEBUG: Registering typed handler messageType=store_metadata payloadType=communication.StoreMetadataRequest 
+2025-07-12T22:25:19Z [8080] INFO: Starting replicated server 
+2025-07-12T22:25:19Z [8080] INFO: Replicated server started successfully 
+2025-07-12T22:25:23Z [8080] DEBUG: Processing message type=store_file 
+2025-07-12T22:25:23Z [8080] INFO: Storing file path=test_file.txt size=84 
+2025-07-12T22:25:23Z [8080] INFO: File stored successfully path=test_file.txt 
+2025-07-12T22:25:51Z [8080] DEBUG: Processing message type=delete_file 
+2025-07-12T22:25:51Z [8080] INFO: Deleting file path=test_file.txt 
+2025-07-12T22:25:51Z [8080] DEBUG: Processing message type=delete_chunk 
+2025-07-12T22:25:51Z [8080] INFO: Deleting chunk chunkID=0462c638-3d5e-48b1-8dbc-a3b36f57f921 
+2025-07-12T22:25:51Z [8080] INFO: Chunk deleted successfully chunkID=0462c638-3d5e-48b1-8dbc-a3b36f57f921 
+2025-07-12T22:25:51Z [8080] ERROR: Failed to delete file path=test_file.txt error=failed to delete chunk: remove chunks/8080/0462c638-3d5e-48b1-8dbc-a3b36f57f921.chunk: no such file or directory 
+2025-07-12T22:26:55Z [8080] INFO: Stopping replicated server 
+2025-07-12T22:26:55Z [8080] INFO: Replicated server stopped successfully 

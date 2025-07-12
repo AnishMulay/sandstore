@@ -12,6 +12,7 @@ import (
 	"github.com/AnishMulay/sandstore/internal/chunk_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/file_service"
+	"github.com/AnishMulay/sandstore/internal/log_service"
 	"github.com/AnishMulay/sandstore/internal/metadata_replicator"
 	"github.com/AnishMulay/sandstore/internal/metadata_service"
 	"github.com/AnishMulay/sandstore/internal/node_registry"
@@ -28,7 +29,10 @@ func createServer(port string, otherNodes []node_registry.Node) *server.Replicat
 	cr := chunk_replicator.NewDefaultChunkReplicator(nr, comm)
 	mr := metadata_replicator.NewPushBasedMetadataReplicator(nr, comm)
 	fs := file_service.NewReplicatedFileService(ms, cs, cr, mr, chunkSize)
-	srv := server.NewReplicatedServer(comm, fs, cs, ms, nr)
+	logDir := "./logs"
+	nodeID := port[1:] // Use port as node ID
+	ls := log_service.NewLocalDiscLogService(logDir, nodeID)
+	srv := server.NewReplicatedServer(comm, fs, cs, ms, ls, nr)
 
 	srv.RegisterTypedHandler(communication.MessageTypeStoreFile, reflect.TypeOf((*communication.StoreFileRequest)(nil)).Elem(), srv.HandleStoreFileMessage)
 	srv.RegisterTypedHandler(communication.MessageTypeReadFile, reflect.TypeOf((*communication.ReadFileRequest)(nil)).Elem(), srv.HandleReadFileMessage)
