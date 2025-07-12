@@ -7,6 +7,7 @@ import (
 
 	"github.com/AnishMulay/sandstore/internal/chunk_replicator"
 	"github.com/AnishMulay/sandstore/internal/chunk_service"
+	"github.com/AnishMulay/sandstore/internal/log_service"
 	"github.com/AnishMulay/sandstore/internal/metadata_replicator"
 	"github.com/AnishMulay/sandstore/internal/metadata_service"
 	"github.com/google/uuid"
@@ -17,15 +18,17 @@ type ReplicatedFileService struct {
 	cs        chunk_service.ChunkService
 	cr        chunk_replicator.ChunkReplicator
 	mr        metadata_replicator.MetadataReplicator
+	ls        log_service.LogService
 	chunkSize int64
 }
 
-func NewReplicatedFileService(ms metadata_service.MetadataService, cs chunk_service.ChunkService, cr chunk_replicator.ChunkReplicator, mr metadata_replicator.MetadataReplicator, chunkSize int64) *ReplicatedFileService {
+func NewReplicatedFileService(ms metadata_service.MetadataService, cs chunk_service.ChunkService, cr chunk_replicator.ChunkReplicator, mr metadata_replicator.MetadataReplicator, ls log_service.LogService, chunkSize int64) *ReplicatedFileService {
 	return &ReplicatedFileService{
 		ms:        ms,
 		cs:        cs,
 		cr:        cr,
 		mr:        mr,
+		ls:        ls,
 		chunkSize: chunkSize,
 	}
 }
