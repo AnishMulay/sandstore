@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"reflect"
 	"sync"
@@ -47,10 +46,10 @@ func (c *HTTPCommunicator) Address() string {
 
 func (c *HTTPCommunicator) Start(handler MessageHandler) error {
 	c.ls.Info(log_service.LogEvent{
-		Message: "Starting HTTP communicator",
+		Message:  "Starting HTTP communicator",
 		Metadata: map[string]any{"address": c.listenAddress},
 	})
-	
+
 	c.handler = handler
 
 	mux := http.NewServeMux()
@@ -62,14 +61,14 @@ func (c *HTTPCommunicator) Start(handler MessageHandler) error {
 	}
 
 	c.ls.Info(log_service.LogEvent{
-		Message: "HTTP communicator started successfully",
+		Message:  "HTTP communicator started successfully",
 		Metadata: map[string]any{"address": c.listenAddress},
 	})
 
 	go func() {
 		if err := c.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			c.ls.Error(log_service.LogEvent{
-				Message: "HTTP server error",
+				Message:  "HTTP server error",
 				Metadata: map[string]any{"address": c.listenAddress, "error": err.Error()},
 			})
 		}
@@ -80,26 +79,26 @@ func (c *HTTPCommunicator) Start(handler MessageHandler) error {
 
 func (c *HTTPCommunicator) Stop() error {
 	c.ls.Info(log_service.LogEvent{
-		Message: "Stopping HTTP communicator",
+		Message:  "Stopping HTTP communicator",
 		Metadata: map[string]any{"address": c.listenAddress},
 	})
-	
+
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	err := c.httpServer.Shutdown(ctx)
 	if err != nil {
 		c.ls.Error(log_service.LogEvent{
-			Message: "Failed to stop HTTP server",
+			Message:  "Failed to stop HTTP server",
 			Metadata: map[string]any{"address": c.listenAddress, "error": err.Error()},
 		})
 		return err
 	}
-	
+
 	c.ls.Info(log_service.LogEvent{
-		Message: "HTTP communicator stopped successfully",
+		Message:  "HTTP communicator stopped successfully",
 		Metadata: map[string]any{"address": c.listenAddress},
 	})
-	
+
 	return nil
 }
 
@@ -122,20 +121,20 @@ func mapFromHTTPCode(code int) SandCode {
 
 func (c *HTTPCommunicator) Send(ctx context.Context, to string, msg Message) (*Response, error) {
 	c.ls.Debug(log_service.LogEvent{
-		Message: "Sending HTTP message",
+		Message:  "Sending HTTP message",
 		Metadata: map[string]any{"to": to, "type": msg.Type, "from": msg.From},
 	})
-	
+
 	c.clientLock.RLock()
 	client, ok := c.clients[to]
 	c.clientLock.RUnlock()
 
 	if !ok {
 		c.ls.Debug(log_service.LogEvent{
-			Message: "Creating new HTTP client",
+			Message:  "Creating new HTTP client",
 			Metadata: map[string]any{"to": to},
 		})
-		
+
 		client = &http.Client{
 			Timeout: 5 * time.Second,
 		}
@@ -148,7 +147,7 @@ func (c *HTTPCommunicator) Send(ctx context.Context, to string, msg Message) (*R
 	jsonData, err := json.Marshal(msg)
 	if err != nil {
 		c.ls.Error(log_service.LogEvent{
-			Message: "Failed to marshal message",
+			Message:  "Failed to marshal message",
 			Metadata: map[string]any{"to": to, "type": msg.Type, "error": err.Error()},
 		})
 		return nil, fmt.Errorf("failed to marshal message: %v", err)
@@ -158,7 +157,7 @@ func (c *HTTPCommunicator) Send(ctx context.Context, to string, msg Message) (*R
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
 		c.ls.Error(log_service.LogEvent{
-			Message: "Failed to create HTTP request",
+			Message:  "Failed to create HTTP request",
 			Metadata: map[string]any{"to": to, "type": msg.Type, "error": err.Error()},
 		})
 		return nil, fmt.Errorf("failed to create request: %v", err)
@@ -168,7 +167,7 @@ func (c *HTTPCommunicator) Send(ctx context.Context, to string, msg Message) (*R
 	resp, err := client.Do(req)
 	if err != nil {
 		c.ls.Error(log_service.LogEvent{
-			Message: "Failed to send HTTP request",
+			Message:  "Failed to send HTTP request",
 			Metadata: map[string]any{"to": to, "type": msg.Type, "error": err.Error()},
 		})
 		return nil, fmt.Errorf("failed to send request: %v", err)
@@ -178,14 +177,14 @@ func (c *HTTPCommunicator) Send(ctx context.Context, to string, msg Message) (*R
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		c.ls.Error(log_service.LogEvent{
-			Message: "Failed to read HTTP response body",
+			Message:  "Failed to read HTTP response body",
 			Metadata: map[string]any{"to": to, "type": msg.Type, "error": err.Error()},
 		})
 		return nil, fmt.Errorf("failed to read response body: %v", err)
 	}
 
 	c.ls.Debug(log_service.LogEvent{
-		Message: "HTTP message sent successfully",
+		Message:  "HTTP message sent successfully",
 		Metadata: map[string]any{"to": to, "type": msg.Type, "statusCode": resp.StatusCode},
 	})
 
@@ -221,7 +220,7 @@ func mapToHTTPCode(code SandCode) int {
 func (c *HTTPCommunicator) handleHTTPMessage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		c.ls.Warn(log_service.LogEvent{
-			Message: "HTTP method not allowed",
+			Message:  "HTTP method not allowed",
 			Metadata: map[string]any{"method": r.Method, "remoteAddr": r.RemoteAddr},
 		})
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -231,7 +230,7 @@ func (c *HTTPCommunicator) handleHTTPMessage(w http.ResponseWriter, r *http.Requ
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		c.ls.Error(log_service.LogEvent{
-			Message: "Failed to read HTTP request body",
+			Message:  "Failed to read HTTP request body",
 			Metadata: map[string]any{"remoteAddr": r.RemoteAddr, "error": err.Error()},
 		})
 		http.Error(w, "Failed to read body", http.StatusBadRequest)
@@ -247,7 +246,7 @@ func (c *HTTPCommunicator) handleHTTPMessage(w http.ResponseWriter, r *http.Requ
 	}
 	if err := json.Unmarshal(body, &rawMsg); err != nil {
 		c.ls.Error(log_service.LogEvent{
-			Message: "Invalid JSON in HTTP request",
+			Message:  "Invalid JSON in HTTP request",
 			Metadata: map[string]any{"remoteAddr": r.RemoteAddr, "error": err.Error()},
 		})
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
@@ -256,7 +255,7 @@ func (c *HTTPCommunicator) handleHTTPMessage(w http.ResponseWriter, r *http.Requ
 
 	if rawMsg.From == "" || rawMsg.Type == "" {
 		c.ls.Warn(log_service.LogEvent{
-			Message: "Missing required fields in HTTP request",
+			Message:  "Missing required fields in HTTP request",
 			Metadata: map[string]any{"remoteAddr": r.RemoteAddr, "from": rawMsg.From, "type": rawMsg.Type},
 		})
 		http.Error(w, "Missing required fields", http.StatusBadRequest)
@@ -264,10 +263,10 @@ func (c *HTTPCommunicator) handleHTTPMessage(w http.ResponseWriter, r *http.Requ
 	}
 
 	c.ls.Debug(log_service.LogEvent{
-		Message: "Received HTTP message",
+		Message:  "Received HTTP message",
 		Metadata: map[string]any{"from": rawMsg.From, "type": rawMsg.Type, "remoteAddr": r.RemoteAddr},
 	})
-	
+
 	// Create the final message
 	msg := Message{
 		From: rawMsg.From,
@@ -282,7 +281,7 @@ func (c *HTTPCommunicator) handleHTTPMessage(w http.ResponseWriter, r *http.Requ
 
 			if err := json.Unmarshal(rawMsg.Payload, payloadPtr); err != nil {
 				c.ls.Error(log_service.LogEvent{
-					Message: "Failed to unmarshal payload",
+					Message:  "Failed to unmarshal payload",
 					Metadata: map[string]any{"from": rawMsg.From, "type": rawMsg.Type, "error": err.Error()},
 				})
 				http.Error(w, fmt.Sprintf("Invalid payload for message type %s: %v", rawMsg.Type, err), http.StatusBadRequest)
@@ -292,7 +291,7 @@ func (c *HTTPCommunicator) handleHTTPMessage(w http.ResponseWriter, r *http.Requ
 			// Dereference the pointer to get the actual value
 			msg.Payload = reflect.ValueOf(payloadPtr).Elem().Interface()
 			c.ls.Debug(log_service.LogEvent{
-				Message: "Payload deserialized successfully",
+				Message:  "Payload deserialized successfully",
 				Metadata: map[string]any{"from": rawMsg.From, "type": rawMsg.Type},
 			})
 		} else {
@@ -301,14 +300,14 @@ func (c *HTTPCommunicator) handleHTTPMessage(w http.ResponseWriter, r *http.Requ
 		}
 	} else {
 		c.ls.Warn(log_service.LogEvent{
-			Message: "No payload type registered for message type",
+			Message:  "No payload type registered for message type",
 			Metadata: map[string]any{"from": rawMsg.From, "type": rawMsg.Type},
 		})
 	}
 
 	if c.handler == nil {
 		c.ls.Error(log_service.LogEvent{
-			Message: "HTTP handler not set",
+			Message:  "HTTP handler not set",
 			Metadata: map[string]any{"from": rawMsg.From, "type": rawMsg.Type},
 		})
 		http.Error(w, "Handler not set", http.StatusInternalServerError)
@@ -318,7 +317,7 @@ func (c *HTTPCommunicator) handleHTTPMessage(w http.ResponseWriter, r *http.Requ
 	resp, err := c.handler(msg)
 	if err != nil {
 		c.ls.Error(log_service.LogEvent{
-			Message: "Message handler error",
+			Message:  "Message handler error",
 			Metadata: map[string]any{"from": rawMsg.From, "type": rawMsg.Type, "error": err.Error()},
 		})
 		http.Error(w, fmt.Sprintf("Handler error: %v", err), http.StatusInternalServerError)
@@ -343,13 +342,13 @@ func (c *HTTPCommunicator) handleHTTPMessage(w http.ResponseWriter, r *http.Requ
 		}
 
 		c.ls.Debug(log_service.LogEvent{
-			Message: "HTTP response sent",
+			Message:  "HTTP response sent",
 			Metadata: map[string]any{"to": msg.From, "code": resp.Code, "httpStatus": httpStatus},
 		})
 	} else {
 		w.WriteHeader(http.StatusOK)
 		c.ls.Debug(log_service.LogEvent{
-			Message: "HTTP response sent",
+			Message:  "HTTP response sent",
 			Metadata: map[string]any{"to": msg.From, "code": "OK", "httpStatus": http.StatusOK},
 		})
 	}
