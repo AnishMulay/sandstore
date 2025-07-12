@@ -8,10 +8,14 @@ import (
 	"os"
 
 	"github.com/AnishMulay/sandstore/internal/communication"
+	"github.com/AnishMulay/sandstore/internal/log_service"
 )
 
 func main() {
-	comm := communication.NewGRPCCommunicator(":8081")
+	logDir := "./logs"
+	nodeID := "client"
+	ls := log_service.NewLocalDiscLogService(logDir, nodeID)
+	comm := communication.NewGRPCCommunicator(":8081", ls)
 	ctx := context.Background()
 	serverAddr := "localhost:8080"
 	readServerAddr := "localhost:8081" // Server to test lazy loading from
