@@ -11,20 +11,24 @@ import (
 	"reflect"
 	"sync"
 	"time"
+
+	"github.com/AnishMulay/sandstore/internal/log_service"
 )
 
 type HTTPCommunicator struct {
 	listenAddress string
 	httpServer    *http.Server
 	handler       MessageHandler
+	ls            log_service.LogService
 	clientLock    sync.RWMutex
 	clients       map[string]*http.Client
 	payloadTypes  map[string]reflect.Type
 }
 
-func NewHTTPCommunicator(listenAddress string) *HTTPCommunicator {
+func NewHTTPCommunicator(listenAddress string, ls log_service.LogService) *HTTPCommunicator {
 	c := &HTTPCommunicator{
 		listenAddress: listenAddress,
+		ls:            ls,
 		clients:       make(map[string]*http.Client),
 		payloadTypes:  make(map[string]reflect.Type),
 	}
@@ -42,6 +46,11 @@ func (c *HTTPCommunicator) Address() string {
 }
 
 func (c *HTTPCommunicator) Start(handler MessageHandler) error {
+	c.ls.Info(log_service.LogEvent{
+		Message: "Starting HTTP communicator",
+		Metadata: map[string]any{"address": c.listenAddress},
+	})
+	
 	c.handler = handler
 
 	mux := http.NewServeMux()
@@ -52,9 +61,17 @@ func (c *HTTPCommunicator) Start(handler MessageHandler) error {
 		Handler: mux,
 	}
 
+	c.ls.Info(log_service.LogEvent{
+		Message: "HTTP communicator started successfully",
+		Metadata: map[string]any{"address": c.listenAddress},
+	})
+
 	go func() {
 		if err := c.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("HTTP server error: %v", err)
+			c.ls.Error(log_service.LogEvent{
+				Message: "HTTP server error",
+				Metadata: map[string]any{"address": c.listenAddress, "error": err.Error()},
+			})
 		}
 	}()
 
@@ -62,9 +79,28 @@ func (c *HTTPCommunicator) Start(handler MessageHandler) error {
 }
 
 func (c *HTTPCommunicator) Stop() error {
+	c.ls.Info(log_service.LogEvent{
+		Message: "Stopping HTTP communicator",
+		Metadata: map[string]any{"address": c.listenAddress},
+	})
+	
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	return c.httpServer.Shutdown(ctx)
+	err := c.httpServer.Shutdown(ctx)
+	if err != nil {
+		c.ls.Error(log_service.LogEvent{
+			Message: "Failed to stop HTTP server",
+			Metadata: map[string]any{"address": c.listenAddress, "error": err.Error()},
+		})
+		return err
+	}
+	
+	c.ls.Info(log_service.LogEvent{
+		Message: "HTTP communicator stopped successfully",
+		Metadata: map[string]any{"address": c.listenAddress},
+	})
+	
+	return nil
 }
 
 func mapFromHTTPCode(code int) SandCode {
@@ -85,11 +121,21 @@ func mapFromHTTPCode(code int) SandCode {
 }
 
 func (c *HTTPCommunicator) Send(ctx context.Context, to string, msg Message) (*Response, error) {
+	c.ls.Debug(log_service.LogEvent{
+		Message: "Sending HTTP message",
+		Metadata: map[string]any{"to": to, "type": msg.Type, "from": msg.From},
+	})
+	
 	c.clientLock.RLock()
 	client, ok := c.clients[to]
 	c.clientLock.RUnlock()
 
 	if !ok {
+		c.ls.Debug(log_service.LogEvent{
+			Message: "Creating new HTTP client",
+			Metadata: map[string]any{"to": to},
+		})
+		
 		client = &http.Client{
 			Timeout: 5 * time.Second,
 		}
@@ -101,26 +147,47 @@ func (c *HTTPCommunicator) Send(ctx context.Context, to string, msg Message) (*R
 	msg.From = c.listenAddress
 	jsonData, err := json.Marshal(msg)
 	if err != nil {
+		c.ls.Error(log_service.LogEvent{
+			Message: "Failed to marshal message",
+			Metadata: map[string]any{"to": to, "type": msg.Type, "error": err.Error()},
+		})
 		return nil, fmt.Errorf("failed to marshal message: %v", err)
 	}
 
 	url := fmt.Sprintf("http://%s/message", to)
 	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
 	if err != nil {
+		c.ls.Error(log_service.LogEvent{
+			Message: "Failed to create HTTP request",
+			Metadata: map[string]any{"to": to, "type": msg.Type, "error": err.Error()},
+		})
 		return nil, fmt.Errorf("failed to create request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := client.Do(req)
 	if err != nil {
+		c.ls.Error(log_service.LogEvent{
+			Message: "Failed to send HTTP request",
+			Metadata: map[string]any{"to": to, "type": msg.Type, "error": err.Error()},
+		})
 		return nil, fmt.Errorf("failed to send request: %v", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		c.ls.Error(log_service.LogEvent{
+			Message: "Failed to read HTTP response body",
+			Metadata: map[string]any{"to": to, "type": msg.Type, "error": err.Error()},
+		})
 		return nil, fmt.Errorf("failed to read response body: %v", err)
 	}
+
+	c.ls.Debug(log_service.LogEvent{
+		Message: "HTTP message sent successfully",
+		Metadata: map[string]any{"to": to, "type": msg.Type, "statusCode": resp.StatusCode},
+	})
 
 	headers := map[string]string{}
 	for key, values := range resp.Header {
@@ -153,12 +220,20 @@ func mapToHTTPCode(code SandCode) int {
 
 func (c *HTTPCommunicator) handleHTTPMessage(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
+		c.ls.Warn(log_service.LogEvent{
+			Message: "HTTP method not allowed",
+			Metadata: map[string]any{"method": r.Method, "remoteAddr": r.RemoteAddr},
+		})
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		c.ls.Error(log_service.LogEvent{
+			Message: "Failed to read HTTP request body",
+			Metadata: map[string]any{"remoteAddr": r.RemoteAddr, "error": err.Error()},
+		})
 		http.Error(w, "Failed to read body", http.StatusBadRequest)
 		return
 	}
@@ -171,15 +246,28 @@ func (c *HTTPCommunicator) handleHTTPMessage(w http.ResponseWriter, r *http.Requ
 		Payload json.RawMessage `json:"Payload"`
 	}
 	if err := json.Unmarshal(body, &rawMsg); err != nil {
+		c.ls.Error(log_service.LogEvent{
+			Message: "Invalid JSON in HTTP request",
+			Metadata: map[string]any{"remoteAddr": r.RemoteAddr, "error": err.Error()},
+		})
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
 
 	if rawMsg.From == "" || rawMsg.Type == "" {
+		c.ls.Warn(log_service.LogEvent{
+			Message: "Missing required fields in HTTP request",
+			Metadata: map[string]any{"remoteAddr": r.RemoteAddr, "from": rawMsg.From, "type": rawMsg.Type},
+		})
 		http.Error(w, "Missing required fields", http.StatusBadRequest)
 		return
 	}
 
+	c.ls.Debug(log_service.LogEvent{
+		Message: "Received HTTP message",
+		Metadata: map[string]any{"from": rawMsg.From, "type": rawMsg.Type, "remoteAddr": r.RemoteAddr},
+	})
+	
 	// Create the final message
 	msg := Message{
 		From: rawMsg.From,
@@ -193,28 +281,46 @@ func (c *HTTPCommunicator) handleHTTPMessage(w http.ResponseWriter, r *http.Requ
 			payloadPtr := reflect.New(payloadType).Interface()
 
 			if err := json.Unmarshal(rawMsg.Payload, payloadPtr); err != nil {
+				c.ls.Error(log_service.LogEvent{
+					Message: "Failed to unmarshal payload",
+					Metadata: map[string]any{"from": rawMsg.From, "type": rawMsg.Type, "error": err.Error()},
+				})
 				http.Error(w, fmt.Sprintf("Invalid payload for message type %s: %v", rawMsg.Type, err), http.StatusBadRequest)
 				return
 			}
 
 			// Dereference the pointer to get the actual value
 			msg.Payload = reflect.ValueOf(payloadPtr).Elem().Interface()
-			log.Printf("Successfully deserialized payload for type %s", rawMsg.Type)
+			c.ls.Debug(log_service.LogEvent{
+				Message: "Payload deserialized successfully",
+				Metadata: map[string]any{"from": rawMsg.From, "type": rawMsg.Type},
+			})
 		} else {
 			// Empty payload - create zero value
 			msg.Payload = reflect.Zero(payloadType).Interface()
 		}
 	} else {
-		log.Printf("No payload type registered for message type: %s", rawMsg.Type)
+		c.ls.Warn(log_service.LogEvent{
+			Message: "No payload type registered for message type",
+			Metadata: map[string]any{"from": rawMsg.From, "type": rawMsg.Type},
+		})
 	}
 
 	if c.handler == nil {
+		c.ls.Error(log_service.LogEvent{
+			Message: "HTTP handler not set",
+			Metadata: map[string]any{"from": rawMsg.From, "type": rawMsg.Type},
+		})
 		http.Error(w, "Handler not set", http.StatusInternalServerError)
 		return
 	}
 
 	resp, err := c.handler(msg)
 	if err != nil {
+		c.ls.Error(log_service.LogEvent{
+			Message: "Message handler error",
+			Metadata: map[string]any{"from": rawMsg.From, "type": rawMsg.Type, "error": err.Error()},
+		})
 		http.Error(w, fmt.Sprintf("Handler error: %v", err), http.StatusInternalServerError)
 		return
 	}
@@ -236,8 +342,15 @@ func (c *HTTPCommunicator) handleHTTPMessage(w http.ResponseWriter, r *http.Requ
 			w.Write(resp.Body)
 		}
 
-		log.Printf("Sent response to %s with code: %s", msg.From, resp.Code)
+		c.ls.Debug(log_service.LogEvent{
+			Message: "HTTP response sent",
+			Metadata: map[string]any{"to": msg.From, "code": resp.Code, "httpStatus": httpStatus},
+		})
 	} else {
 		w.WriteHeader(http.StatusOK)
+		c.ls.Debug(log_service.LogEvent{
+			Message: "HTTP response sent",
+			Metadata: map[string]any{"to": msg.From, "code": "OK", "httpStatus": http.StatusOK},
+		})
 	}
 }
