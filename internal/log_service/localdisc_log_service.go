@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 type LocalDiscLogService struct {
@@ -31,4 +32,28 @@ func NewLocalDiscLogService(logDir string, nodeID string) *LocalDiscLogService {
 		nodeID: nodeID,
 		logger: log.New(file, "", 0),
 	}
+}
+
+func formatLog(level string, event LogEvent) string {
+	ts := event.Timestamp
+	if ts.IsZero() {
+		ts = time.Now().UTC()
+	}
+
+	meta := ""
+	for k, v := range event.Metadata {
+		meta += fmt.Sprintf("%s=%v ", k, v)
+	}
+
+	return fmt.Sprintf("%s [%s] %s: %s %s\n", ts.Format(time.RFC3339), event.NodeID, level, event.Message, meta)
+}
+
+func (ls *LocalDiscLogService) log(level string, event LogEvent) {
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+
+	event.NodeID = ls.nodeID
+
+	logMessage := formatLog(level, event)
+	ls.logger.Print(logMessage)
 }
