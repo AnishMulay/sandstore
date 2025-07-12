@@ -20,10 +20,10 @@ import (
 )
 
 func createServer(port string, otherNodes []node_registry.Node) *server.ReplicatedServer {
-	ms := metadata_service.NewInMemoryMetadataService()
 	logDir := "./logs"
 	nodeID := port[1:] // Use port as node ID
 	ls := log_service.NewLocalDiscLogService(logDir, nodeID)
+	ms := metadata_service.NewInMemoryMetadataService(ls)
 	chunkPath := "./chunks/" + port[1:] // Use the port to create a unique directory for each server
 	cs := chunk_service.NewLocalDiscChunkService(chunkPath, ls)
 	chunkSize := int64(8 * 1024 * 1024)
