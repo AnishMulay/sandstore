@@ -21,17 +21,17 @@ import (
 
 func createServer(port string, otherNodes []node_registry.Node) *server.ReplicatedServer {
 	ms := metadata_service.NewInMemoryMetadataService()
+	logDir := "./logs"
+	nodeID := port[1:] // Use port as node ID
+	ls := log_service.NewLocalDiscLogService(logDir, nodeID)
 	chunkPath := "./chunks/" + port[1:] // Use the port to create a unique directory for each server
-	cs := chunk_service.NewLocalDiscChunkService(chunkPath)
+	cs := chunk_service.NewLocalDiscChunkService(chunkPath, ls)
 	chunkSize := int64(8 * 1024 * 1024)
 	comm := communication.NewGRPCCommunicator(port)
 	nr := node_registry.NewInMemoryNodeRegistry(otherNodes)
 	cr := chunk_replicator.NewDefaultChunkReplicator(nr, comm)
 	mr := metadata_replicator.NewPushBasedMetadataReplicator(nr, comm)
 	fs := file_service.NewReplicatedFileService(ms, cs, cr, mr, chunkSize)
-	logDir := "./logs"
-	nodeID := port[1:] // Use port as node ID
-	ls := log_service.NewLocalDiscLogService(logDir, nodeID)
 	srv := server.NewReplicatedServer(comm, fs, cs, ms, ls, nr)
 
 	srv.RegisterTypedHandler(communication.MessageTypeStoreFile, reflect.TypeOf((*communication.StoreFileRequest)(nil)).Elem(), srv.HandleStoreFileMessage)

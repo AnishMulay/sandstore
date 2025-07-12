@@ -3,17 +3,23 @@ package chunk_service
 import (
 	"os"
 	"path/filepath"
+
+	"github.com/AnishMulay/sandstore/internal/log_service"
 )
 
 type LocalDiscChunkService struct {
 	baseDir string
+	ls      log_service.LogService
 }
 
-func NewLocalDiscChunkService(baseDir string) *LocalDiscChunkService {
+func NewLocalDiscChunkService(baseDir string, ls log_service.LogService) *LocalDiscChunkService {
 	if err := os.MkdirAll(baseDir, os.ModePerm); err != nil {
 		panic(err)
 	}
-	return &LocalDiscChunkService{baseDir: baseDir}
+	return &LocalDiscChunkService{
+		baseDir: baseDir,
+		ls:      ls,
+	}
 }
 
 func (cs *LocalDiscChunkService) chunkPath(chunkID string) string {
