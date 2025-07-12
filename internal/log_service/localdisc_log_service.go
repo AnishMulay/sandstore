@@ -57,3 +57,19 @@ func (ls *LocalDiscLogService) log(level string, event LogEvent) {
 	logMessage := formatLog(level, event)
 	ls.logger.Print(logMessage)
 }
+
+func (ls *LocalDiscLogService) Debug(event LogEvent) {
+	ls.log(DebugLevel, event)
+}
+
+func (ls *LocalDiscLogService) Info(event LogEvent) {
+	ls.log(InfoLevel, event)
+}
+
+func (ls *LocalDiscLogService) Warn(event LogEvent) {
+	ls.log(WarnLevel, event)
+}
+
+func (ls *LocalDiscLogService) Error(event LogEvent) {
+	ls.log(ErrorLevel, event)
+}
