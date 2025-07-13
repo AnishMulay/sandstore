@@ -3,7 +3,6 @@ package communication
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net"
 	"reflect"
 	"sync"
@@ -67,7 +66,7 @@ func (c *GRPCCommunicator) Start(handler MessageHandler) error {
 			Message:  "Failed to listen on address",
 			Metadata: map[string]any{"address": c.listenAddress, "error": err.Error()},
 		})
-		return err
+		return ErrGRPCListenFailed
 	}
 
 	c.ls.Info(log_service.LogEvent{
@@ -124,7 +123,7 @@ func (c *GRPCCommunicator) Send(ctx context.Context, to string, msg Message) (*R
 				Message:  "Failed to create GRPC client",
 				Metadata: map[string]any{"to": to, "error": err.Error()},
 			})
-			return nil, fmt.Errorf("failed to create gRPC client: %w", err)
+			return nil, ErrClientCreateFailed
 		}
 		client = communicationpb.NewMessageServiceClient(conn)
 		c.clientLock.Lock()
@@ -142,7 +141,7 @@ func (c *GRPCCommunicator) Send(ctx context.Context, to string, msg Message) (*R
 				Message:  "Failed to marshal payload",
 				Metadata: map[string]any{"to": to, "type": msg.Type, "error": err.Error()},
 			})
-			return nil, fmt.Errorf("failed to marshal payload: %w", err)
+			return nil, ErrPayloadMarshalFailed
 		}
 	}
 
@@ -158,7 +157,7 @@ func (c *GRPCCommunicator) Send(ctx context.Context, to string, msg Message) (*R
 			Message:  "Failed to send GRPC message",
 			Metadata: map[string]any{"to": to, "type": msg.Type, "error": err.Error()},
 		})
-		return nil, fmt.Errorf("failed to send message: %w", err)
+		return nil, ErrMessageSendFailed
 	}
 
 	c.ls.Debug(log_service.LogEvent{
@@ -184,7 +183,7 @@ func (s *grpcServer) SendMessage(ctx context.Context, req *communicationpb.Messa
 			Message:  "GRPC handler not set",
 			Metadata: map[string]any{"from": req.From, "type": req.Type},
 		})
-		return nil, fmt.Errorf("handler not set")
+		return nil, ErrHandlerNotSet
 	}
 
 	s.comm.ls.Debug(log_service.LogEvent{
@@ -208,7 +207,7 @@ func (s *grpcServer) SendMessage(ctx context.Context, req *communicationpb.Messa
 					Message:  "Failed to unmarshal payload",
 					Metadata: map[string]any{"from": req.From, "type": req.Type, "error": err.Error()},
 				})
-				return nil, fmt.Errorf("failed to unmarshal payload for type %s: %w", req.Type, err)
+				return nil, ErrPayloadUnmarshalFailed
 			}
 
 			// Dereference the pointer to get the actual value

@@ -91,7 +91,7 @@ func (c *HTTPCommunicator) Stop() error {
 			Message:  "Failed to stop HTTP server",
 			Metadata: map[string]any{"address": c.listenAddress, "error": err.Error()},
 		})
-		return err
+		return ErrServerStopFailed
 	}
 
 	c.ls.Info(log_service.LogEvent{
@@ -150,7 +150,7 @@ func (c *HTTPCommunicator) Send(ctx context.Context, to string, msg Message) (*R
 			Message:  "Failed to marshal message",
 			Metadata: map[string]any{"to": to, "type": msg.Type, "error": err.Error()},
 		})
-		return nil, fmt.Errorf("failed to marshal message: %v", err)
+		return nil, ErrMessageMarshalFailed
 	}
 
 	url := fmt.Sprintf("http://%s/message", to)
@@ -160,7 +160,7 @@ func (c *HTTPCommunicator) Send(ctx context.Context, to string, msg Message) (*R
 			Message:  "Failed to create HTTP request",
 			Metadata: map[string]any{"to": to, "type": msg.Type, "error": err.Error()},
 		})
-		return nil, fmt.Errorf("failed to create request: %v", err)
+		return nil, ErrHTTPRequestCreateFailed
 	}
 	req.Header.Set("Content-Type", "application/json")
 
@@ -170,7 +170,7 @@ func (c *HTTPCommunicator) Send(ctx context.Context, to string, msg Message) (*R
 			Message:  "Failed to send HTTP request",
 			Metadata: map[string]any{"to": to, "type": msg.Type, "error": err.Error()},
 		})
-		return nil, fmt.Errorf("failed to send request: %v", err)
+		return nil, ErrHTTPRequestSendFailed
 	}
 	defer resp.Body.Close()
 
@@ -180,7 +180,7 @@ func (c *HTTPCommunicator) Send(ctx context.Context, to string, msg Message) (*R
 			Message:  "Failed to read HTTP response body",
 			Metadata: map[string]any{"to": to, "type": msg.Type, "error": err.Error()},
 		})
-		return nil, fmt.Errorf("failed to read response body: %v", err)
+		return nil, ErrHTTPResponseReadFailed
 	}
 
 	c.ls.Debug(log_service.LogEvent{
@@ -233,7 +233,7 @@ func (c *HTTPCommunicator) handleHTTPMessage(w http.ResponseWriter, r *http.Requ
 			Message:  "Failed to read HTTP request body",
 			Metadata: map[string]any{"remoteAddr": r.RemoteAddr, "error": err.Error()},
 		})
-		http.Error(w, "Failed to read body", http.StatusBadRequest)
+		http.Error(w, ErrHTTPBodyReadFailed.Error(), http.StatusBadRequest)
 		return
 	}
 	defer r.Body.Close()
@@ -249,7 +249,7 @@ func (c *HTTPCommunicator) handleHTTPMessage(w http.ResponseWriter, r *http.Requ
 			Message:  "Invalid JSON in HTTP request",
 			Metadata: map[string]any{"remoteAddr": r.RemoteAddr, "error": err.Error()},
 		})
-		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		http.Error(w, ErrInvalidJSON.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -258,7 +258,7 @@ func (c *HTTPCommunicator) handleHTTPMessage(w http.ResponseWriter, r *http.Requ
 			Message:  "Missing required fields in HTTP request",
 			Metadata: map[string]any{"remoteAddr": r.RemoteAddr, "from": rawMsg.From, "type": rawMsg.Type},
 		})
-		http.Error(w, "Missing required fields", http.StatusBadRequest)
+		http.Error(w, ErrMissingRequiredFields.Error(), http.StatusBadRequest)
 		return
 	}
 
@@ -310,7 +310,7 @@ func (c *HTTPCommunicator) handleHTTPMessage(w http.ResponseWriter, r *http.Requ
 			Message:  "HTTP handler not set",
 			Metadata: map[string]any{"from": rawMsg.From, "type": rawMsg.Type},
 		})
-		http.Error(w, "Handler not set", http.StatusInternalServerError)
+		http.Error(w, ErrHandlerNotSet.Error(), http.StatusInternalServerError)
 		return
 	}
 
