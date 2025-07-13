@@ -39,7 +39,7 @@ func (cs *LocalDiscChunkService) WriteChunk(chunkID string, data []byte) error {
 			Message: "Failed to write chunk",
 			Metadata: map[string]any{"chunkID": chunkID, "error": err.Error()},
 		})
-		return err
+		return ErrChunkWriteFailed
 	}
 	
 	cs.ls.Info(log_service.LogEvent{
@@ -62,7 +62,7 @@ func (cs *LocalDiscChunkService) ReadChunk(chunkID string) ([]byte, error) {
 			Message: "Failed to read chunk",
 			Metadata: map[string]any{"chunkID": chunkID, "error": err.Error()},
 		})
-		return nil, err
+		return nil, ErrChunkReadFailed
 	}
 	
 	cs.ls.Info(log_service.LogEvent{
@@ -85,7 +85,7 @@ func (cs *LocalDiscChunkService) DeleteChunk(chunkID string) error {
 			Message: "Failed to delete chunk",
 			Metadata: map[string]any{"chunkID": chunkID, "error": err.Error()},
 		})
-		return err
+		return ErrChunkDeleteFailed
 	}
 	
 	cs.ls.Info(log_service.LogEvent{
