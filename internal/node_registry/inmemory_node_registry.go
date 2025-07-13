@@ -20,6 +20,32 @@ func (r *InMemoryNodeRegistry) RegisterNode(node Node) error {
 		Metadata: map[string]any{"nodeID": node.ID, "address": node.Address, "healthy": node.Healthy},
 	})
 	
+	if node.ID == "" {
+		r.ls.Error(log_service.LogEvent{
+			Message: "Invalid node ID",
+			Metadata: map[string]any{"nodeID": node.ID},
+		})
+		return ErrInvalidNodeID
+	}
+	
+	if node.Address == "" {
+		r.ls.Error(log_service.LogEvent{
+			Message: "Invalid node address",
+			Metadata: map[string]any{"nodeID": node.ID, "address": node.Address},
+		})
+		return ErrInvalidNodeAddress
+	}
+	
+	for _, n := range r.nodes {
+		if n.ID == node.ID {
+			r.ls.Error(log_service.LogEvent{
+				Message: "Node already exists",
+				Metadata: map[string]any{"nodeID": node.ID},
+			})
+			return ErrNodeAlreadyExists
+		}
+	}
+	
 	r.nodes = append(r.nodes, node)
 	
 	r.ls.Info(log_service.LogEvent{
@@ -47,12 +73,12 @@ func (r *InMemoryNodeRegistry) DeregisterNode(node Node) error {
 		}
 	}
 	
-	r.ls.Warn(log_service.LogEvent{
+	r.ls.Error(log_service.LogEvent{
 		Message: "Node not found for deregistration",
 		Metadata: map[string]any{"nodeID": node.ID, "address": node.Address},
 	})
 	
-	return nil
+	return ErrNodeNotFound
 }
 
 func (r *InMemoryNodeRegistry) GetHealthyNodes() ([]Node, error) {
@@ -66,6 +92,14 @@ func (r *InMemoryNodeRegistry) GetHealthyNodes() ([]Node, error) {
 		if node.Healthy {
 			healthyNodes = append(healthyNodes, node)
 		}
+	}
+	
+	if len(healthyNodes) == 0 {
+		r.ls.Warn(log_service.LogEvent{
+			Message: "No healthy nodes available",
+			Metadata: map[string]any{"totalNodes": len(r.nodes)},
+		})
+		return nil, ErrNoHealthyNodes
 	}
 	
 	r.ls.Debug(log_service.LogEvent{
