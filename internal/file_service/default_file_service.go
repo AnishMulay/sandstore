@@ -58,7 +58,7 @@ func (fs *DefaultFileService) StoreFile(path string, data []byte) error {
 				Message: "Failed to store chunk",
 				Metadata: map[string]any{"path": path, "chunkID": chunkID, "error": err.Error()},
 			})
-			return fmt.Errorf("failed to store chunk: %w", err)
+			return ErrChunkStoreFailed
 		}
 
 		chunks = append(chunks, chunk_service.FileChunk{
@@ -88,7 +88,7 @@ func (fs *DefaultFileService) StoreFile(path string, data []byte) error {
 			Message: "Failed to create file metadata",
 			Metadata: map[string]any{"path": path, "error": err.Error()},
 		})
-		return err
+		return ErrMetadataCreateFailed
 	}
 	
 	fs.ls.Info(log_service.LogEvent{
@@ -111,7 +111,7 @@ func (fs *DefaultFileService) ReadFile(path string) ([]byte, error) {
 			Message: "Failed to get file metadata",
 			Metadata: map[string]any{"path": path, "error": err.Error()},
 		})
-		return nil, fmt.Errorf("failed to get file metadata: %w", err)
+		return nil, ErrMetadataGetFailed
 	}
 
 	var data []byte
@@ -122,7 +122,7 @@ func (fs *DefaultFileService) ReadFile(path string) ([]byte, error) {
 				Message: "Failed to read chunk",
 				Metadata: map[string]any{"path": path, "chunkID": chunk.ChunkID, "error": err.Error()},
 			})
-			return nil, fmt.Errorf("failed to read chunk: %w", err)
+			return nil, ErrChunkReadFailed
 		}
 
 		data = append(data, chunkData...)
@@ -148,7 +148,7 @@ func (fs *DefaultFileService) DeleteFile(path string) error {
 			Message: "Failed to get file metadata",
 			Metadata: map[string]any{"path": path, "error": err.Error()},
 		})
-		return fmt.Errorf("failed to get file metadata: %w", err)
+		return ErrMetadataGetFailed
 	}
 
 	for _, chunk := range metadata.Chunks {
@@ -158,7 +158,7 @@ func (fs *DefaultFileService) DeleteFile(path string) error {
 				Message: "Failed to delete chunk",
 				Metadata: map[string]any{"path": path, "chunkID": chunk.ChunkID, "error": err.Error()},
 			})
-			return fmt.Errorf("failed to delete chunk: %w", err)
+			return ErrChunkDeleteFailed
 		}
 	}
 
@@ -173,7 +173,7 @@ func (fs *DefaultFileService) DeleteFile(path string) error {
 			Message: "Failed to delete file metadata",
 			Metadata: map[string]any{"path": path, "error": err.Error()},
 		})
-		return err
+		return ErrMetadataDeleteFailed
 	}
 
 	fs.ls.Info(log_service.LogEvent{

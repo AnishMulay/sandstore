@@ -64,7 +64,7 @@ func (fs *ReplicatedFileService) StoreFile(path string, data []byte) error {
 				Message: "Failed to store chunk",
 				Metadata: map[string]any{"path": path, "chunkID": chunkID, "error": err.Error()},
 			})
-			return fmt.Errorf("failed to store chunk: %w", err)
+			return ErrChunkStoreFailed
 		}
 
 		replicas, err := fs.cr.ReplicateChunk(chunkID, chunkData, 2) // Assuming replication factor of 3
@@ -73,7 +73,7 @@ func (fs *ReplicatedFileService) StoreFile(path string, data []byte) error {
 				Message: "Failed to replicate chunk",
 				Metadata: map[string]any{"path": path, "chunkID": chunkID, "error": err.Error()},
 			})
-			return fmt.Errorf("failed to replicate chunk: %w", err)
+			return ErrChunkReplicationFailed
 		}
 
 		chunks = append(chunks, chunk_service.FileChunk{
@@ -104,7 +104,7 @@ func (fs *ReplicatedFileService) StoreFile(path string, data []byte) error {
 			Message: "Failed to create file metadata",
 			Metadata: map[string]any{"path": path, "error": err.Error()},
 		})
-		return fmt.Errorf("failed to create file metadata: %w", err)
+		return ErrMetadataCreateFailed
 	}
 
 	metadata := &metadata_service.FileMetadata{
@@ -126,7 +126,7 @@ func (fs *ReplicatedFileService) StoreFile(path string, data []byte) error {
 			Message: "Failed to replicate metadata",
 			Metadata: map[string]any{"path": path, "error": err.Error()},
 		})
-		return fmt.Errorf("failed to replicate metadata: %w", err)
+		return ErrMetadataReplicationFailed
 	}
 
 	fs.ls.Info(log_service.LogEvent{
@@ -149,7 +149,7 @@ func (fs *ReplicatedFileService) ReadFile(path string) ([]byte, error) {
 			Message: "Failed to get file metadata",
 			Metadata: map[string]any{"path": path, "error": err.Error()},
 		})
-		return nil, fmt.Errorf("failed to get file metadata: %w", err)
+		return nil, ErrMetadataGetFailed
 	}
 
 	var data []byte
@@ -166,7 +166,7 @@ func (fs *ReplicatedFileService) ReadFile(path string) ([]byte, error) {
 					Message: "Failed to fetch replicated chunk",
 					Metadata: map[string]any{"path": path, "chunkID": chunk.ChunkID, "error": err.Error()},
 				})
-				return nil, fmt.Errorf("failed to fetch replicated chunk: %w", err)
+				return nil, ErrReplicatedChunkFetchFailed
 			}
 		}
 
@@ -193,7 +193,7 @@ func (fs *ReplicatedFileService) DeleteFile(path string) error {
 			Message: "Failed to get file metadata",
 			Metadata: map[string]any{"path": path, "error": err.Error()},
 		})
-		return fmt.Errorf("failed to get file metadata: %w", err)
+		return ErrMetadataGetFailed
 	}
 
 	for _, chunk := range metadata.Chunks {
@@ -203,7 +203,7 @@ func (fs *ReplicatedFileService) DeleteFile(path string) error {
 				Message: "Failed to delete replicated chunk",
 				Metadata: map[string]any{"path": path, "chunkID": chunk.ChunkID, "error": err.Error()},
 			})
-			return fmt.Errorf("failed to delete replicated chunk: %w", err)
+			return ErrReplicatedChunkDeleteFailed
 		}
 
 		err = fs.cs.DeleteChunk(chunk.ChunkID)
@@ -212,7 +212,7 @@ func (fs *ReplicatedFileService) DeleteFile(path string) error {
 				Message: "Failed to delete chunk",
 				Metadata: map[string]any{"path": path, "chunkID": chunk.ChunkID, "error": err.Error()},
 			})
-			return fmt.Errorf("failed to delete chunk: %w", err)
+			return ErrChunkDeleteFailed
 		}
 	}
 
@@ -227,7 +227,7 @@ func (fs *ReplicatedFileService) DeleteFile(path string) error {
 			Message: "Failed to delete file metadata",
 			Metadata: map[string]any{"path": path, "error": err.Error()},
 		})
-		return err
+		return ErrMetadataDeleteFailed
 	}
 
 	fs.ls.Info(log_service.LogEvent{
