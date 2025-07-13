@@ -5,25 +5,37 @@ import (
 	"time"
 
 	"github.com/AnishMulay/sandstore/internal/chunk_service"
+	"github.com/AnishMulay/sandstore/internal/log_service"
 )
 
 type InMemoryMetadataService struct {
 	mu    sync.RWMutex
 	files map[string]*FileMetadata
+	ls    log_service.LogService
 }
 
-func NewInMemoryMetadataService() *InMemoryMetadataService {
+func NewInMemoryMetadataService(ls log_service.LogService) *InMemoryMetadataService {
 	return &InMemoryMetadataService{
 		files: make(map[string]*FileMetadata),
+		ls:    ls,
 	}
 }
 
 func (ms *InMemoryMetadataService) CreateFileMetadata(path string, size int64, chunks []chunk_service.FileChunk) error {
+	ms.ls.Info(log_service.LogEvent{
+		Message:  "Creating file metadata",
+		Metadata: map[string]any{"path": path, "size": size, "chunks": len(chunks)},
+	})
+
 	ms.mu.RLock()
 	_, exists := ms.files[path]
 	ms.mu.RUnlock()
 
 	if exists {
+		ms.ls.Warn(log_service.LogEvent{
+			Message:  "File metadata already exists",
+			Metadata: map[string]any{"path": path},
+		})
 		return ErrFileAlreadyExists
 	}
 
@@ -40,35 +52,73 @@ func (ms *InMemoryMetadataService) CreateFileMetadata(path string, size int64, c
 	ms.files[path] = file
 	ms.mu.Unlock()
 
+	ms.ls.Info(log_service.LogEvent{
+		Message:  "File metadata created successfully",
+		Metadata: map[string]any{"path": path, "chunks": len(chunks)},
+	})
+
 	return nil
 }
 
 func (ms *InMemoryMetadataService) GetFileMetadata(path string) (*FileMetadata, error) {
+	ms.ls.Debug(log_service.LogEvent{
+		Message:  "Getting file metadata",
+		Metadata: map[string]any{"path": path},
+	})
+
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
 
 	file, exists := ms.files[path]
 	if !exists {
+		ms.ls.Warn(log_service.LogEvent{
+			Message:  "File metadata not found",
+			Metadata: map[string]any{"path": path},
+		})
 		return nil, ErrFileNotFound
 	}
+
+	ms.ls.Debug(log_service.LogEvent{
+		Message:  "File metadata retrieved successfully",
+		Metadata: map[string]any{"path": path, "size": file.Size, "chunks": len(file.Chunks)},
+	})
 
 	return file, nil
 }
 
 func (ms *InMemoryMetadataService) DeleteFileMetadata(path string) error {
+	ms.ls.Info(log_service.LogEvent{
+		Message:  "Deleting file metadata",
+		Metadata: map[string]any{"path": path},
+	})
+
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 
 	if _, exists := ms.files[path]; !exists {
+		ms.ls.Warn(log_service.LogEvent{
+			Message:  "File metadata not found for deletion",
+			Metadata: map[string]any{"path": path},
+		})
 		return ErrFileNotFound
 	}
 
 	delete(ms.files, path)
 
+	ms.ls.Info(log_service.LogEvent{
+		Message:  "File metadata deleted successfully",
+		Metadata: map[string]any{"path": path},
+	})
+
 	return nil
 }
 
 func (ms *InMemoryMetadataService) ListDirectory(path string) ([]FileMetadata, error) {
+	ms.ls.Debug(log_service.LogEvent{
+		Message:  "Listing directory",
+		Metadata: map[string]any{"path": path},
+	})
+
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
 
@@ -81,14 +131,28 @@ func (ms *InMemoryMetadataService) ListDirectory(path string) ([]FileMetadata, e
 		}
 	}
 
+	ms.ls.Debug(log_service.LogEvent{
+		Message:  "Directory listed successfully",
+		Metadata: map[string]any{"path": path, "files": len(files)},
+	})
+
 	return files, nil
 }
 
 func (ms *InMemoryMetadataService) UpdateFileMetadata(path string, metadata FileMetadata) error {
+	ms.ls.Info(log_service.LogEvent{
+		Message:  "Updating file metadata",
+		Metadata: map[string]any{"path": path, "size": metadata.Size, "chunks": len(metadata.Chunks)},
+	})
+
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
 
 	if _, exists := ms.files[path]; !exists {
+		ms.ls.Warn(log_service.LogEvent{
+			Message:  "File metadata not found for update",
+			Metadata: map[string]any{"path": path},
+		})
 		return ErrFileNotFound
 	}
 
@@ -100,6 +164,11 @@ func (ms *InMemoryMetadataService) UpdateFileMetadata(path string, metadata File
 	file.Chunks = metadata.Chunks
 
 	ms.files[path] = file
+
+	ms.ls.Info(log_service.LogEvent{
+		Message:  "File metadata updated successfully",
+		Metadata: map[string]any{"path": path, "chunks": len(metadata.Chunks)},
+	})
 
 	return nil
 }

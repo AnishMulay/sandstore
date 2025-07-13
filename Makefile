@@ -46,4 +46,4 @@ test:
 .PHONY: clean
 clean:
 	rm -f $(SERVER_BINARY) $(CLIENT_BINARY)
-	rm -rf chunks
+	rm -rf chunks logs

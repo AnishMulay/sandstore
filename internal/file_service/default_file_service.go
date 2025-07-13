@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/AnishMulay/sandstore/internal/chunk_service"
+	"github.com/AnishMulay/sandstore/internal/log_service"
 	"github.com/AnishMulay/sandstore/internal/metadata_service"
 	"github.com/google/uuid"
 )
@@ -13,18 +14,25 @@ import (
 type DefaultFileService struct {
 	ms        metadata_service.MetadataService
 	cs        chunk_service.ChunkService
+	ls        log_service.LogService
 	chunkSize int64
 }
 
-func NewDefaultFileService(ms metadata_service.MetadataService, cs chunk_service.ChunkService, chunkSize int64) *DefaultFileService {
+func NewDefaultFileService(ms metadata_service.MetadataService, cs chunk_service.ChunkService, ls log_service.LogService, chunkSize int64) *DefaultFileService {
 	return &DefaultFileService{
 		ms:        ms,
 		cs:        cs,
+		ls:        ls,
 		chunkSize: chunkSize,
 	}
 }
 
 func (fs *DefaultFileService) StoreFile(path string, data []byte) error {
+	fs.ls.Info(log_service.LogEvent{
+		Message: "Storing file",
+		Metadata: map[string]any{"path": path, "size": len(data)},
+	})
+	
 	var chunks []chunk_service.FileChunk
 	offset := 0
 	now := time.Now()
@@ -46,6 +54,10 @@ func (fs *DefaultFileService) StoreFile(path string, data []byte) error {
 
 		err := fs.cs.WriteChunk(chunkID, chunkData)
 		if err != nil {
+			fs.ls.Error(log_service.LogEvent{
+				Message: "Failed to store chunk",
+				Metadata: map[string]any{"path": path, "chunkID": chunkID, "error": err.Error()},
+			})
 			return fmt.Errorf("failed to store chunk: %w", err)
 		}
 
@@ -65,12 +77,40 @@ func (fs *DefaultFileService) StoreFile(path string, data []byte) error {
 		}
 	}
 
-	return fs.ms.CreateFileMetadata(path, int64(len(data)), chunks)
+	fs.ls.Debug(log_service.LogEvent{
+		Message: "Creating file metadata",
+		Metadata: map[string]any{"path": path, "chunks": len(chunks)},
+	})
+	
+	err := fs.ms.CreateFileMetadata(path, int64(len(data)), chunks)
+	if err != nil {
+		fs.ls.Error(log_service.LogEvent{
+			Message: "Failed to create file metadata",
+			Metadata: map[string]any{"path": path, "error": err.Error()},
+		})
+		return err
+	}
+	
+	fs.ls.Info(log_service.LogEvent{
+		Message: "File stored successfully",
+		Metadata: map[string]any{"path": path, "chunks": len(chunks)},
+	})
+	
+	return nil
 }
 
 func (fs *DefaultFileService) ReadFile(path string) ([]byte, error) {
+	fs.ls.Info(log_service.LogEvent{
+		Message: "Reading file",
+		Metadata: map[string]any{"path": path},
+	})
+	
 	metadata, err := fs.ms.GetFileMetadata(path)
 	if err != nil {
+		fs.ls.Error(log_service.LogEvent{
+			Message: "Failed to get file metadata",
+			Metadata: map[string]any{"path": path, "error": err.Error()},
+		})
 		return nil, fmt.Errorf("failed to get file metadata: %w", err)
 	}
 
@@ -78,27 +118,68 @@ func (fs *DefaultFileService) ReadFile(path string) ([]byte, error) {
 	for _, chunk := range metadata.Chunks {
 		chunkData, err := fs.cs.ReadChunk(chunk.ChunkID)
 		if err != nil {
+			fs.ls.Error(log_service.LogEvent{
+				Message: "Failed to read chunk",
+				Metadata: map[string]any{"path": path, "chunkID": chunk.ChunkID, "error": err.Error()},
+			})
 			return nil, fmt.Errorf("failed to read chunk: %w", err)
 		}
 
 		data = append(data, chunkData...)
 	}
 
+	fs.ls.Info(log_service.LogEvent{
+		Message: "File read successfully",
+		Metadata: map[string]any{"path": path, "size": len(data), "chunks": len(metadata.Chunks)},
+	})
+
 	return data, nil
 }
 
 func (fs *DefaultFileService) DeleteFile(path string) error {
+	fs.ls.Info(log_service.LogEvent{
+		Message: "Deleting file",
+		Metadata: map[string]any{"path": path},
+	})
+	
 	metadata, err := fs.ms.GetFileMetadata(path)
 	if err != nil {
+		fs.ls.Error(log_service.LogEvent{
+			Message: "Failed to get file metadata",
+			Metadata: map[string]any{"path": path, "error": err.Error()},
+		})
 		return fmt.Errorf("failed to get file metadata: %w", err)
 	}
 
 	for _, chunk := range metadata.Chunks {
 		err = fs.cs.DeleteChunk(chunk.ChunkID)
 		if err != nil {
+			fs.ls.Error(log_service.LogEvent{
+				Message: "Failed to delete chunk",
+				Metadata: map[string]any{"path": path, "chunkID": chunk.ChunkID, "error": err.Error()},
+			})
 			return fmt.Errorf("failed to delete chunk: %w", err)
 		}
 	}
 
-	return fs.ms.DeleteFileMetadata(path)
+	fs.ls.Debug(log_service.LogEvent{
+		Message: "Deleting file metadata",
+		Metadata: map[string]any{"path": path},
+	})
+	
+	err = fs.ms.DeleteFileMetadata(path)
+	if err != nil {
+		fs.ls.Error(log_service.LogEvent{
+			Message: "Failed to delete file metadata",
+			Metadata: map[string]any{"path": path, "error": err.Error()},
+		})
+		return err
+	}
+
+	fs.ls.Info(log_service.LogEvent{
+		Message: "File deleted successfully",
+		Metadata: map[string]any{"path": path, "chunks": len(metadata.Chunks)},
+	})
+	
+	return nil
 }

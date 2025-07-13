@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/AnishMulay/sandstore/internal/communication"
+	"github.com/AnishMulay/sandstore/internal/log_service"
 	"github.com/AnishMulay/sandstore/internal/metadata_service"
 	"github.com/AnishMulay/sandstore/internal/node_registry"
 )
@@ -13,22 +14,43 @@ import (
 type PushBasedMetadataReplicator struct {
 	nodeRegistry node_registry.NodeRegistry
 	comm         communication.Communicator
+	ls           log_service.LogService
 }
 
-func NewPushBasedMetadataReplicator(nr node_registry.NodeRegistry, comm communication.Communicator) *PushBasedMetadataReplicator {
+func NewPushBasedMetadataReplicator(nr node_registry.NodeRegistry, comm communication.Communicator, ls log_service.LogService) *PushBasedMetadataReplicator {
 	return &PushBasedMetadataReplicator{
 		nodeRegistry: nr,
 		comm:         comm,
+		ls:           ls,
 	}
 }
 
 func (mr *PushBasedMetadataReplicator) ReplicateMetadata(metadata metadata_service.FileMetadata) error {
+	mr.ls.Info(log_service.LogEvent{
+		Message: "Replicating metadata",
+		Metadata: map[string]any{"path": metadata.Path, "size": metadata.Size, "chunks": len(metadata.Chunks)},
+	})
+	
 	nodes, err := mr.nodeRegistry.GetHealthyNodes()
 	if err != nil {
+		mr.ls.Error(log_service.LogEvent{
+			Message: "Failed to get healthy nodes for metadata replication",
+			Metadata: map[string]any{"path": metadata.Path, "error": err.Error()},
+		})
 		return err
 	}
 
+	mr.ls.Debug(log_service.LogEvent{
+		Message: "Selected nodes for metadata replication",
+		Metadata: map[string]any{"path": metadata.Path, "nodes": len(nodes)},
+	})
+
 	for _, node := range nodes {
+		mr.ls.Debug(log_service.LogEvent{
+			Message: "Replicating metadata to node",
+			Metadata: map[string]any{"path": metadata.Path, "nodeID": node.ID, "address": node.Address},
+		})
+		
 		msg := communication.Message{
 			From:    mr.comm.Address(),
 			Type:    communication.MessageTypeStoreMetadata,
@@ -40,13 +62,31 @@ func (mr *PushBasedMetadataReplicator) ReplicateMetadata(metadata metadata_servi
 
 		resp, err := mr.comm.Send(ctx, node.Address, msg)
 		if err != nil {
+			mr.ls.Error(log_service.LogEvent{
+				Message: "Failed to send metadata to node",
+				Metadata: map[string]any{"path": metadata.Path, "nodeID": node.ID, "address": node.Address, "error": err.Error()},
+			})
 			return err
 		}
 
 		if resp.Code != communication.CodeOK {
+			mr.ls.Error(log_service.LogEvent{
+				Message: "Metadata replication failed",
+				Metadata: map[string]any{"path": metadata.Path, "nodeID": node.ID, "address": node.Address, "responseCode": resp.Code, "responseBody": string(resp.Body)},
+			})
 			return fmt.Errorf("failed to replicate metadata to node %s: %s", node.ID, resp.Body)
+		} else {
+			mr.ls.Debug(log_service.LogEvent{
+				Message: "Metadata replicated successfully to node",
+				Metadata: map[string]any{"path": metadata.Path, "nodeID": node.ID, "address": node.Address},
+			})
 		}
 	}
+
+	mr.ls.Info(log_service.LogEvent{
+		Message: "Metadata replication completed",
+		Metadata: map[string]any{"path": metadata.Path, "nodes": len(nodes)},
+	})
 
 	return nil
 }

@@ -4,12 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"reflect"
 	"sync"
 
 	communicationpb "github.com/AnishMulay/sandstore/gen/proto/communication"
+	"github.com/AnishMulay/sandstore/internal/log_service"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -19,15 +19,17 @@ type GRPCCommunicator struct {
 	listenAddress string
 	handler       MessageHandler
 	grpcServer    *grpc.Server
+	ls            log_service.LogService
 
 	clientLock   sync.RWMutex
 	clients      map[string]communicationpb.MessageServiceClient
 	payloadTypes map[string]reflect.Type
 }
 
-func NewGRPCCommunicator(addr string) *GRPCCommunicator {
+func NewGRPCCommunicator(addr string, ls log_service.LogService) *GRPCCommunicator {
 	c := &GRPCCommunicator{
 		listenAddress: addr,
+		ls:            ls,
 		clients:       make(map[string]communicationpb.MessageServiceClient),
 		payloadTypes:  make(map[string]reflect.Type),
 	}
@@ -50,36 +52,78 @@ func (c *GRPCCommunicator) Address() string {
 }
 
 func (c *GRPCCommunicator) Start(handler MessageHandler) error {
+	c.ls.Info(log_service.LogEvent{
+		Message:  "Starting GRPC communicator",
+		Metadata: map[string]any{"address": c.listenAddress},
+	})
+
 	c.handler = handler
 	c.grpcServer = grpc.NewServer()
 	communicationpb.RegisterMessageServiceServer(c.grpcServer, &grpcServer{comm: c})
 
 	lis, err := net.Listen("tcp", c.listenAddress)
 	if err != nil {
+		c.ls.Error(log_service.LogEvent{
+			Message:  "Failed to listen on address",
+			Metadata: map[string]any{"address": c.listenAddress, "error": err.Error()},
+		})
 		return err
 	}
 
+	c.ls.Info(log_service.LogEvent{
+		Message:  "GRPC communicator started successfully",
+		Metadata: map[string]any{"address": c.listenAddress},
+	})
+
 	go func() {
 		if err := c.grpcServer.Serve(lis); err != nil {
-			log.Printf("GRPC server error: %v", err)
+			c.ls.Error(log_service.LogEvent{
+				Message:  "GRPC server error",
+				Metadata: map[string]any{"address": c.listenAddress, "error": err.Error()},
+			})
 		}
 	}()
 	return nil
 }
 
 func (c *GRPCCommunicator) Stop() error {
+	c.ls.Info(log_service.LogEvent{
+		Message:  "Stopping GRPC communicator",
+		Metadata: map[string]any{"address": c.listenAddress},
+	})
+
 	c.grpcServer.GracefulStop()
+
+	c.ls.Info(log_service.LogEvent{
+		Message:  "GRPC communicator stopped successfully",
+		Metadata: map[string]any{"address": c.listenAddress},
+	})
+
 	return nil
 }
 
 func (c *GRPCCommunicator) Send(ctx context.Context, to string, msg Message) (*Response, error) {
+	c.ls.Debug(log_service.LogEvent{
+		Message:  "Sending GRPC message",
+		Metadata: map[string]any{"to": to, "type": msg.Type, "from": msg.From},
+	})
+
 	c.clientLock.RLock()
 	client, ok := c.clients[to]
 	c.clientLock.RUnlock()
 
 	if !ok {
+		c.ls.Debug(log_service.LogEvent{
+			Message:  "Creating new GRPC client",
+			Metadata: map[string]any{"to": to},
+		})
+
 		conn, err := grpc.NewClient(to, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
+			c.ls.Error(log_service.LogEvent{
+				Message:  "Failed to create GRPC client",
+				Metadata: map[string]any{"to": to, "error": err.Error()},
+			})
 			return nil, fmt.Errorf("failed to create gRPC client: %w", err)
 		}
 		client = communicationpb.NewMessageServiceClient(conn)
@@ -94,6 +138,10 @@ func (c *GRPCCommunicator) Send(ctx context.Context, to string, msg Message) (*R
 		var err error
 		payloadBytes, err = json.Marshal(msg.Payload)
 		if err != nil {
+			c.ls.Error(log_service.LogEvent{
+				Message:  "Failed to marshal payload",
+				Metadata: map[string]any{"to": to, "type": msg.Type, "error": err.Error()},
+			})
 			return nil, fmt.Errorf("failed to marshal payload: %w", err)
 		}
 	}
@@ -104,12 +152,19 @@ func (c *GRPCCommunicator) Send(ctx context.Context, to string, msg Message) (*R
 		Payload: payloadBytes,
 	}
 
-	log.Printf("Sending gRPC message type %s to %s", msg.Type, to)
 	resp, err := client.SendMessage(ctx, req)
 	if err != nil {
+		c.ls.Error(log_service.LogEvent{
+			Message:  "Failed to send GRPC message",
+			Metadata: map[string]any{"to": to, "type": msg.Type, "error": err.Error()},
+		})
 		return nil, fmt.Errorf("failed to send message: %w", err)
 	}
-	log.Printf("Received gRPC response with code: %s", resp.Code)
+
+	c.ls.Debug(log_service.LogEvent{
+		Message:  "GRPC message sent successfully",
+		Metadata: map[string]any{"to": to, "type": msg.Type, "responseCode": resp.Code},
+	})
 
 	return &Response{
 		Code:    SandCode(resp.Code),
@@ -125,15 +180,22 @@ type grpcServer struct {
 
 func (s *grpcServer) SendMessage(ctx context.Context, req *communicationpb.MessageRequest) (*communicationpb.MessageResponse, error) {
 	if s.comm.handler == nil {
+		s.comm.ls.Error(log_service.LogEvent{
+			Message:  "GRPC handler not set",
+			Metadata: map[string]any{"from": req.From, "type": req.Type},
+		})
 		return nil, fmt.Errorf("handler not set")
 	}
+
+	s.comm.ls.Debug(log_service.LogEvent{
+		Message:  "Received GRPC message",
+		Metadata: map[string]any{"from": req.From, "type": req.Type},
+	})
 
 	msg := Message{
 		From: req.From,
 		Type: req.Type,
 	}
-
-	log.Printf("Received gRPC message type %s from %s", req.Type, req.From)
 
 	// Deserialize payload from JSON bytes
 	if payloadType, exists := s.comm.payloadTypes[req.Type]; exists {
@@ -142,31 +204,52 @@ func (s *grpcServer) SendMessage(ctx context.Context, req *communicationpb.Messa
 			payloadPtr := reflect.New(payloadType).Interface()
 
 			if err := json.Unmarshal(req.Payload, payloadPtr); err != nil {
+				s.comm.ls.Error(log_service.LogEvent{
+					Message:  "Failed to unmarshal payload",
+					Metadata: map[string]any{"from": req.From, "type": req.Type, "error": err.Error()},
+				})
 				return nil, fmt.Errorf("failed to unmarshal payload for type %s: %w", req.Type, err)
 			}
 
 			// Dereference the pointer to get the actual value
 			msg.Payload = reflect.ValueOf(payloadPtr).Elem().Interface()
-			log.Printf("Successfully deserialized payload for type %s", req.Type)
+			s.comm.ls.Debug(log_service.LogEvent{
+				Message:  "Payload deserialized successfully",
+				Metadata: map[string]any{"from": req.From, "type": req.Type},
+			})
 		} else {
 			// Empty payload - create zero value
 			msg.Payload = reflect.Zero(payloadType).Interface()
 		}
 	} else {
-		log.Printf("No payload type registered for message type: %s", req.Type)
+		s.comm.ls.Warn(log_service.LogEvent{
+			Message:  "No payload type registered for message type",
+			Metadata: map[string]any{"from": req.From, "type": req.Type},
+		})
 	}
 
 	resp, err := s.comm.handler(msg)
 	if err != nil {
+		s.comm.ls.Error(log_service.LogEvent{
+			Message:  "Message handler error",
+			Metadata: map[string]any{"from": req.From, "type": req.Type, "error": err.Error()},
+		})
 		return nil, err
 	}
 
 	if resp == nil {
-		log.Printf("Sent gRPC response to %s with code: OK", req.From)
+		s.comm.ls.Debug(log_service.LogEvent{
+			Message:  "GRPC response sent",
+			Metadata: map[string]any{"to": req.From, "code": "OK"},
+		})
 		return &communicationpb.MessageResponse{Code: "OK"}, nil
 	}
 
-	log.Printf("Sent gRPC response to %s with code: %s", req.From, resp.Code)
+	s.comm.ls.Debug(log_service.LogEvent{
+		Message:  "GRPC response sent",
+		Metadata: map[string]any{"to": req.From, "code": resp.Code},
+	})
+
 	return &communicationpb.MessageResponse{
 		Code:    string(resp.Code),
 		Body:    resp.Body,
