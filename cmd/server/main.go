@@ -30,7 +30,7 @@ func createServer(port string, otherNodes []node_registry.Node) *server.Replicat
 	comm := communication.NewGRPCCommunicator(port, ls)
 	nr := node_registry.NewInMemoryNodeRegistry(otherNodes)
 	cr := chunk_replicator.NewDefaultChunkReplicator(nr, comm, ls)
-	mr := metadata_replicator.NewPushBasedMetadataReplicator(nr, comm)
+	mr := metadata_replicator.NewPushBasedMetadataReplicator(nr, comm, ls)
 	fs := file_service.NewReplicatedFileService(ms, cs, cr, mr, ls, chunkSize)
 	srv := server.NewReplicatedServer(comm, fs, cs, ms, ls, nr)
 
