@@ -1,6 +1,7 @@
 # Variables
 SERVER_BINARY=server
 CLIENT_BINARY=client
+MCP_BINARY=sandstore-mcp
 
 # Generate protobuf files
 .PHONY: proto
@@ -15,6 +16,11 @@ proto:
 build:
 	go build -o $(SERVER_BINARY) ./cmd/server
 	go build -o $(CLIENT_BINARY) ./cmd/client
+
+# Build MCP server
+.PHONY: mcp
+mcp:
+	go build -o $(MCP_BINARY) ./cmd/mcp
 
 # Run the server
 .PHONY: server
@@ -45,5 +51,5 @@ test:
 # Clean up
 .PHONY: clean
 clean:
-	rm -f $(SERVER_BINARY) $(CLIENT_BINARY)
+	rm -f $(SERVER_BINARY) $(CLIENT_BINARY) $(MCP_BINARY)
 	rm -rf chunks logs
