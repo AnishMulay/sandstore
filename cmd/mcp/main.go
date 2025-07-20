@@ -89,6 +89,52 @@ func addTools(s *server.MCPServer, registry *ServerRegistry) {
 		result += fmt.Sprintf("Default server: %s\n", registry.DefaultServer)
 		return mcp.NewToolResultText(result), nil
 	})
+
+	storeFileTool := mcp.NewTool("store_file",
+		mcp.WithDescription("Store a file in the sandstore system"),
+		mcp.WithString("path",
+			mcp.Required(),
+			mcp.Description("Path where the file will be stored"),
+		),
+		mcp.WithString("content",
+			mcp.Required(),
+			mcp.Description("Content of the file to store"),
+		),
+		mcp.WithString("server",
+			mcp.Description("Server ID to use (defaults to the default server)"),
+		),
+	)
+	s.AddTool(storeFileTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return handleStoreFile(ctx, request, registry)
+	})
+
+	readFileTool := mcp.NewTool("read_file",
+		mcp.WithDescription("Read a file from the sandstore system"),
+		mcp.WithString("path",
+			mcp.Required(),
+			mcp.Description("Path of the file to read"),
+		),
+		mcp.WithString("server",
+			mcp.Description("Server ID to use (defaults to the default server)"),
+		),
+	)
+	s.AddTool(readFileTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return handleReadFile(ctx, request, registry)
+	})
+
+	deleteFileTool := mcp.NewTool("delete_file",
+		mcp.WithDescription("Delete a file from the sandstore system"),
+		mcp.WithString("path",
+			mcp.Required(),
+			mcp.Description("Path of the file to delete"),
+		),
+		mcp.WithString("server",
+			mcp.Description("Server ID to use (defaults to the default server)"),
+		),
+	)
+	s.AddTool(deleteFileTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return handleDeleteFile(ctx, request, registry)
+	})
 }
 
 func handleStoreFile(ctx context.Context, request mcp.CallToolRequest, registry *ServerRegistry) (*mcp.CallToolResult, error) {
@@ -204,36 +250,48 @@ func handleDeleteFile(ctx context.Context, request mcp.CallToolRequest, registry
 }
 
 func main() {
-	// Create a new MCP server
+	logDir := "./logs"
+	nodeID := "mcp-server"
+	ls := log_service.NewLocalDiscLogService(logDir, nodeID)
+
+	config, err := LoadConfig("config.yaml")
+	if err != nil {
+		fmt.Printf("Error loading config: %v\n", err)
+		return
+	}
+
+	registry := &ServerRegistry{
+		Servers:       make(map[string]string),
+		DefaultServer: config.DefaultServer,
+		LogServer:     ls,
+	}
+
+	for _, server := range config.Servers {
+		registry.Servers[server.ID] = server.Address
+	}
+
+	var comm communication.Communicator
+	switch config.Communicator.Type {
+	case "grpc":
+		comm = communication.NewGRPCCommunicator("mcp-server:9000", ls)
+	case "http":
+		comm = communication.NewHTTPCommunicator("mcp-server:9000", ls)
+	default:
+		fmt.Printf("Unknown communicator type: %s\n", config.Communicator.Type)
+	}
+
+	registry.Communicator = comm
+
 	s := server.NewMCPServer(
-		"Demo 🚀",
+		"SandStore MCP Server",
 		"1.0.0",
 		server.WithToolCapabilities(false),
 	)
 
-	// Add tool
-	tool := mcp.NewTool("hello_world",
-		mcp.WithDescription("Say hello to someone"),
-		mcp.WithString("name",
-			mcp.Required(),
-			mcp.Description("Name of the person to greet"),
-		),
-	)
+	addTools(s, registry)
 
-	// Add tool handler
-	s.AddTool(tool, helloHandler)
-
-	// Start the stdio server
 	if err := server.ServeStdio(s); err != nil {
-		fmt.Printf("Server error: %v\n", err)
+		fmt.Printf("Failed to start MCP server: %v\n", err)
+		os.Exit(1)
 	}
-}
-
-func helloHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	name, err := request.RequireString("name")
-	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
-	}
-
-	return mcp.NewToolResultText(fmt.Sprintf("Hello, %s!", name)), nil
 }
