@@ -131,6 +131,44 @@ func handleStoreFile(ctx context.Context, request mcp.CallToolRequest, registry 
 	return mcp.NewToolResultText(fmt.Sprintf("File stored successfully, response code: %s", resp.Code)), nil
 }
 
+func handleReadFile(ctx context.Context, request mcp.CallToolRequest, registry *ServerRegistry) (*mcp.CallToolResult, error) {
+	path, err := request.RequireString("path")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	serverID, _ := request.RequireString("server")
+	if serverID == "" {
+		serverID = registry.DefaultServer
+	}
+
+	serverAddr, ok := registry.Servers[serverID]
+	if !ok {
+		return mcp.NewToolResultError(fmt.Sprintf("Server %s not found", serverID)), nil
+	}
+
+	readRequest := communication.ReadFileRequest{
+		Path: path,
+	}
+
+	msg := communication.Message{
+		From:    "mcp-server",
+		Type:    communication.MessageTypeReadFile,
+		Payload: readRequest,
+	}
+
+	resp, err := registry.Communicator.Send(ctx, serverAddr, msg)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to send request: %v", err)), nil
+	}
+
+	if resp.Code == communication.CodeOK {
+		return mcp.NewToolResultText(fmt.Sprintf("File content: %s", string(resp.Body))), nil
+	} else {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to read file: %s", resp.Code)), nil
+	}
+}
+
 func main() {
 	// Create a new MCP server
 	s := server.NewMCPServer(
