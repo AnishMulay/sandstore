@@ -77,6 +77,20 @@ func LoadConfig(path string) (*MCPConfig, error) {
 	return &config, nil
 }
 
+func addTools(s *server.MCPServer, registry *ServerRegistry) {
+	listServersTool := mcp.NewTool("list_servers",
+		mcp.WithDescription("List all available servers"),
+	)
+	s.AddTool(listServersTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		result := "Available servers:\n"
+		for id, addr := range registry.Servers {
+			result += fmt.Sprintf("- %s: %s\n", id, addr)
+		}
+		result += fmt.Sprintf("Default server: %s\n", registry.DefaultServer)
+		return mcp.NewToolResultText(result), nil
+	})
+}
+
 func main() {
 	// Create a new MCP server
 	s := server.NewMCPServer(
