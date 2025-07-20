@@ -70,7 +70,7 @@ func LoadConfig(path string) (*MCPConfig, error) {
 	}
 
 	config := MCPConfig{}
-	if err := yaml.Unmarshal(data, config); err != nil {
+	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("Failed to unmarshal config: %v", err)
 	}
 
@@ -273,9 +273,9 @@ func main() {
 	var comm communication.Communicator
 	switch config.Communicator.Type {
 	case "grpc":
-		comm = communication.NewGRPCCommunicator("mcp-server:9000", ls)
+		comm = communication.NewGRPCCommunicator(":9000", ls)
 	case "http":
-		comm = communication.NewHTTPCommunicator("mcp-server:9000", ls)
+		comm = communication.NewHTTPCommunicator(":9000", ls)
 	default:
 		fmt.Printf("Unknown communicator type: %s\n", config.Communicator.Type)
 	}

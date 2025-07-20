@@ -1,0 +1,13 @@
+communicator:
+    type: grpc
+servers:
+    - id: server1
+      address: localhost:8080
+      healthy: true
+    - id: server2
+      address: localhost:8081
+      healthy: true
+    - id: server3
+      address: localhost:8082
+      healthy: true
+default_server: server1
