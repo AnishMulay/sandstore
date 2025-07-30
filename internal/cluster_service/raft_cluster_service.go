@@ -238,3 +238,7 @@ func (r *RaftClusterService) becomeLeader() {
 
 	r.startHeartbeats()
 }
+
+func (r *RaftClusterService) startHeartbeats() {
+
+}

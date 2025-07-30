@@ -378,3 +378,23 @@ func (s *RaftServer) HandleStopServerMessage(msg communication.Message) (*commun
 		Code: communication.CodeOK,
 	}, nil
 }
+
+func (s *RaftServer) handleRequestVoteMessage(msg communication.Message) (*communication.Response, error) {
+	request := msg.Payload.(communication.RequestVoteRequest)
+
+	s.ls.Info(log_service.LogEvent{
+		Message:  "Handling request vote",
+		Metadata: map[string]any{"term": request.Term, "candidateID": request.CandidateID},
+	})
+
+	// For now, just log the request and return OK
+	// Actual voting logic will be implemented in the cluster service
+	s.ls.Debug(log_service.LogEvent{
+		Message:  "Received request vote",
+		Metadata: map[string]any{"from": msg.From, "term": request.Term, "candidateID": request.CandidateID},
+	})
+
+	return &communication.Response{
+		Code: communication.CodeOK,
+	}, nil
+}
