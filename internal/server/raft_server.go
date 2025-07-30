@@ -41,7 +41,7 @@ func NewRaftServer(comm communication.Communicator, fs file_service.FileService,
 
 func (s *RaftServer) Start() error {
 	s.ls.Info(log_service.LogEvent{
-		Message: "Starting replicated server",
+		Message: "Starting raft server",
 	})
 
 	err := s.comm.Start(s.handleMessage)
@@ -54,14 +54,14 @@ func (s *RaftServer) Start() error {
 	}
 
 	s.ls.Info(log_service.LogEvent{
-		Message: "Replicated server started successfully",
+		Message: "Raft server started successfully",
 	})
 	return nil
 }
 
 func (s *RaftServer) Stop() error {
 	s.ls.Info(log_service.LogEvent{
-		Message: "Stopping replicated server",
+		Message: "Stopping raft server",
 	})
 
 	s.cancel()
@@ -75,7 +75,7 @@ func (s *RaftServer) Stop() error {
 	}
 
 	s.ls.Info(log_service.LogEvent{
-		Message: "Replicated server stopped successfully",
+		Message: "raft server stopped successfully",
 	})
 	return nil
 }
