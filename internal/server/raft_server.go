@@ -343,3 +343,29 @@ func (s *RaftServer) HandleStoreMetadataMessage(msg communication.Message) (*com
 		Code: communication.CodeOK,
 	}, nil
 }
+
+func (s *RaftServer) HandleStopServerMessage(msg communication.Message) (*communication.Response, error) {
+	s.ls.Info(log_service.LogEvent{
+		Message: "Stopping server",
+	})
+
+	err := s.Stop()
+	if err != nil {
+		s.ls.Error(log_service.LogEvent{
+			Message:  "Failed to stop server",
+			Metadata: map[string]any{"error": err.Error()},
+		})
+		return &communication.Response{
+			Code: communication.CodeInternal,
+			Body: []byte(ErrServerStopFailed.Error()),
+		}, nil
+	}
+
+	s.ls.Info(log_service.LogEvent{
+		Message: "Server stopped successfully",
+	})
+
+	return &communication.Response{
+		Code: communication.CodeOK,
+	}, nil
+}
