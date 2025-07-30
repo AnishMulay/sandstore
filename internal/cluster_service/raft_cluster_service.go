@@ -220,11 +220,21 @@ func (r *RaftClusterService) registerVote() {
 	r.voteCount++
 	nodes, _ := r.GetHealthyNodes()
 	if r.state == Candidate && r.voteCount > int64(len(nodes))/2 {
-		r.state = Leader
-		r.leaderID = r.id
+		r.becomeLeader()
 		r.ls.Info(log_service.LogEvent{
 			Message:  "Became leader",
 			Metadata: map[string]any{"leaderID": r.leaderID},
 		})
 	}
+}
+
+func (r *RaftClusterService) becomeLeader() {
+	r.state = Leader
+	r.leaderID = r.id
+
+	if r.electionTimer != nil {
+		r.electionTimer.Stop()
+	}
+
+	r.startHeartbeats()
 }
