@@ -271,7 +271,7 @@ func handleStopServer(ctx context.Context, request mcp.CallToolRequest, registry
 		return mcp.NewToolResultError(fmt.Sprintf("Server %s not found", serverID)), nil
 	}
 
-	stopRequest := communication.StopServer{}
+	stopRequest := communication.StopServerRequest{}
 
 	msg := communication.Message{
 		From:    "mcp-server",

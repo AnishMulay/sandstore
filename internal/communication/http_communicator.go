@@ -41,7 +41,7 @@ func NewHTTPCommunicator(listenAddress string, ls log_service.LogService) *HTTPC
 	c.payloadTypes[MessageTypeDeleteChunk] = reflect.TypeOf((*DeleteChunkRequest)(nil)).Elem()
 	c.payloadTypes[MessageTypeStoreMetadata] = reflect.TypeOf((*StoreMetadataRequest)(nil)).Elem()
 	c.payloadTypes[MessageTypeDeleteMetadata] = reflect.TypeOf((*DeleteMetadataRequest)(nil)).Elem()
-	c.payloadTypes[MessageTypeStopServer] = reflect.TypeOf((*StopServer)(nil)).Elem()
+	c.payloadTypes[MessageTypeStopServer] = reflect.TypeOf((*StopServerRequest)(nil)).Elem()
 
 	return c
 }

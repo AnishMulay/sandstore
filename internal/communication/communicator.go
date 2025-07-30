@@ -59,7 +59,7 @@ type DeleteMetadataRequest struct {
 	FileID string
 }
 
-type StopServer struct {
+type StopServerRequest struct {
 }
 
 type SandCode string
