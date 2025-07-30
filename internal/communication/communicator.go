@@ -64,8 +64,8 @@ type StopServerRequest struct {
 }
 
 type RequestVoteRequest struct {
-	Term        int
-	candidateID string
+	Term        int64
+	CandidateID string
 }
 
 type SandCode string

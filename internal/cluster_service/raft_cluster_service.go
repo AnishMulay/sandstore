@@ -1,6 +1,7 @@
 package cluster_service
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -166,10 +167,48 @@ func (r *RaftClusterService) startElection() {
 		}
 
 		go func(n Node) {
-			ok := r.sendRequestVote(n.ID, term)
+			ok := r.sendRequestVote(n.Address, term)
 			if ok {
 				r.registerVote()
 			}
 		}(node)
 	}
+}
+
+func (r *RaftClusterService) sendRequestVote(nodeAddress string, term int64) bool {
+	r.ls.Debug(log_service.LogEvent{
+		Message:  "Sending request vote",
+		Metadata: map[string]any{"nodeAddress": nodeAddress, "term": term},
+	})
+
+	req := communication.RequestVoteRequest{
+		Term:        term,
+		CandidateID: r.id,
+	}
+
+	msg := communication.Message{
+		From:    r.comm.Address(),
+		Type:    communication.MessageTypeRequestVote,
+		Payload: req,
+	}
+
+	resp, err := r.comm.Send(context.Background(), nodeAddress, msg)
+	if err != nil {
+		r.ls.Error(log_service.LogEvent{
+			Message:  "Failed to send request vote",
+			Metadata: map[string]any{"nodeAddress": nodeAddress, "error": err.Error()},
+		})
+		return false
+	}
+
+	// For now, assume vote is granted if response is OK
+	// I'll need to implement proper response parsing based on raft later
+	voteGranted := resp.Code == communication.CodeOK
+
+	r.ls.Debug(log_service.LogEvent{
+		Message:  "Received request vote response",
+		Metadata: map[string]any{"nodeAddress": nodeAddress, "voteGranted": voteGranted},
+	})
+
+	return voteGranted
 }
