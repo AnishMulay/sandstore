@@ -10,16 +10,16 @@ import (
 
 	"github.com/AnishMulay/sandstore/internal/chunk_replicator"
 	"github.com/AnishMulay/sandstore/internal/chunk_service"
+	"github.com/AnishMulay/sandstore/internal/cluster_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/file_service"
 	"github.com/AnishMulay/sandstore/internal/log_service"
 	"github.com/AnishMulay/sandstore/internal/metadata_replicator"
 	"github.com/AnishMulay/sandstore/internal/metadata_service"
-	"github.com/AnishMulay/sandstore/internal/node_registry"
 	"github.com/AnishMulay/sandstore/internal/server"
 )
 
-func createServer(port string, otherNodes []node_registry.Node) *server.RaftServer {
+func createServer(port string, otherNodes []cluster_service.Node) *server.RaftServer {
 	logDir := "./logs"
 	nodeID := port[1:] // Use port as node ID
 	ls := log_service.NewLocalDiscLogService(logDir, nodeID)
@@ -28,11 +28,11 @@ func createServer(port string, otherNodes []node_registry.Node) *server.RaftServ
 	cs := chunk_service.NewLocalDiscChunkService(chunkPath, ls)
 	chunkSize := int64(8 * 1024 * 1024)
 	comm := communication.NewGRPCCommunicator(port, ls)
-	nr := node_registry.NewInMemoryNodeRegistry(otherNodes, ls)
-	cr := chunk_replicator.NewDefaultChunkReplicator(nr, comm, ls)
-	mr := metadata_replicator.NewPushBasedMetadataReplicator(nr, comm, ls)
+	clusterService := cluster_service.NewInMemoryClusterService(otherNodes, ls)
+	cr := chunk_replicator.NewDefaultChunkReplicator(clusterService, comm, ls)
+	mr := metadata_replicator.NewPushBasedMetadataReplicator(clusterService, comm, ls)
 	fs := file_service.NewReplicatedFileService(ms, cs, cr, mr, ls, chunkSize)
-	srv := server.NewRaftServer(comm, fs, cs, ms, ls, nr)
+	srv := server.NewRaftServer(comm, fs, cs, ms, ls, clusterService)
 
 	srv.RegisterTypedHandler(communication.MessageTypeStoreFile, reflect.TypeOf((*communication.StoreFileRequest)(nil)).Elem(), srv.HandleStoreFileMessage)
 	srv.RegisterTypedHandler(communication.MessageTypeReadFile, reflect.TypeOf((*communication.ReadFileRequest)(nil)).Elem(), srv.HandleReadFileMessage)
@@ -48,15 +48,15 @@ func createServer(port string, otherNodes []node_registry.Node) *server.RaftServ
 
 func main() {
 	servers := []*server.RaftServer{
-		createServer(":8080", []node_registry.Node{
+		createServer(":8080", []cluster_service.Node{
 			{ID: "8081", Address: "localhost:8081", Healthy: true},
 			{ID: "8082", Address: "localhost:8082", Healthy: true},
 		}),
-		createServer(":8081", []node_registry.Node{
+		createServer(":8081", []cluster_service.Node{
 			{ID: "8080", Address: "localhost:8080", Healthy: true},
 			{ID: "8082", Address: "localhost:8082", Healthy: true},
 		}),
-		createServer(":8082", []node_registry.Node{
+		createServer(":8082", []cluster_service.Node{
 			{ID: "8080", Address: "localhost:8080", Healthy: true},
 			{ID: "8081", Address: "localhost:8081", Healthy: true},
 		}),

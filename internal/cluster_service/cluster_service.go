@@ -1,4 +1,4 @@
-package node_registry
+package cluster_service
 
 type Node struct {
 	ID      string
@@ -6,7 +6,7 @@ type Node struct {
 	Healthy bool
 }
 
-type NodeRegistry interface {
+type ClusterService interface {
 	RegisterNode(node Node) error
 	DeregisterNode(node Node) error
 	GetHealthyNodes() ([]Node, error)

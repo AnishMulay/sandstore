@@ -6,39 +6,40 @@ import (
 	"sync"
 
 	"github.com/AnishMulay/sandstore/internal/chunk_service"
+	"github.com/AnishMulay/sandstore/internal/cluster_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/file_service"
 	"github.com/AnishMulay/sandstore/internal/log_service"
 	"github.com/AnishMulay/sandstore/internal/metadata_service"
-	"github.com/AnishMulay/sandstore/internal/node_registry"
 )
 
 type RaftServer struct {
-	comm          communication.Communicator
-	fs            file_service.FileService
-	cs            chunk_service.ChunkService
-	ms            metadata_service.MetadataService
-	ls            log_service.LogService
-	ctx           context.Context
-	cancel        context.CancelFunc
-	typedHandlers map[string]*TypedHandler
-	nodeRegistry  node_registry.NodeRegistry
-	stopped       bool
-	stopMutex     sync.RWMutex
+	comm           communication.Communicator
+	fs             file_service.FileService
+	cs             chunk_service.ChunkService
+	ms             metadata_service.MetadataService
+	ls             log_service.LogService
+	ctx            context.Context
+	cancel         context.CancelFunc
+	typedHandlers  map[string]*TypedHandler
+	clusterService cluster_service.ClusterService
+	stopped        bool
+	stopMutex      sync.RWMutex
 }
 
-func NewRaftServer(comm communication.Communicator, fs file_service.FileService, cs chunk_service.ChunkService, ms metadata_service.MetadataService, ls log_service.LogService, nr node_registry.NodeRegistry) *RaftServer {
+func NewRaftServer(comm communication.Communicator, fs file_service.FileService, cs chunk_service.ChunkService, ms metadata_service.MetadataService, ls log_service.LogService, clusterService cluster_service.ClusterService) *RaftServer {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &RaftServer{
-		comm:          comm,
-		fs:            fs,
-		cs:            cs,
-		ms:            ms,
-		ls:            ls,
-		ctx:           ctx,
-		cancel:        cancel,
-		typedHandlers: make(map[string]*TypedHandler),
-		nodeRegistry:  nr,
+		comm:           comm,
+		fs:             fs,
+		cs:             cs,
+		ms:             ms,
+		ls:             ls,
+		ctx:            ctx,
+		cancel:         cancel,
+		typedHandlers:  make(map[string]*TypedHandler),
+		clusterService: clusterService,
+		stopped:        false,
 	}
 }
 

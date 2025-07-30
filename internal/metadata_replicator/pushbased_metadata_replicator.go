@@ -4,23 +4,23 @@ import (
 	"context"
 	"time"
 
+	"github.com/AnishMulay/sandstore/internal/cluster_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/log_service"
 	"github.com/AnishMulay/sandstore/internal/metadata_service"
-	"github.com/AnishMulay/sandstore/internal/node_registry"
 )
 
 type PushBasedMetadataReplicator struct {
-	nodeRegistry node_registry.NodeRegistry
-	comm         communication.Communicator
-	ls           log_service.LogService
+	clusterService cluster_service.ClusterService
+	comm           communication.Communicator
+	ls             log_service.LogService
 }
 
-func NewPushBasedMetadataReplicator(nr node_registry.NodeRegistry, comm communication.Communicator, ls log_service.LogService) *PushBasedMetadataReplicator {
+func NewPushBasedMetadataReplicator(clusterService cluster_service.ClusterService, comm communication.Communicator, ls log_service.LogService) *PushBasedMetadataReplicator {
 	return &PushBasedMetadataReplicator{
-		nodeRegistry: nr,
-		comm:         comm,
-		ls:           ls,
+		clusterService: clusterService,
+		comm:           comm,
+		ls:             ls,
 	}
 }
 
@@ -30,7 +30,7 @@ func (mr *PushBasedMetadataReplicator) ReplicateMetadata(metadata metadata_servi
 		Metadata: map[string]any{"path": metadata.Path, "size": metadata.Size, "chunks": len(metadata.Chunks)},
 	})
 
-	nodes, err := mr.nodeRegistry.GetHealthyNodes()
+	nodes, err := mr.clusterService.GetHealthyNodes()
 	if err != nil {
 		mr.ls.Error(log_service.LogEvent{
 			Message:  "Failed to get healthy nodes for metadata replication",

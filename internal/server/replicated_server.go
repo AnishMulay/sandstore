@@ -5,11 +5,11 @@ import (
 	"reflect"
 
 	"github.com/AnishMulay/sandstore/internal/chunk_service"
+	"github.com/AnishMulay/sandstore/internal/cluster_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/file_service"
 	"github.com/AnishMulay/sandstore/internal/log_service"
 	"github.com/AnishMulay/sandstore/internal/metadata_service"
-	"github.com/AnishMulay/sandstore/internal/node_registry"
 )
 
 type ReplicatedServer struct {
@@ -21,21 +21,22 @@ type ReplicatedServer struct {
 	ctx           context.Context
 	cancel        context.CancelFunc
 	typedHandlers map[string]*TypedHandler
-	nodeRegistry  node_registry.NodeRegistry
+	// nodeRegistry  node_registry.NodeRegistry
+	clusterService cluster_service.ClusterService
 }
 
-func NewReplicatedServer(comm communication.Communicator, fs file_service.FileService, cs chunk_service.ChunkService, ms metadata_service.MetadataService, ls log_service.LogService, nr node_registry.NodeRegistry) *ReplicatedServer {
+func NewReplicatedServer(comm communication.Communicator, fs file_service.FileService, cs chunk_service.ChunkService, ms metadata_service.MetadataService, ls log_service.LogService, clusterService cluster_service.ClusterService) *ReplicatedServer {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &ReplicatedServer{
-		comm:          comm,
-		fs:            fs,
-		cs:            cs,
-		ms:            ms,
-		ls:            ls,
-		ctx:           ctx,
-		cancel:        cancel,
-		typedHandlers: make(map[string]*TypedHandler),
-		nodeRegistry:  nr,
+		comm:           comm,
+		fs:             fs,
+		cs:             cs,
+		ms:             ms,
+		ls:             ls,
+		ctx:            ctx,
+		cancel:         cancel,
+		typedHandlers:  make(map[string]*TypedHandler),
+		clusterService: clusterService,
 	}
 }
 
