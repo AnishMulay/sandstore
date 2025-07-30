@@ -47,6 +47,14 @@ func NewRaftClusterService(id string, nodes []Node, comm communication.Communica
 	}
 }
 
+func (r *RaftClusterService) Start() {
+	r.ls.Info(log_service.LogEvent{
+		Message: "Starting Raft cluster service",
+		Metadata: map[string]any{"nodeID": r.id},
+	})
+	r.resetElectionTimer()
+}
+
 func (r *RaftClusterService) RegisterNode(node Node) error {
 	r.ls.Info(log_service.LogEvent{
 		Message:  "Registering node",

@@ -57,6 +57,11 @@ func (s *RaftServer) Start() error {
 		return ErrServerStartFailed
 	}
 
+	// Start the Raft cluster service
+	if raftCluster, ok := s.clusterService.(*cluster_service.RaftClusterService); ok {
+		raftCluster.Start()
+	}
+
 	s.ls.Info(log_service.LogEvent{
 		Message: "Raft server started successfully",
 	})
@@ -379,7 +384,7 @@ func (s *RaftServer) HandleStopServerMessage(msg communication.Message) (*commun
 	}, nil
 }
 
-func (s *RaftServer) handleRequestVoteMessage(msg communication.Message) (*communication.Response, error) {
+func (s *RaftServer) HandleRequestVoteMessage(msg communication.Message) (*communication.Response, error) {
 	request := msg.Payload.(communication.RequestVoteRequest)
 
 	s.ls.Info(log_service.LogEvent{
