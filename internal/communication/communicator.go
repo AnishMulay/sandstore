@@ -23,6 +23,7 @@ const (
 	MessageTypeStoreMetadata  = "store_metadata"
 	MessageTypeDeleteMetadata = "delete_metadata"
 	MessageTypeStopServer     = "stop_server"
+	MessageTypeRequestVote    = "request_vote"
 )
 
 type StoreFileRequest struct {
@@ -60,6 +61,11 @@ type DeleteMetadataRequest struct {
 }
 
 type StopServerRequest struct {
+}
+
+type RequestVoteRequest struct {
+	Term        int
+	candidateID string
 }
 
 type SandCode string

@@ -59,3 +59,8 @@ message DeleteMetadataRequest {
 
 message StopServer {
 }
+
+message RequestVoteRequest {
+  int32 term = 1;
+  string candidate_id = 2;
+}

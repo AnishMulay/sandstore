@@ -45,6 +45,7 @@ func NewGRPCCommunicator(addr string, ls log_service.LogService) *GRPCCommunicat
 	c.payloadTypes[MessageTypeStoreMetadata] = reflect.TypeOf((*StoreMetadataRequest)(nil)).Elem()
 	c.payloadTypes[MessageTypeDeleteMetadata] = reflect.TypeOf((*DeleteMetadataRequest)(nil)).Elem()
 	c.payloadTypes[MessageTypeStopServer] = reflect.TypeOf((*StopServerRequest)(nil)).Elem()
+	c.payloadTypes[MessageTypeRequestVote] = reflect.TypeOf((*RequestVoteRequest)(nil)).Elem()
 
 	return c
 }
