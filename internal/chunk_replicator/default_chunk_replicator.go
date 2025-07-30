@@ -6,35 +6,35 @@ import (
 	"time"
 
 	"github.com/AnishMulay/sandstore/internal/chunk_service"
+	"github.com/AnishMulay/sandstore/internal/cluster_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/log_service"
-	"github.com/AnishMulay/sandstore/internal/node_registry"
 )
 
 type DefaultChunkReplicator struct {
-	nodeRegistry node_registry.NodeRegistry
-	comm         communication.Communicator
-	ls           log_service.LogService
+	clusterService cluster_service.ClusterService
+	comm           communication.Communicator
+	ls             log_service.LogService
 }
 
-func NewDefaultChunkReplicator(nr node_registry.NodeRegistry, comm communication.Communicator, ls log_service.LogService) *DefaultChunkReplicator {
+func NewDefaultChunkReplicator(clusterService cluster_service.ClusterService, comm communication.Communicator, ls log_service.LogService) *DefaultChunkReplicator {
 	return &DefaultChunkReplicator{
-		nodeRegistry: nr,
-		comm:         comm,
-		ls:           ls,
+		clusterService: clusterService,
+		comm:           comm,
+		ls:             ls,
 	}
 }
 
 func (cr *DefaultChunkReplicator) ReplicateChunk(chunkID string, data []byte, replicationFactor int) ([]chunk_service.ChunkReplica, error) {
 	cr.ls.Info(log_service.LogEvent{
-		Message: "Replicating chunk",
+		Message:  "Replicating chunk",
 		Metadata: map[string]any{"chunkID": chunkID, "size": len(data), "replicationFactor": replicationFactor},
 	})
-	
-	nodes, err := cr.nodeRegistry.GetHealthyNodes()
+
+	nodes, err := cr.clusterService.GetHealthyNodes()
 	if err != nil {
 		cr.ls.Error(log_service.LogEvent{
-			Message: "Failed to get healthy nodes",
+			Message:  "Failed to get healthy nodes",
 			Metadata: map[string]any{"chunkID": chunkID, "error": err.Error()},
 		})
 		return nil, err
@@ -42,7 +42,7 @@ func (cr *DefaultChunkReplicator) ReplicateChunk(chunkID string, data []byte, re
 
 	if len(nodes) < replicationFactor {
 		cr.ls.Warn(log_service.LogEvent{
-			Message: "Insufficient nodes for replication",
+			Message:  "Insufficient nodes for replication",
 			Metadata: map[string]any{"chunkID": chunkID, "availableNodes": len(nodes), "required": replicationFactor},
 		})
 		return nil, ErrInsufficientNodes
@@ -52,7 +52,7 @@ func (cr *DefaultChunkReplicator) ReplicateChunk(chunkID string, data []byte, re
 	targetNodes := nodes[:replicationFactor]
 
 	cr.ls.Debug(log_service.LogEvent{
-		Message: "Selected target nodes for replication",
+		Message:  "Selected target nodes for replication",
 		Metadata: map[string]any{"chunkID": chunkID, "targetNodes": len(targetNodes)},
 	})
 
@@ -68,10 +68,10 @@ func (cr *DefaultChunkReplicator) ReplicateChunk(chunkID string, data []byte, re
 
 	for _, node := range targetNodes {
 		cr.ls.Debug(log_service.LogEvent{
-			Message: "Replicating chunk to node",
+			Message:  "Replicating chunk to node",
 			Metadata: map[string]any{"chunkID": chunkID, "nodeID": node.ID, "address": node.Address},
 		})
-		
+
 		msg := communication.Message{
 			From: cr.comm.Address(),
 			Type: communication.MessageTypeStoreChunk,
@@ -86,7 +86,7 @@ func (cr *DefaultChunkReplicator) ReplicateChunk(chunkID string, data []byte, re
 		resp, err := cr.comm.Send(ctx, node.Address, msg)
 		if err != nil {
 			cr.ls.Error(log_service.LogEvent{
-				Message: "Failed to send chunk to node",
+				Message:  "Failed to send chunk to node",
 				Metadata: map[string]any{"chunkID": chunkID, "nodeID": node.ID, "address": node.Address, "error": err.Error()},
 			})
 			return nil, err
@@ -94,13 +94,13 @@ func (cr *DefaultChunkReplicator) ReplicateChunk(chunkID string, data []byte, re
 
 		if resp.Code != communication.CodeOK {
 			cr.ls.Error(log_service.LogEvent{
-				Message: "Chunk replication failed",
+				Message:  "Chunk replication failed",
 				Metadata: map[string]any{"chunkID": chunkID, "nodeID": node.ID, "address": node.Address, "responseCode": resp.Code},
 			})
 			return nil, ErrReplicationFailed
 		} else {
 			cr.ls.Debug(log_service.LogEvent{
-				Message: "Chunk replicated successfully to node",
+				Message:  "Chunk replicated successfully to node",
 				Metadata: map[string]any{"chunkID": chunkID, "nodeID": node.ID, "address": node.Address},
 			})
 			replicas = append(replicas, chunk_service.ChunkReplica{
@@ -113,7 +113,7 @@ func (cr *DefaultChunkReplicator) ReplicateChunk(chunkID string, data []byte, re
 	}
 
 	cr.ls.Info(log_service.LogEvent{
-		Message: "Chunk replication completed",
+		Message:  "Chunk replication completed",
 		Metadata: map[string]any{"chunkID": chunkID, "replicas": len(replicas)},
 	})
 
@@ -122,16 +122,16 @@ func (cr *DefaultChunkReplicator) ReplicateChunk(chunkID string, data []byte, re
 
 func (cr *DefaultChunkReplicator) FetchReplicatedChunk(chunkID string, replicas []chunk_service.ChunkReplica) ([]byte, error) {
 	cr.ls.Info(log_service.LogEvent{
-		Message: "Fetching replicated chunk",
+		Message:  "Fetching replicated chunk",
 		Metadata: map[string]any{"chunkID": chunkID, "replicas": len(replicas)},
 	})
-	
+
 	for _, replica := range replicas {
 		cr.ls.Debug(log_service.LogEvent{
-			Message: "Attempting to fetch chunk from replica",
+			Message:  "Attempting to fetch chunk from replica",
 			Metadata: map[string]any{"chunkID": chunkID, "nodeID": replica.NodeID, "address": replica.Address},
 		})
-		
+
 		msg := communication.Message{
 			From: cr.comm.Address(),
 			Type: communication.MessageTypeReadChunk,
@@ -145,7 +145,7 @@ func (cr *DefaultChunkReplicator) FetchReplicatedChunk(chunkID string, replicas 
 		resp, err := cr.comm.Send(ctx, replica.Address, msg)
 		if err != nil {
 			cr.ls.Warn(log_service.LogEvent{
-				Message: "Failed to fetch chunk from replica",
+				Message:  "Failed to fetch chunk from replica",
 				Metadata: map[string]any{"chunkID": chunkID, "nodeID": replica.NodeID, "address": replica.Address, "error": err.Error()},
 			})
 			continue
@@ -153,20 +153,20 @@ func (cr *DefaultChunkReplicator) FetchReplicatedChunk(chunkID string, replicas 
 
 		if resp.Code == communication.CodeOK {
 			cr.ls.Info(log_service.LogEvent{
-				Message: "Chunk fetched successfully from replica",
+				Message:  "Chunk fetched successfully from replica",
 				Metadata: map[string]any{"chunkID": chunkID, "nodeID": replica.NodeID, "address": replica.Address, "size": len(resp.Body)},
 			})
 			return resp.Body, nil
 		} else {
 			cr.ls.Warn(log_service.LogEvent{
-				Message: "Failed to fetch chunk from replica",
+				Message:  "Failed to fetch chunk from replica",
 				Metadata: map[string]any{"chunkID": chunkID, "nodeID": replica.NodeID, "address": replica.Address, "responseCode": resp.Code},
 			})
 		}
 	}
 
 	cr.ls.Error(log_service.LogEvent{
-		Message: "Replicated chunk not found in any replica",
+		Message:  "Replicated chunk not found in any replica",
 		Metadata: map[string]any{"chunkID": chunkID, "replicas": len(replicas)},
 	})
 
@@ -175,16 +175,16 @@ func (cr *DefaultChunkReplicator) FetchReplicatedChunk(chunkID string, replicas 
 
 func (cr *DefaultChunkReplicator) DeleteReplicatedChunk(chunkID string, replicas []chunk_service.ChunkReplica) error {
 	cr.ls.Info(log_service.LogEvent{
-		Message: "Deleting replicated chunk",
+		Message:  "Deleting replicated chunk",
 		Metadata: map[string]any{"chunkID": chunkID, "replicas": len(replicas)},
 	})
-	
+
 	for _, replica := range replicas {
 		cr.ls.Debug(log_service.LogEvent{
-			Message: "Deleting chunk from replica",
+			Message:  "Deleting chunk from replica",
 			Metadata: map[string]any{"chunkID": chunkID, "nodeID": replica.NodeID, "address": replica.Address},
 		})
-		
+
 		msg := communication.Message{
 			From: cr.comm.Address(),
 			Type: communication.MessageTypeDeleteChunk,
@@ -198,7 +198,7 @@ func (cr *DefaultChunkReplicator) DeleteReplicatedChunk(chunkID string, replicas
 		resp, err := cr.comm.Send(ctx, replica.Address, msg)
 		if err != nil {
 			cr.ls.Error(log_service.LogEvent{
-				Message: "Failed to delete chunk from replica",
+				Message:  "Failed to delete chunk from replica",
 				Metadata: map[string]any{"chunkID": chunkID, "nodeID": replica.NodeID, "address": replica.Address, "error": err.Error()},
 			})
 			return err
@@ -206,20 +206,20 @@ func (cr *DefaultChunkReplicator) DeleteReplicatedChunk(chunkID string, replicas
 
 		if resp.Code != communication.CodeOK {
 			cr.ls.Error(log_service.LogEvent{
-				Message: "Failed to delete chunk from replica",
+				Message:  "Failed to delete chunk from replica",
 				Metadata: map[string]any{"chunkID": chunkID, "nodeID": replica.NodeID, "address": replica.Address, "responseCode": resp.Code},
 			})
 			return ErrDeletionFailed
 		} else {
 			cr.ls.Debug(log_service.LogEvent{
-				Message: "Chunk deleted successfully from replica",
+				Message:  "Chunk deleted successfully from replica",
 				Metadata: map[string]any{"chunkID": chunkID, "nodeID": replica.NodeID, "address": replica.Address},
 			})
 		}
 	}
 
 	cr.ls.Info(log_service.LogEvent{
-		Message: "Replicated chunk deletion completed",
+		Message:  "Replicated chunk deletion completed",
 		Metadata: map[string]any{"chunkID": chunkID, "replicas": len(replicas)},
 	})
 

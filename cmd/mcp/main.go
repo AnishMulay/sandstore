@@ -135,6 +135,17 @@ func addTools(s *server.MCPServer, registry *ServerRegistry) {
 	s.AddTool(deleteFileTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		return handleDeleteFile(ctx, request, registry)
 	})
+
+	stopServerTool := mcp.NewTool("stop_server",
+		mcp.WithDescription("Stop a server in the sandstore system"),
+		mcp.WithString("server",
+			mcp.Required(),
+			mcp.Description("Server ID to stop"),
+		),
+	)
+	s.AddTool(stopServerTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return handleStopServer(ctx, request, registry)
+	})
 }
 
 func handleStoreFile(ctx context.Context, request mcp.CallToolRequest, registry *ServerRegistry) (*mcp.CallToolResult, error) {
@@ -247,6 +258,33 @@ func handleDeleteFile(ctx context.Context, request mcp.CallToolRequest, registry
 	}
 
 	return mcp.NewToolResultText(fmt.Sprintf("File deleted successfully, response code: %s", resp.Code)), nil
+}
+
+func handleStopServer(ctx context.Context, request mcp.CallToolRequest, registry *ServerRegistry) (*mcp.CallToolResult, error) {
+	serverID, err := request.RequireString("server")
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
+	}
+
+	serverAddr, ok := registry.Servers[serverID]
+	if !ok {
+		return mcp.NewToolResultError(fmt.Sprintf("Server %s not found", serverID)), nil
+	}
+
+	stopRequest := communication.StopServerRequest{}
+
+	msg := communication.Message{
+		From:    "mcp-server",
+		Type:    communication.MessageTypeStopServer,
+		Payload: stopRequest,
+	}
+
+	resp, err := registry.Communicator.Send(ctx, serverAddr, msg)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf("Failed to send request: %v", err)), nil
+	}
+
+	return mcp.NewToolResultText(fmt.Sprintf("Server stopped successfully, response code: %s", resp.Code)), nil
 }
 
 func main() {

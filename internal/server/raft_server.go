@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"reflect"
+	"sync"
 
 	"github.com/AnishMulay/sandstore/internal/chunk_service"
 	"github.com/AnishMulay/sandstore/internal/cluster_service"
@@ -12,22 +13,23 @@ import (
 	"github.com/AnishMulay/sandstore/internal/metadata_service"
 )
 
-type ReplicatedServer struct {
-	comm          communication.Communicator
-	fs            file_service.FileService
-	cs            chunk_service.ChunkService
-	ms            metadata_service.MetadataService
-	ls            log_service.LogService
-	ctx           context.Context
-	cancel        context.CancelFunc
-	typedHandlers map[string]*TypedHandler
-	// nodeRegistry  node_registry.NodeRegistry
+type RaftServer struct {
+	comm           communication.Communicator
+	fs             file_service.FileService
+	cs             chunk_service.ChunkService
+	ms             metadata_service.MetadataService
+	ls             log_service.LogService
+	ctx            context.Context
+	cancel         context.CancelFunc
+	typedHandlers  map[string]*TypedHandler
 	clusterService cluster_service.ClusterService
+	stopped        bool
+	stopMutex      sync.RWMutex
 }
 
-func NewReplicatedServer(comm communication.Communicator, fs file_service.FileService, cs chunk_service.ChunkService, ms metadata_service.MetadataService, ls log_service.LogService, clusterService cluster_service.ClusterService) *ReplicatedServer {
+func NewRaftServer(comm communication.Communicator, fs file_service.FileService, cs chunk_service.ChunkService, ms metadata_service.MetadataService, ls log_service.LogService, clusterService cluster_service.ClusterService) *RaftServer {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &ReplicatedServer{
+	return &RaftServer{
 		comm:           comm,
 		fs:             fs,
 		cs:             cs,
@@ -37,12 +39,13 @@ func NewReplicatedServer(comm communication.Communicator, fs file_service.FileSe
 		cancel:         cancel,
 		typedHandlers:  make(map[string]*TypedHandler),
 		clusterService: clusterService,
+		stopped:        false,
 	}
 }
 
-func (s *ReplicatedServer) Start() error {
+func (s *RaftServer) Start() error {
 	s.ls.Info(log_service.LogEvent{
-		Message: "Starting replicated server",
+		Message: "Starting raft server",
 	})
 
 	err := s.comm.Start(s.handleMessage)
@@ -54,15 +57,30 @@ func (s *ReplicatedServer) Start() error {
 		return ErrServerStartFailed
 	}
 
+	// Start the Raft cluster service
+	if raftCluster, ok := s.clusterService.(*cluster_service.RaftClusterService); ok {
+		raftCluster.Start()
+	}
+
 	s.ls.Info(log_service.LogEvent{
-		Message: "Replicated server started successfully",
+		Message: "Raft server started successfully",
 	})
 	return nil
 }
 
-func (s *ReplicatedServer) Stop() error {
+func (s *RaftServer) Stop() error {
+	s.stopMutex.Lock()
+	defer s.stopMutex.Unlock()
+
+	if s.stopped {
+		s.ls.Debug(log_service.LogEvent{
+			Message: "Server already stopped, skipping",
+		})
+		return nil
+	}
+
 	s.ls.Info(log_service.LogEvent{
-		Message: "Stopping replicated server",
+		Message: "Stopping raft server",
 	})
 
 	s.cancel()
@@ -75,13 +93,14 @@ func (s *ReplicatedServer) Stop() error {
 		return ErrServerStopFailed
 	}
 
+	s.stopped = true
 	s.ls.Info(log_service.LogEvent{
-		Message: "Replicated server stopped successfully",
+		Message: "raft server stopped successfully",
 	})
 	return nil
 }
 
-func (s *ReplicatedServer) RegisterTypedHandler(msgType string, payloadType reflect.Type, handler func(msg communication.Message) (*communication.Response, error)) {
+func (s *RaftServer) RegisterTypedHandler(msgType string, payloadType reflect.Type, handler func(msg communication.Message) (*communication.Response, error)) {
 	s.ls.Debug(log_service.LogEvent{
 		Message:  "Registering typed handler",
 		Metadata: map[string]any{"messageType": msgType, "payloadType": payloadType.String()},
@@ -93,7 +112,7 @@ func (s *ReplicatedServer) RegisterTypedHandler(msgType string, payloadType refl
 	}
 }
 
-func (s *ReplicatedServer) handleMessage(msg communication.Message) (*communication.Response, error) {
+func (s *RaftServer) handleMessage(msg communication.Message) (*communication.Response, error) {
 	s.ls.Debug(log_service.LogEvent{
 		Message:  "Processing message",
 		Metadata: map[string]any{"type": msg.Type},
@@ -132,7 +151,7 @@ func (s *ReplicatedServer) handleMessage(msg communication.Message) (*communicat
 	}, nil
 }
 
-func (s *ReplicatedServer) HandleStoreFileMessage(msg communication.Message) (*communication.Response, error) {
+func (s *RaftServer) HandleStoreFileMessage(msg communication.Message) (*communication.Response, error) {
 	request := msg.Payload.(communication.StoreFileRequest)
 
 	s.ls.Info(log_service.LogEvent{
@@ -162,7 +181,7 @@ func (s *ReplicatedServer) HandleStoreFileMessage(msg communication.Message) (*c
 	}, nil
 }
 
-func (s *ReplicatedServer) HandleReadFileMessage(msg communication.Message) (*communication.Response, error) {
+func (s *RaftServer) HandleReadFileMessage(msg communication.Message) (*communication.Response, error) {
 	request := msg.Payload.(communication.ReadFileRequest)
 
 	s.ls.Info(log_service.LogEvent{
@@ -193,7 +212,7 @@ func (s *ReplicatedServer) HandleReadFileMessage(msg communication.Message) (*co
 	}, nil
 }
 
-func (s *ReplicatedServer) HandleDeleteFileMessage(msg communication.Message) (*communication.Response, error) {
+func (s *RaftServer) HandleDeleteFileMessage(msg communication.Message) (*communication.Response, error) {
 	request := msg.Payload.(communication.DeleteFileRequest)
 
 	s.ls.Info(log_service.LogEvent{
@@ -223,7 +242,7 @@ func (s *ReplicatedServer) HandleDeleteFileMessage(msg communication.Message) (*
 	}, nil
 }
 
-func (s *ReplicatedServer) HandleStoreChunkMessage(msg communication.Message) (*communication.Response, error) {
+func (s *RaftServer) HandleStoreChunkMessage(msg communication.Message) (*communication.Response, error) {
 	request := msg.Payload.(communication.StoreChunkRequest)
 
 	s.ls.Info(log_service.LogEvent{
@@ -253,7 +272,7 @@ func (s *ReplicatedServer) HandleStoreChunkMessage(msg communication.Message) (*
 	}, nil
 }
 
-func (s *ReplicatedServer) HandleReadChunkMessage(msg communication.Message) (*communication.Response, error) {
+func (s *RaftServer) HandleReadChunkMessage(msg communication.Message) (*communication.Response, error) {
 	request := msg.Payload.(communication.ReadChunkRequest)
 
 	s.ls.Info(log_service.LogEvent{
@@ -284,7 +303,7 @@ func (s *ReplicatedServer) HandleReadChunkMessage(msg communication.Message) (*c
 	}, nil
 }
 
-func (s *ReplicatedServer) HandleDeleteChunkMessage(msg communication.Message) (*communication.Response, error) {
+func (s *RaftServer) HandleDeleteChunkMessage(msg communication.Message) (*communication.Response, error) {
 	request := msg.Payload.(communication.DeleteChunkRequest)
 
 	s.ls.Info(log_service.LogEvent{
@@ -314,7 +333,7 @@ func (s *ReplicatedServer) HandleDeleteChunkMessage(msg communication.Message) (
 	}, nil
 }
 
-func (s *ReplicatedServer) HandleStoreMetadataMessage(msg communication.Message) (*communication.Response, error) {
+func (s *RaftServer) HandleStoreMetadataMessage(msg communication.Message) (*communication.Response, error) {
 	request := msg.Payload.(communication.StoreMetadataRequest)
 	metadata := request.Metadata
 
@@ -338,6 +357,46 @@ func (s *ReplicatedServer) HandleStoreMetadataMessage(msg communication.Message)
 	s.ls.Info(log_service.LogEvent{
 		Message:  "Metadata stored successfully",
 		Metadata: map[string]any{"path": metadata.Path},
+	})
+
+	return &communication.Response{
+		Code: communication.CodeOK,
+	}, nil
+}
+
+func (s *RaftServer) HandleStopServerMessage(msg communication.Message) (*communication.Response, error) {
+	s.ls.Info(log_service.LogEvent{
+		Message: "Received stop server message",
+	})
+
+	// Stop the server in a goroutine to avoid blocking the response
+	go func() {
+		if err := s.Stop(); err != nil {
+			s.ls.Error(log_service.LogEvent{
+				Message:  "Failed to stop server via message",
+				Metadata: map[string]any{"error": err.Error()},
+			})
+		}
+	}()
+
+	return &communication.Response{
+		Code: communication.CodeOK,
+	}, nil
+}
+
+func (s *RaftServer) HandleRequestVoteMessage(msg communication.Message) (*communication.Response, error) {
+	request := msg.Payload.(communication.RequestVoteRequest)
+
+	s.ls.Info(log_service.LogEvent{
+		Message:  "Handling request vote",
+		Metadata: map[string]any{"term": request.Term, "candidateID": request.CandidateID},
+	})
+
+	// For now, just log the request and return OK
+	// Actual voting logic will be implemented in the cluster service
+	s.ls.Debug(log_service.LogEvent{
+		Message:  "Received request vote",
+		Metadata: map[string]any{"from": msg.From, "term": request.Term, "candidateID": request.CandidateID},
 	})
 
 	return &communication.Response{

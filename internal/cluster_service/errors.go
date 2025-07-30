@@ -1,4 +1,4 @@
-package node_registry
+package cluster_service
 
 import "errors"
 

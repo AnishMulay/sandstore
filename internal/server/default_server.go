@@ -4,10 +4,10 @@ import (
 	"context"
 	"reflect"
 
+	"github.com/AnishMulay/sandstore/internal/cluster_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/file_service"
 	"github.com/AnishMulay/sandstore/internal/log_service"
-	"github.com/AnishMulay/sandstore/internal/node_registry"
 )
 
 type DefaultServer struct {
@@ -17,19 +17,20 @@ type DefaultServer struct {
 	ctx           context.Context
 	cancel        context.CancelFunc
 	typedHandlers map[string]*TypedHandler
-	nodeRegistry  node_registry.NodeRegistry
+	// nodeRegistry  node_registry.NodeRegistry
+	clusterService cluster_service.ClusterService
 }
 
-func NewDefaultServer(comm communication.Communicator, fs file_service.FileService, ls log_service.LogService, nr node_registry.NodeRegistry) *DefaultServer {
+func NewDefaultServer(comm communication.Communicator, fs file_service.FileService, ls log_service.LogService, clusterService cluster_service.ClusterService) *DefaultServer {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &DefaultServer{
-		comm:          comm,
-		fs:            fs,
-		ls:            ls,
-		ctx:           ctx,
-		cancel:        cancel,
-		typedHandlers: make(map[string]*TypedHandler),
-		nodeRegistry:  nr,
+		comm:           comm,
+		fs:             fs,
+		ls:             ls,
+		ctx:            ctx,
+		cancel:         cancel,
+		typedHandlers:  make(map[string]*TypedHandler),
+		clusterService: clusterService,
 	}
 }
 

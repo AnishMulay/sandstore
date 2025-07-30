@@ -23,6 +23,8 @@ type GRPCCommunicator struct {
 	clientLock   sync.RWMutex
 	clients      map[string]communicationpb.MessageServiceClient
 	payloadTypes map[string]reflect.Type
+	stopped      bool
+	stopMutex    sync.RWMutex
 }
 
 func NewGRPCCommunicator(addr string, ls log_service.LogService) *GRPCCommunicator {
@@ -42,6 +44,8 @@ func NewGRPCCommunicator(addr string, ls log_service.LogService) *GRPCCommunicat
 	c.payloadTypes[MessageTypeDeleteChunk] = reflect.TypeOf((*DeleteChunkRequest)(nil)).Elem()
 	c.payloadTypes[MessageTypeStoreMetadata] = reflect.TypeOf((*StoreMetadataRequest)(nil)).Elem()
 	c.payloadTypes[MessageTypeDeleteMetadata] = reflect.TypeOf((*DeleteMetadataRequest)(nil)).Elem()
+	c.payloadTypes[MessageTypeStopServer] = reflect.TypeOf((*StopServerRequest)(nil)).Elem()
+	c.payloadTypes[MessageTypeRequestVote] = reflect.TypeOf((*RequestVoteRequest)(nil)).Elem()
 
 	return c
 }
@@ -86,13 +90,27 @@ func (c *GRPCCommunicator) Start(handler MessageHandler) error {
 }
 
 func (c *GRPCCommunicator) Stop() error {
+	c.stopMutex.Lock()
+	defer c.stopMutex.Unlock()
+
+	if c.stopped {
+		c.ls.Debug(log_service.LogEvent{
+			Message:  "GRPC communicator already stopped, skipping",
+			Metadata: map[string]any{"address": c.listenAddress},
+		})
+		return nil
+	}
+
 	c.ls.Info(log_service.LogEvent{
 		Message:  "Stopping GRPC communicator",
 		Metadata: map[string]any{"address": c.listenAddress},
 	})
 
-	c.grpcServer.GracefulStop()
+	if c.grpcServer != nil {
+		c.grpcServer.GracefulStop()
+	}
 
+	c.stopped = true
 	c.ls.Info(log_service.LogEvent{
 		Message:  "GRPC communicator stopped successfully",
 		Metadata: map[string]any{"address": c.listenAddress},

@@ -22,6 +22,8 @@ const (
 	MessageTypeDeleteChunk    = "delete_chunk"
 	MessageTypeStoreMetadata  = "store_metadata"
 	MessageTypeDeleteMetadata = "delete_metadata"
+	MessageTypeStopServer     = "stop_server"
+	MessageTypeRequestVote    = "request_vote"
 )
 
 type StoreFileRequest struct {
@@ -56,6 +58,14 @@ type StoreMetadataRequest struct {
 
 type DeleteMetadataRequest struct {
 	FileID string
+}
+
+type StopServerRequest struct {
+}
+
+type RequestVoteRequest struct {
+	Term        int64
+	CandidateID string
 }
 
 type SandCode string
