@@ -22,6 +22,7 @@ const (
 	MessageTypeDeleteChunk    = "delete_chunk"
 	MessageTypeStoreMetadata  = "store_metadata"
 	MessageTypeDeleteMetadata = "delete_metadata"
+	MessageTypeStopServer     = "stop_server"
 )
 
 type StoreFileRequest struct {
@@ -56,6 +57,9 @@ type StoreMetadataRequest struct {
 
 type DeleteMetadataRequest struct {
 	FileID string
+}
+
+type StopServer struct {
 }
 
 type SandCode string

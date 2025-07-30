@@ -52,3 +52,10 @@ message StoreMetadataRequest {
   int64 file_size = 3;
   int64 timestamp = 4;
 }
+
+message DeleteMetadataRequest {
+  string file_id = 1;
+}
+
+message StopServer {
+}
