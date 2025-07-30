@@ -23,6 +23,7 @@ type RaftClusterService struct {
 	state         RaftState
 	currentTerm   int64
 	votedFor      string
+	voteCount     int64
 	leaderID      string
 	electionTimer *time.Timer
 
@@ -134,4 +135,41 @@ func (r *RaftClusterService) resetElectionTimer() {
 
 	timeout := time.Duration(rand.Intn(150)+150) * time.Millisecond
 	r.electionTimer = time.AfterFunc(timeout, r.startElection)
+}
+
+func (r *RaftClusterService) startElection() {
+	r.mu.Lock()
+	r.state = Candidate
+	r.currentTerm++
+	r.votedFor = r.id
+	r.voteCount = 1
+	term := r.currentTerm
+	r.mu.Unlock()
+
+	r.ls.Info(log_service.LogEvent{
+		Message:  "Starting election",
+		Metadata: map[string]any{"term": term, "candidateID": r.id},
+	})
+
+	nodes, err := r.GetHealthyNodes()
+	if err != nil {
+		r.ls.Error(log_service.LogEvent{
+			Message:  "Failed to get healthy nodes",
+			Metadata: map[string]any{"error": err.Error()},
+		})
+		return
+	}
+
+	for _, node := range nodes {
+		if node.ID == r.id {
+			continue
+		}
+
+		go func(n Node) {
+			ok := r.sendRequestVote(n.ID, term)
+			if ok {
+				r.registerVote()
+			}
+		}(node)
+	}
 }
