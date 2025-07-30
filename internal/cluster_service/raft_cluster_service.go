@@ -33,6 +33,20 @@ type RaftClusterService struct {
 	mu   sync.Mutex
 }
 
+func NewRaftClusterService(id string, nodes []Node, comm communication.Communicator, ls log_service.LogService) *RaftClusterService {
+	return &RaftClusterService{
+		nodes:       nodes,
+		id:          id,
+		state:       Follower,
+		currentTerm: 0,
+		votedFor:    "",
+		voteCount:   0,
+		leaderID:    "",
+		comm:        comm,
+		ls:          ls,
+	}
+}
+
 func (r *RaftClusterService) RegisterNode(node Node) error {
 	r.ls.Info(log_service.LogEvent{
 		Message:  "Registering node",
