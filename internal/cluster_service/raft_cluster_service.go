@@ -212,3 +212,19 @@ func (r *RaftClusterService) sendRequestVote(nodeAddress string, term int64) boo
 
 	return voteGranted
 }
+
+func (r *RaftClusterService) registerVote() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.voteCount++
+	nodes, _ := r.GetHealthyNodes()
+	if r.state == Candidate && r.voteCount > int64(len(nodes))/2 {
+		r.state = Leader
+		r.leaderID = r.id
+		r.ls.Info(log_service.LogEvent{
+			Message:  "Became leader",
+			Metadata: map[string]any{"leaderID": r.leaderID},
+		})
+	}
+}
