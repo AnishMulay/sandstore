@@ -79,9 +79,18 @@ func main() {
 	<-c
 
 	log.Println("Shutting down servers...")
+	var shutdownWg sync.WaitGroup
 	for i, srv := range servers {
-		if err := srv.Stop(); err != nil {
-			log.Printf("Error stopping server %d: %v", i, err)
-		}
+		shutdownWg.Add(1)
+		go func(idx int, server *server.RaftServer) {
+			defer shutdownWg.Done()
+			if err := server.Stop(); err != nil {
+				log.Printf("Error stopping server %d: %v", idx, err)
+			} else {
+				log.Printf("Server %d stopped successfully", idx)
+			}
+		}(i, srv)
 	}
+	shutdownWg.Wait()
+	log.Println("All servers stopped")
 }

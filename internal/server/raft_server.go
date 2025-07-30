@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"reflect"
+	"sync"
 
 	"github.com/AnishMulay/sandstore/internal/chunk_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
@@ -22,6 +23,8 @@ type RaftServer struct {
 	cancel        context.CancelFunc
 	typedHandlers map[string]*TypedHandler
 	nodeRegistry  node_registry.NodeRegistry
+	stopped       bool
+	stopMutex     sync.RWMutex
 }
 
 func NewRaftServer(comm communication.Communicator, fs file_service.FileService, cs chunk_service.ChunkService, ms metadata_service.MetadataService, ls log_service.LogService, nr node_registry.NodeRegistry) *RaftServer {
@@ -60,6 +63,16 @@ func (s *RaftServer) Start() error {
 }
 
 func (s *RaftServer) Stop() error {
+	s.stopMutex.Lock()
+	defer s.stopMutex.Unlock()
+
+	if s.stopped {
+		s.ls.Debug(log_service.LogEvent{
+			Message: "Server already stopped, skipping",
+		})
+		return nil
+	}
+
 	s.ls.Info(log_service.LogEvent{
 		Message: "Stopping raft server",
 	})
@@ -74,6 +87,7 @@ func (s *RaftServer) Stop() error {
 		return ErrServerStopFailed
 	}
 
+	s.stopped = true
 	s.ls.Info(log_service.LogEvent{
 		Message: "raft server stopped successfully",
 	})
@@ -346,24 +360,18 @@ func (s *RaftServer) HandleStoreMetadataMessage(msg communication.Message) (*com
 
 func (s *RaftServer) HandleStopServerMessage(msg communication.Message) (*communication.Response, error) {
 	s.ls.Info(log_service.LogEvent{
-		Message: "Stopping server",
+		Message: "Received stop server message",
 	})
 
-	err := s.Stop()
-	if err != nil {
-		s.ls.Error(log_service.LogEvent{
-			Message:  "Failed to stop server",
-			Metadata: map[string]any{"error": err.Error()},
-		})
-		return &communication.Response{
-			Code: communication.CodeInternal,
-			Body: []byte(ErrServerStopFailed.Error()),
-		}, nil
-	}
-
-	s.ls.Info(log_service.LogEvent{
-		Message: "Server stopped successfully",
-	})
+	// Stop the server in a goroutine to avoid blocking the response
+	go func() {
+		if err := s.Stop(); err != nil {
+			s.ls.Error(log_service.LogEvent{
+				Message:  "Failed to stop server via message",
+				Metadata: map[string]any{"error": err.Error()},
+			})
+		}
+	}()
 
 	return &communication.Response{
 		Code: communication.CodeOK,
