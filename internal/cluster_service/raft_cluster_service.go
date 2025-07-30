@@ -49,7 +49,7 @@ func NewRaftClusterService(id string, nodes []Node, comm communication.Communica
 
 func (r *RaftClusterService) Start() {
 	r.ls.Info(log_service.LogEvent{
-		Message: "Starting Raft cluster service",
+		Message:  "Starting Raft cluster service",
 		Metadata: map[string]any{"nodeID": r.id},
 	})
 	r.resetElectionTimer()
@@ -259,6 +259,29 @@ func (r *RaftClusterService) becomeLeader() {
 	}
 
 	r.startHeartbeats()
+}
+
+func (r *RaftClusterService) HandleRequestVote(req communication.RequestVoteRequest) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if req.Term < r.currentTerm {
+		return false, nil
+	}
+
+	if req.Term > r.currentTerm {
+		r.state = Follower
+		r.currentTerm = req.Term
+		r.votedFor = ""
+		r.voteCount = 0
+	}
+
+	if r.votedFor == "" || r.votedFor == req.CandidateID {
+		r.votedFor = req.CandidateID
+		return true, nil
+	}
+
+	return false, nil
 }
 
 func (r *RaftClusterService) startHeartbeats() {
