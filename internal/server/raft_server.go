@@ -392,14 +392,62 @@ func (s *RaftServer) HandleRequestVoteMessage(msg communication.Message) (*commu
 		Metadata: map[string]any{"term": request.Term, "candidateID": request.CandidateID},
 	})
 
-	// For now, just log the request and return OK
-	// Actual voting logic will be implemented in the cluster service
-	s.ls.Debug(log_service.LogEvent{
-		Message:  "Received request vote",
-		Metadata: map[string]any{"from": msg.From, "term": request.Term, "candidateID": request.CandidateID},
-	})
+	if raftCluster, ok := s.clusterService.(*cluster_service.RaftClusterService); ok {
+		voteGranted, err := raftCluster.HandleRequestVote(request)
+		if err != nil {
+			return &communication.Response{
+				Code: communication.CodeInternal,
+				Body: []byte(err.Error()),
+			}, nil
+		}
+
+		if voteGranted {
+			return &communication.Response{
+				Code: communication.CodeOK,
+			}, nil
+		} else {
+			return &communication.Response{
+				Code: communication.CodeBadRequest,
+			}, nil
+		}
+	}
 
 	return &communication.Response{
-		Code: communication.CodeOK,
+		Code: communication.CodeInternal,
+		Body: []byte("cluster service not available"),
+	}, nil
+}
+
+func (s *RaftServer) HandleAppendEntriesMessage(msg communication.Message) (*communication.Response, error) {
+	request := msg.Payload.(communication.AppendEntriesRequest)
+
+	s.ls.Debug(log_service.LogEvent{
+		Message:  "Handling append entries message",
+		Metadata: map[string]any{"term": request.Term, "leaderID": request.LeaderID},
+	})
+
+	if raftCluster, ok := s.clusterService.(*cluster_service.RaftClusterService); ok {
+		success, err := raftCluster.HandleAppendEntries(request)
+		if err != nil {
+			return &communication.Response{
+				Code: communication.CodeInternal,
+				Body: []byte(err.Error()),
+			}, nil
+		}
+
+		if success {
+			return &communication.Response{
+				Code: communication.CodeOK,
+			}, nil
+		} else {
+			return &communication.Response{
+				Code: communication.CodeBadRequest,
+			}, nil
+		}
+	}
+
+	return &communication.Response{
+		Code: communication.CodeInternal,
+		Body: []byte("cluster service not available"),
 	}, nil
 }

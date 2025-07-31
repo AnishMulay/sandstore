@@ -49,7 +49,7 @@ func NewRaftClusterService(id string, nodes []Node, comm communication.Communica
 
 func (r *RaftClusterService) Start() {
 	r.ls.Info(log_service.LogEvent{
-		Message: "Starting Raft cluster service",
+		Message:  "Starting Raft cluster service",
 		Metadata: map[string]any{"nodeID": r.id},
 	})
 	r.resetElectionTimer()
@@ -204,8 +204,10 @@ func (r *RaftClusterService) sendRequestVote(nodeAddress string, term int64) boo
 	})
 
 	req := communication.RequestVoteRequest{
-		Term:        term,
-		CandidateID: r.id,
+		Term:         term,
+		CandidateID:  r.id,
+		LastLogIndex: 0, // TODO: Get from log service
+		LastLogTerm:  0, // TODO: Get from log service
 	}
 
 	msg := communication.Message{
@@ -223,8 +225,6 @@ func (r *RaftClusterService) sendRequestVote(nodeAddress string, term int64) boo
 		return false
 	}
 
-	// For now, assume vote is granted if response is OK
-	// I'll need to implement proper response parsing based on raft later
 	voteGranted := resp.Code == communication.CodeOK
 
 	r.ls.Debug(log_service.LogEvent{
@@ -261,6 +261,162 @@ func (r *RaftClusterService) becomeLeader() {
 	r.startHeartbeats()
 }
 
-func (r *RaftClusterService) startHeartbeats() {
+func (r *RaftClusterService) HandleRequestVote(req communication.RequestVoteRequest) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
+	if req.Term < r.currentTerm {
+		return false, nil
+	}
+
+	if req.Term > r.currentTerm {
+		r.state = Follower
+		r.currentTerm = req.Term
+		r.votedFor = ""
+		r.voteCount = 0
+	}
+
+	if r.votedFor == "" || r.votedFor == req.CandidateID {
+		r.votedFor = req.CandidateID
+		return true, nil
+	}
+
+	return false, nil
+}
+
+func (r *RaftClusterService) HandleAppendEntries(req communication.AppendEntriesRequest) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.ls.Debug(log_service.LogEvent{
+		Message:  "Handling append entries",
+		Metadata: map[string]any{"term": req.Term, "leaderID": req.LeaderID, "currentTerm": r.currentTerm},
+	})
+
+	if req.Term < r.currentTerm {
+		r.ls.Debug(log_service.LogEvent{
+			Message:  "Rejecting append entries - stale term",
+			Metadata: map[string]any{"requestTerm": req.Term, "currentTerm": r.currentTerm},
+		})
+		return false, nil
+	}
+
+	if req.Term > r.currentTerm {
+		r.ls.Info(log_service.LogEvent{
+			Message:  "Received higher term, converting to follower",
+			Metadata: map[string]any{"oldTerm": r.currentTerm, "newTerm": req.Term},
+		})
+		r.currentTerm = req.Term
+		r.votedFor = ""
+		r.voteCount = 0
+		r.state = Follower
+	}
+
+	if r.state == Follower || r.state == Candidate {
+		r.state = Follower
+		r.leaderID = req.LeaderID
+		r.resetElectionTimer()
+
+		r.ls.Debug(log_service.LogEvent{
+			Message:  "Heartbeat received, election timer reset",
+			Metadata: map[string]any{"leaderID": req.LeaderID, "term": req.Term},
+		})
+	}
+
+	return true, nil
+}
+
+func (r *RaftClusterService) startHeartbeats() {
+	r.ls.Info(log_service.LogEvent{
+		Message:  "Starting heartbeats",
+		Metadata: map[string]any{"term": r.currentTerm, "leaderID": r.leaderID},
+	})
+
+	heartBeatInterval := 100 * time.Millisecond
+	heartbeatTicker := time.NewTicker(heartBeatInterval)
+
+	go func() {
+		defer heartbeatTicker.Stop()
+
+		for {
+			select {
+			case <-heartbeatTicker.C:
+				r.mu.Lock()
+
+				if r.state != Leader {
+					r.mu.Unlock()
+					return
+				}
+
+				currentTerm := r.currentTerm
+				r.mu.Unlock()
+
+				r.sendHeartbeats(currentTerm)
+			}
+		}
+	}()
+}
+
+func (r *RaftClusterService) sendHeartbeats(term int64) {
+	nodes, err := r.GetHealthyNodes()
+	if err != nil {
+		r.ls.Error(log_service.LogEvent{
+			Message:  "Failed to get healthy nodes",
+			Metadata: map[string]any{"error": err.Error()},
+		})
+		return
+	}
+
+	for _, node := range nodes {
+		if node.ID == r.id {
+			continue
+		}
+
+		go func(n Node) {
+			r.sendAppendEntries(n.Address, term)
+		}(node)
+	}
+}
+
+func (r *RaftClusterService) sendAppendEntries(nodeAddress string, term int64) {
+	r.ls.Debug(log_service.LogEvent{
+		Message:  "Sending append entries",
+		Metadata: map[string]any{"nodeAddress": nodeAddress, "term": term},
+	})
+
+	req := communication.AppendEntriesRequest{
+		Term:         term,
+		LeaderID:     r.id,
+		PrevLogIndex: 0, // TODO: Get from log service
+		PrevLogTerm:  0, // TODO: Get from log service
+	}
+
+	msg := communication.Message{
+		From:    r.comm.Address(),
+		Type:    communication.MessageTypeAppendEntries,
+		Payload: req,
+	}
+
+	resp, err := r.comm.Send(context.Background(), nodeAddress, msg)
+	if err != nil {
+		r.ls.Error(log_service.LogEvent{
+			Message:  "Failed to send append entries",
+			Metadata: map[string]any{"nodeAddress": nodeAddress, "error": err.Error()},
+		})
+		return
+	}
+
+	// might need to change this later to differentiate between kinds of failures
+	if resp.Code != communication.CodeOK {
+		r.ls.Error(log_service.LogEvent{
+			Message:  "Failed to send append entries",
+			Metadata: map[string]any{"nodeAddress": nodeAddress, "error": err.Error()},
+		})
+		return
+	}
+
+	r.ls.Debug(log_service.LogEvent{
+		Message:  "Received append entries response",
+		Metadata: map[string]any{"nodeAddress": nodeAddress},
+	})
 }
