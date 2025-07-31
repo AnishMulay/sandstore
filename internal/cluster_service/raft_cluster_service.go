@@ -245,7 +245,7 @@ func (r *RaftClusterService) registerVote() {
 		r.becomeLeader()
 		r.ls.Info(log_service.LogEvent{
 			Message:  "Became leader",
-			Metadata: map[string]any{"leaderID": r.leaderID},
+			Metadata: map[string]any{"term": r.currentTerm, "leaderID": r.leaderID},
 		})
 	}
 }
