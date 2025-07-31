@@ -5,18 +5,21 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
 
 type LocalDiscLogService struct {
-	logDir string
-	nodeID string
-	mu     sync.Mutex
-	logger *log.Logger
+	logDir        string
+	nodeID        string
+	mu            sync.Mutex
+	logger        *log.Logger
+	minLevel      int  // Minimum log level to write to disc
+	filterEnabled bool // Whether filtering is enabled
 }
 
-func NewLocalDiscLogService(logDir string, nodeID string) *LocalDiscLogService {
+func NewLocalDiscLogService(logDir string, nodeID string, minLogLevel ...string) *LocalDiscLogService {
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		log.Fatalf("failed to create log directory: %v", err)
 	}
@@ -27,11 +30,44 @@ func NewLocalDiscLogService(logDir string, nodeID string) *LocalDiscLogService {
 		log.Fatalf("failed to open log file: %v", err)
 	}
 
-	return &LocalDiscLogService{
-		logDir: logDir,
-		nodeID: nodeID,
-		logger: log.New(file, "", 0),
+	service := &LocalDiscLogService{
+		logDir:        logDir,
+		nodeID:        nodeID,
+		logger:        log.New(file, "", 0),
+		filterEnabled: false,
+		minLevel:      DebugLevelValue, // Default to most verbose
 	}
+
+	// Configure log level if provided
+	if len(minLogLevel) > 0 && minLogLevel[0] != "" {
+		service.SetMinLogLevel(minLogLevel[0])
+	}
+
+	return service
+}
+
+func (ls *LocalDiscLogService) SetMinLogLevel(level string) {
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+
+	normalizedLevel := strings.ToUpper(strings.TrimSpace(level))
+	ls.minLevel = GetLevelValue(normalizedLevel)
+	ls.filterEnabled = true
+}
+
+func (ls *LocalDiscLogService) DisableFiltering() {
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	ls.filterEnabled = false
+}
+
+func (ls *LocalDiscLogService) shouldLog(level string) bool {
+	if !ls.filterEnabled {
+		return true // If filtering disabled, log everything
+	}
+
+	levelValue := GetLevelValue(level)
+	return levelValue >= ls.minLevel
 }
 
 func formatLog(level string, event LogEvent) string {
@@ -49,11 +85,14 @@ func formatLog(level string, event LogEvent) string {
 }
 
 func (ls *LocalDiscLogService) log(level string, event LogEvent) {
+	if !ls.shouldLog(level) {
+		return
+	}
+
 	ls.mu.Lock()
 	defer ls.mu.Unlock()
 
 	event.NodeID = ls.nodeID
-
 	logMessage := formatLog(level, event)
 	ls.logger.Print(logMessage)
 }

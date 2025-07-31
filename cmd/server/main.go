@@ -21,7 +21,7 @@ import (
 
 func createRaftServer(port string, nodeID string, otherNodes []cluster_service.Node) *server.RaftServer {
 	logDir := "./logs"
-	ls := log_service.NewLocalDiscLogService(logDir, nodeID)
+	ls := log_service.NewLocalDiscLogService(logDir, nodeID, "INFO")
 	ms := metadata_service.NewInMemoryMetadataService(ls)
 	chunkPath := "./chunks/" + nodeID
 	cs := chunk_service.NewLocalDiscChunkService(chunkPath, ls)
