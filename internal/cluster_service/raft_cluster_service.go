@@ -420,3 +420,27 @@ func (r *RaftClusterService) sendAppendEntries(nodeAddress string, term int64) {
 		Metadata: map[string]any{"nodeAddress": nodeAddress},
 	})
 }
+
+func (r *RaftClusterService) IsLeader() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	return r.state == Leader
+}
+
+func (r *RaftClusterService) GetLeaderAddress() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.state == Leader {
+		return r.comm.Address()
+	}
+
+	for _, node := range r.nodes {
+		if node.ID == r.leaderID {
+			return node.Address
+		}
+	}
+
+	return "" // No known leader
+}
