@@ -284,6 +284,48 @@ func (r *RaftClusterService) HandleRequestVote(req communication.RequestVoteRequ
 	return false, nil
 }
 
+func (r *RaftClusterService) HandleAppendEntries(req communication.AppendEntriesRequest) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	r.ls.Debug(log_service.LogEvent{
+		Message:  "Handling append entries",
+		Metadata: map[string]any{"term": req.Term, "leaderID": req.LeaderID, "currentTerm": r.currentTerm},
+	})
+
+	if req.Term < r.currentTerm {
+		r.ls.Debug(log_service.LogEvent{
+			Message:  "Rejecting append entries - stale term",
+			Metadata: map[string]any{"requestTerm": req.Term, "currentTerm": r.currentTerm},
+		})
+		return false, nil
+	}
+
+	if req.Term > r.currentTerm {
+		r.ls.Info(log_service.LogEvent{
+			Message:  "Received higher term, converting to follower",
+			Metadata: map[string]any{"oldTerm": r.currentTerm, "newTerm": req.Term},
+		})
+		r.currentTerm = req.Term
+		r.votedFor = ""
+		r.voteCount = 0
+		r.state = Follower
+	}
+
+	if r.state == Follower || r.state == Candidate {
+		r.state = Follower
+		r.leaderID = req.LeaderID
+		r.resetElectionTimer()
+
+		r.ls.Debug(log_service.LogEvent{
+			Message:  "Heartbeat received, election timer reset",
+			Metadata: map[string]any{"leaderID": req.LeaderID, "term": req.Term},
+		})
+	}
+
+	return true, nil
+}
+
 func (r *RaftClusterService) startHeartbeats() {
 	r.ls.Info(log_service.LogEvent{
 		Message:  "Starting heartbeats",
