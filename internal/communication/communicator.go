@@ -24,6 +24,7 @@ const (
 	MessageTypeDeleteMetadata = "delete_metadata"
 	MessageTypeStopServer     = "stop_server"
 	MessageTypeRequestVote    = "request_vote"
+	MessageTypeAppendEntries  = "append_entries"
 )
 
 type StoreFileRequest struct {
@@ -68,6 +69,13 @@ type RequestVoteRequest struct {
 	CandidateID  string
 	LastLogIndex int64
 	LastLogTerm  int64
+}
+
+type AppendEntriesRequest struct {
+	Term         int64
+	LeaderID     string
+	PrevLogIndex int64
+	PrevLogTerm  int64
 }
 
 type SandCode string

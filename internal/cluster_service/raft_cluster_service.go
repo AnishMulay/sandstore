@@ -204,8 +204,10 @@ func (r *RaftClusterService) sendRequestVote(nodeAddress string, term int64) boo
 	})
 
 	req := communication.RequestVoteRequest{
-		Term:        term,
-		CandidateID: r.id,
+		Term:         term,
+		CandidateID:  r.id,
+		LastLogIndex: 0, // TODO: Get from log service
+		LastLogTerm:  0, // TODO: Get from log service
 	}
 
 	msg := communication.Message{
@@ -223,8 +225,6 @@ func (r *RaftClusterService) sendRequestVote(nodeAddress string, term int64) boo
 		return false
 	}
 
-	// For now, assume vote is granted if response is OK
-	// I'll need to implement proper response parsing based on raft later
 	voteGranted := resp.Code == communication.CodeOK
 
 	r.ls.Debug(log_service.LogEvent{

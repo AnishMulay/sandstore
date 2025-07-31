@@ -66,3 +66,10 @@ message RequestVoteRequest {
   int64 last_log_index = 3;
   int64 last_log_term = 4;
 }
+
+message AppendEntriesRequest {
+  int64 term = 1;
+  string leader_id = 2;
+  int64 prev_log_index = 3;
+  int64 prev_log_term = 4;
+}

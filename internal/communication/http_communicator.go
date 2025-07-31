@@ -43,6 +43,7 @@ func NewHTTPCommunicator(listenAddress string, ls log_service.LogService) *HTTPC
 	c.payloadTypes[MessageTypeDeleteMetadata] = reflect.TypeOf((*DeleteMetadataRequest)(nil)).Elem()
 	c.payloadTypes[MessageTypeStopServer] = reflect.TypeOf((*StopServerRequest)(nil)).Elem()
 	c.payloadTypes[MessageTypeRequestVote] = reflect.TypeOf((*RequestVoteRequest)(nil)).Elem()
+	c.payloadTypes[MessageTypeAppendEntries] = reflect.TypeOf((*AppendEntriesRequest)(nil)).Elem()
 
 	return c
 }
