@@ -335,3 +335,46 @@ func (r *RaftClusterService) sendHeartbeats(term int64) {
 		}(node)
 	}
 }
+
+func (r *RaftClusterService) sendAppendEntries(nodeAddress string, term int64) {
+	r.ls.Debug(log_service.LogEvent{
+		Message:  "Sending append entries",
+		Metadata: map[string]any{"nodeAddress": nodeAddress, "term": term},
+	})
+
+	req := communication.AppendEntriesRequest{
+		Term:         term,
+		LeaderID:     r.id,
+		PrevLogIndex: 0, // TODO: Get from log service
+		PrevLogTerm:  0, // TODO: Get from log service
+	}
+
+	msg := communication.Message{
+		From:    r.comm.Address(),
+		Type:    communication.MessageTypeAppendEntries,
+		Payload: req,
+	}
+
+	resp, err := r.comm.Send(context.Background(), nodeAddress, msg)
+	if err != nil {
+		r.ls.Error(log_service.LogEvent{
+			Message:  "Failed to send append entries",
+			Metadata: map[string]any{"nodeAddress": nodeAddress, "error": err.Error()},
+		})
+		return
+	}
+
+	// might need to change this later to differentiate between kinds of failures
+	if resp.Code != communication.CodeOK {
+		r.ls.Error(log_service.LogEvent{
+			Message:  "Failed to send append entries",
+			Metadata: map[string]any{"nodeAddress": nodeAddress, "error": err.Error()},
+		})
+		return
+	}
+
+	r.ls.Debug(log_service.LogEvent{
+		Message:  "Received append entries response",
+		Metadata: map[string]any{"nodeAddress": nodeAddress},
+	})
+}
