@@ -314,3 +314,24 @@ func (r *RaftClusterService) startHeartbeats() {
 		}
 	}()
 }
+
+func (r *RaftClusterService) sendHeartbeats(term int64) {
+	nodes, err := r.GetHealthyNodes()
+	if err != nil {
+		r.ls.Error(log_service.LogEvent{
+			Message:  "Failed to get healthy nodes",
+			Metadata: map[string]any{"error": err.Error()},
+		})
+		return
+	}
+
+	for _, node := range nodes {
+		if node.ID == r.id {
+			continue
+		}
+
+		go func(n Node) {
+			r.sendAppendEntries(n.Address, term)
+		}(node)
+	}
+}
