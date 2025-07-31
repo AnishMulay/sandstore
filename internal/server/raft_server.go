@@ -154,8 +154,20 @@ func (s *RaftServer) handleMessage(msg communication.Message) (*communication.Re
 func (s *RaftServer) HandleStoreFileMessage(msg communication.Message) (*communication.Response, error) {
 	request := msg.Payload.(communication.StoreFileRequest)
 
-	s.ls.Info(log_service.LogEvent{
-		Message:  "Storing file",
+	// Check if this node is the leader
+	if raftCluster, ok := s.clusterService.(*cluster_service.RaftClusterService); ok {
+		if !raftCluster.IsLeader() {
+			s.ls.Error(log_service.LogEvent{
+				Message:  "Store file request received by non-leader, redirecting",
+				Metadata: map[string]any{"path": request.Path, "size": len(request.Data)},
+			})
+			return s.redirectToLeader(msg)
+		}
+	}
+
+	// Only leaders process the actual store operation
+	s.ls.Error(log_service.LogEvent{
+		Message:  "Processing store file as leader",
 		Metadata: map[string]any{"path": request.Path, "size": len(request.Data)},
 	})
 
@@ -170,11 +182,6 @@ func (s *RaftServer) HandleStoreFileMessage(msg communication.Message) (*communi
 			Body: []byte(ErrFileStoreFailed.Error()),
 		}, nil
 	}
-
-	s.ls.Info(log_service.LogEvent{
-		Message:  "File stored successfully",
-		Metadata: map[string]any{"path": request.Path},
-	})
 
 	return &communication.Response{
 		Code: communication.CodeOK,
@@ -215,8 +222,20 @@ func (s *RaftServer) HandleReadFileMessage(msg communication.Message) (*communic
 func (s *RaftServer) HandleDeleteFileMessage(msg communication.Message) (*communication.Response, error) {
 	request := msg.Payload.(communication.DeleteFileRequest)
 
-	s.ls.Info(log_service.LogEvent{
-		Message:  "Deleting file",
+	// Check if this node is the leader
+	if raftCluster, ok := s.clusterService.(*cluster_service.RaftClusterService); ok {
+		if !raftCluster.IsLeader() {
+			s.ls.Error(log_service.LogEvent{
+				Message:  "Delete file request received by non-leader, redirecting",
+				Metadata: map[string]any{"path": request.Path},
+			})
+			return s.redirectToLeader(msg)
+		}
+	}
+
+	// Only leaders process the actual delete operation
+	s.ls.Error(log_service.LogEvent{
+		Message:  "Processing delete file as leader",
 		Metadata: map[string]any{"path": request.Path},
 	})
 
@@ -231,11 +250,6 @@ func (s *RaftServer) HandleDeleteFileMessage(msg communication.Message) (*commun
 			Body: []byte(ErrFileDeleteFailed.Error()),
 		}, nil
 	}
-
-	s.ls.Info(log_service.LogEvent{
-		Message:  "File deleted successfully",
-		Metadata: map[string]any{"path": request.Path},
-	})
 
 	return &communication.Response{
 		Code: communication.CodeOK,
@@ -444,6 +458,55 @@ func (s *RaftServer) HandleAppendEntriesMessage(msg communication.Message) (*com
 				Code: communication.CodeBadRequest,
 			}, nil
 		}
+	}
+
+	return &communication.Response{
+		Code: communication.CodeInternal,
+		Body: []byte("cluster service not available"),
+	}, nil
+}
+
+func (s *RaftServer) redirectToLeader(msg communication.Message) (*communication.Response, error) {
+	if raftCluster, ok := s.clusterService.(*cluster_service.RaftClusterService); ok {
+		leaderAddress := raftCluster.GetLeaderAddress()
+		if leaderAddress == "" {
+			s.ls.Error(log_service.LogEvent{
+				Message:  "No known leader to redirect request",
+				Metadata: map[string]any{"messageType": msg.Type},
+			})
+			return &communication.Response{
+				Code: communication.CodeUnavailable,
+				Body: []byte("no leader available"),
+			}, nil
+		}
+
+		s.ls.Error(log_service.LogEvent{
+			Message: "Redirecting request to leader",
+			Metadata: map[string]any{
+				"messageType":   msg.Type,
+				"leaderAddress": leaderAddress,
+				"originalFrom":  msg.From,
+			},
+		})
+
+		// Forward the original message to the leader
+		response, err := s.comm.Send(context.Background(), leaderAddress, msg)
+		if err != nil {
+			s.ls.Error(log_service.LogEvent{
+				Message: "Failed to redirect request to leader",
+				Metadata: map[string]any{
+					"messageType":   msg.Type,
+					"leaderAddress": leaderAddress,
+					"error":         err.Error(),
+				},
+			})
+			return &communication.Response{
+				Code: communication.CodeInternal,
+				Body: []byte("failed to redirect to leader"),
+			}, nil
+		}
+
+		return response, nil
 	}
 
 	return &communication.Response{
