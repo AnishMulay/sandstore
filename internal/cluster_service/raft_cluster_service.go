@@ -285,5 +285,32 @@ func (r *RaftClusterService) HandleRequestVote(req communication.RequestVoteRequ
 }
 
 func (r *RaftClusterService) startHeartbeats() {
+	r.ls.Info(log_service.LogEvent{
+		Message:  "Starting heartbeats",
+		Metadata: map[string]any{"term": r.currentTerm, "leaderID": r.leaderID},
+	})
 
+	heartBeatInterval := 100 * time.Millisecond
+	heartbeatTicker := time.NewTicker(heartBeatInterval)
+
+	go func() {
+		defer heartbeatTicker.Stop()
+
+		for {
+			select {
+			case <-heartbeatTicker.C:
+				r.mu.Lock()
+
+				if r.state != Leader {
+					r.mu.Unlock()
+					return
+				}
+
+				currentTerm := r.currentTerm
+				r.mu.Unlock()
+
+				r.sendHeartbeats(currentTerm)
+			}
+		}
+	}()
 }
