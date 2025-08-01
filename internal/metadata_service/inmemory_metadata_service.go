@@ -81,6 +81,7 @@ func (ms *InMemoryMetadataService) CreateFileMetadataFromStruct(metadata FileMet
 	return nil
 }
 
+// CreateFileMetadata is deprecated and will be removed in future versions.
 func (ms *InMemoryMetadataService) CreateFileMetadata(path string, size int64, chunks []chunk_service.FileChunk) error {
 	ms.ls.Info(log_service.LogEvent{
 		Message:  "Creating file metadata",
