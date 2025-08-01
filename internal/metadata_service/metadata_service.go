@@ -17,9 +17,36 @@ type FileMetadata struct {
 }
 
 type MetadataService interface {
+	// Being deprecated
 	CreateFileMetadata(path string, size int64, chunks []chunk_service.FileChunk) error
+
+	// New method, will be renamed to CreateFileMetadata in the future
+	CreateFileMetadataFromStruct(metadata FileMetadata) error
+
 	GetFileMetadata(path string) (*FileMetadata, error)
 	DeleteFileMetadata(path string) error
 	ListDirectory(path string) ([]FileMetadata, error)
 	UpdateFileMetadata(path string, metadata FileMetadata) error
+}
+
+func (fm FileMetadata) Validate() error {
+	if fm.Path == "" {
+		return ErrInvalidPath
+	}
+	if fm.FileID == "" {
+		return ErrMissingFileID
+	}
+	if fm.Size < 0 {
+		return ErrInvalidSize
+	}
+	if fm.CreatedAt.IsZero() {
+		return ErrMissingCreatedAt
+	}
+	if fm.ModifiedAt.IsZero() {
+		return ErrMissingModifiedAt
+	}
+	if fm.Permissions == "" {
+		return ErrMissingPermissions
+	}
+	return nil
 }
