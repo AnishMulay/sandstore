@@ -21,6 +21,66 @@ func NewInMemoryMetadataService(ls log_service.LogService) *InMemoryMetadataServ
 	}
 }
 
+func (ms *InMemoryMetadataService) CreateFileMetadataFromStruct(metadata FileMetadata) error {
+	ms.ls.Info(log_service.LogEvent{
+		Message: "Creating file metadata from struct",
+		Metadata: map[string]any{
+			"path":   metadata.Path,
+			"fileID": metadata.FileID,
+			"size":   metadata.Size,
+			"chunks": len(metadata.Chunks),
+		},
+	})
+
+	// Validate the metadata
+	if err := metadata.Validate(); err != nil {
+		ms.ls.Error(log_service.LogEvent{
+			Message:  "Invalid metadata provided",
+			Metadata: map[string]any{"path": metadata.Path, "error": err.Error()},
+		})
+		return err
+	}
+
+	ms.mu.RLock()
+	_, exists := ms.files[metadata.Path]
+	ms.mu.RUnlock()
+
+	if exists {
+		ms.ls.Error(log_service.LogEvent{
+			Message:  "File metadata already exists",
+			Metadata: map[string]any{"path": metadata.Path},
+		})
+		return ErrFileAlreadyExists
+	}
+
+	// Make a copy to avoid external mutations
+	file := &FileMetadata{
+		FileID:      metadata.FileID,
+		Path:        metadata.Path,
+		Size:        metadata.Size,
+		CreatedAt:   metadata.CreatedAt,
+		ModifiedAt:  metadata.ModifiedAt,
+		Permissions: metadata.Permissions,
+		Chunks:      make([]chunk_service.FileChunk, len(metadata.Chunks)),
+	}
+	copy(file.Chunks, metadata.Chunks)
+
+	ms.mu.Lock()
+	ms.files[metadata.Path] = file
+	ms.mu.Unlock()
+
+	ms.ls.Info(log_service.LogEvent{
+		Message: "File metadata created successfully",
+		Metadata: map[string]any{
+			"path":   metadata.Path,
+			"fileID": metadata.FileID,
+			"chunks": len(metadata.Chunks),
+		},
+	})
+
+	return nil
+}
+
 func (ms *InMemoryMetadataService) CreateFileMetadata(path string, size int64, chunks []chunk_service.FileChunk) error {
 	ms.ls.Info(log_service.LogEvent{
 		Message:  "Creating file metadata",
