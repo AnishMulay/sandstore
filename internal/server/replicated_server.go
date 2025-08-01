@@ -323,7 +323,8 @@ func (s *ReplicatedServer) HandleStoreMetadataMessage(msg communication.Message)
 		Metadata: map[string]any{"path": metadata.Path, "size": metadata.Size, "chunks": len(metadata.Chunks)},
 	})
 
-	err := s.ms.CreateFileMetadata(metadata.Path, metadata.Size, metadata.Chunks)
+	fileMetadata := metadata_service.NewFileMetadata(metadata.Path, metadata.Size, metadata.Chunks)
+	err := s.ms.CreateFileMetadataFromStruct(fileMetadata)
 	if err != nil {
 		s.ls.Error(log_service.LogEvent{
 			Message:  "Failed to store metadata",

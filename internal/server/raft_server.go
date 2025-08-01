@@ -347,37 +347,6 @@ func (s *RaftServer) HandleDeleteChunkMessage(msg communication.Message) (*commu
 	}, nil
 }
 
-func (s *RaftServer) HandleStoreMetadataMessage(msg communication.Message) (*communication.Response, error) {
-	request := msg.Payload.(communication.StoreMetadataRequest)
-	metadata := request.Metadata
-
-	s.ls.Info(log_service.LogEvent{
-		Message:  "Storing metadata",
-		Metadata: map[string]any{"path": metadata.Path, "size": metadata.Size, "chunks": len(metadata.Chunks)},
-	})
-
-	err := s.ms.CreateFileMetadata(metadata.Path, metadata.Size, metadata.Chunks)
-	if err != nil {
-		s.ls.Error(log_service.LogEvent{
-			Message:  "Failed to store metadata",
-			Metadata: map[string]any{"path": metadata.Path, "error": err.Error()},
-		})
-		return &communication.Response{
-			Code: communication.CodeInternal,
-			Body: []byte(ErrMetadataStoreFailed.Error()),
-		}, nil
-	}
-
-	s.ls.Info(log_service.LogEvent{
-		Message:  "Metadata stored successfully",
-		Metadata: map[string]any{"path": metadata.Path},
-	})
-
-	return &communication.Response{
-		Code: communication.CodeOK,
-	}, nil
-}
-
 func (s *RaftServer) HandleStopServerMessage(msg communication.Message) (*communication.Response, error) {
 	s.ls.Info(log_service.LogEvent{
 		Message: "Received stop server message",
