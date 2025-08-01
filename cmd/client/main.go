@@ -2,104 +2,158 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"fmt"
 	"log"
 	"os"
-
-	"github.com/AnishMulay/sandstore/internal/communication"
-	"github.com/AnishMulay/sandstore/internal/log_service"
+	"strings"
 )
 
 func main() {
-	logDir := "./logs"
-	nodeID := "client"
-	ls := log_service.NewLocalDiscLogService(logDir, nodeID)
-	comm := communication.NewGRPCCommunicator(":8081", ls)
-	ctx := context.Background()
-	serverAddr := "localhost:8080"
-	readServerAddr := "localhost:8081" // Server to test lazy loading from
+	fmt.Println("=====================================")
+	fmt.Println("RAFT CONSENSUS TESTING CLIENT")
+	fmt.Println("=====================================")
+	fmt.Println()
+	fmt.Println("This client tests Raft leader election and leader-only operations.")
+	fmt.Println("Make sure you have started 3 servers with 'make server' before running.")
+	fmt.Println()
+
+	// Initialize test configuration
+	config := NewTestConfig()
+
+	// Show menu
+	for {
+		showMenu()
+		choice := getUserChoice()
+
+		switch choice {
+		case "1":
+			RunScenario1(config)
+			waitForContinue()
+		case "2":
+			RunScenario2(config)
+			waitForContinue()
+		case "3":
+			fmt.Println("Running both scenarios sequentially...")
+			RunScenario1(config)
+			fmt.Println("\n" + strings.Repeat("=", 60))
+			fmt.Println("MOVING TO SCENARIO 2")
+			fmt.Println(strings.Repeat("=", 60))
+			waitForContinue()
+			RunScenario2(config)
+			waitForContinue()
+		case "4":
+			config.PrintServerStatus()
+			waitForContinue()
+		case "5":
+			quickOperationTest(config)
+			waitForContinue()
+		case "q", "Q":
+			fmt.Println("Exiting test client...")
+			return
+		default:
+			fmt.Println("Invalid choice. Please try again.")
+		}
+	}
+}
+
+func showMenu() {
+	fmt.Println("\n========== TEST MENU ==========")
+	fmt.Println("1. Scenario 1: Normal Operation (Leader Redirection)")
+	fmt.Println("2. Scenario 2: Leader Failure (Election Recovery)")
+	fmt.Println("3. Run Both Scenarios")
+	fmt.Println("4. Check Server Status")
+	fmt.Println("5. Quick Operation Test")
+	fmt.Println("Q. Quit")
+	fmt.Println("===============================")
+	fmt.Print("Enter your choice: ")
+}
+
+func getUserChoice() string {
 	scanner := bufio.NewScanner(os.Stdin)
-
-	fileData := []byte("This is sample file content that will be chunked and stored in the sandstore system.")
-	filePath := "test_file.txt"
-
-	// Store file
-	storeRequest := communication.StoreFileRequest{
-		Path: filePath,
-		Data: fileData,
-	}
-
-	storeMsg := communication.Message{
-		From:    "client",
-		Type:    communication.MessageTypeStoreFile,
-		Payload: storeRequest,
-	}
-
-	log.Printf("Storing file with %d bytes...", len(fileData))
-	resp, err := comm.Send(ctx, serverAddr, storeMsg)
-	if err != nil {
-		log.Printf("Failed to store file: %v", err)
-		return
-	}
-	log.Printf("File stored successfully, response code: %s", resp.Code)
-
-	// Wait for manual chunk deletion
-	fmt.Println("\nFile has been stored and replicated.")
-	fmt.Printf("Now manually delete a chunk from server 8081 (localhost:8081)\n")
-	fmt.Print("Press Enter after deleting a chunk to test lazy loading...")
 	scanner.Scan()
+	return strings.TrimSpace(scanner.Text())
+}
 
-	// Read file to test lazy loading
-	readRequest := communication.ReadFileRequest{
-		Path: filePath,
-	}
+func waitForContinue() {
+	fmt.Print("\nPress Enter to return to menu...")
+	bufio.NewScanner(os.Stdin).Scan()
+}
 
-	readMsg := communication.Message{
-		From:    "client",
-		Type:    communication.MessageTypeReadFile,
-		Payload: readRequest,
-	}
+// quickOperationTest performs a simple test to verify basic functionality
+func quickOperationTest(config *TestConfig) {
+	fmt.Println("\n=== Quick Operation Test ===")
+	fmt.Println("Testing basic store/read/delete cycle...")
 
-	log.Printf("Reading file to test lazy chunk loading...")
-	resp, err = comm.Send(ctx, readServerAddr, readMsg)
-	if err != nil {
-		log.Printf("Failed to read file: %v", err)
+	// Check server status first
+	config.PrintServerStatus()
+	aliveServers := config.FindAliveServers()
+
+	if len(aliveServers) == 0 {
+		fmt.Println("❌ No servers are responding!")
 		return
 	}
-	log.Printf("File read successfully, response code: %s", resp.Code)
 
-	// Print file contents to verify correctness
-	fmt.Printf("\nFile contents: %s\n", string(resp.Body))
-	fmt.Printf("Original data: %s\n", string(fileData))
-	if string(resp.Body) == string(fileData) {
-		fmt.Println("✓ File contents match - lazy loading successful!")
+	fmt.Printf("✓ Found %d responding servers\n", len(aliveServers))
+
+	testFile := "quick_test.txt"
+	testData := []byte("Quick test file content - " + fmt.Sprint(len(aliveServers)) + " servers active")
+
+	// Use first alive server
+	serverAddr := aliveServers[0].Address
+
+	fmt.Printf("Using server: %s\n", serverAddr)
+
+	// Store
+	fmt.Print("Store operation... ")
+	resp, err := config.SendStoreFileRequest(serverAddr, testFile, testData)
+	if err != nil {
+		fmt.Printf("❌ Failed: %v\n", err)
+		return
+	}
+	fmt.Printf("✓ Success (%s)\n", resp.Code)
+
+	// Read
+	fmt.Print("Read operation... ")
+	resp, err = config.SendReadFileRequest(serverAddr, testFile)
+	if err != nil {
+		fmt.Printf("❌ Failed: %v\n", err)
+		return
+	}
+	if resp.Code == "OK" {
+		fmt.Printf("✓ Success - Content length: %d bytes\n", len(resp.Body))
 	} else {
-		fmt.Println("✗ File contents don't match - lazy loading failed!")
-	}
-
-	fmt.Print("\nPress Enter to delete the file...")
-	scanner.Scan()
-
-	// Delete file
-	deleteRequest := communication.DeleteFileRequest{
-		Path: filePath,
-	}
-
-	deleteMsg := communication.Message{
-		From:    "client",
-		Type:    communication.MessageTypeDeleteFile,
-		Payload: deleteRequest,
-	}
-
-	log.Printf("Deleting file...")
-	resp, err = comm.Send(ctx, serverAddr, deleteMsg)
-	if err != nil {
-		log.Printf("Failed to delete file: %v", err)
+		fmt.Printf("❌ Failed with code: %s\n", resp.Code)
 		return
 	}
-	log.Printf("File deleted successfully, response code: %s", resp.Code)
 
-	fmt.Println("\nFile has been deleted.")
-	fmt.Println("Please verify that all replicated chunks have been removed from all nodes.")
+	// Delete
+	fmt.Print("Delete operation... ")
+	resp, err = config.SendDeleteFileRequest(serverAddr, testFile)
+	if err != nil {
+		fmt.Printf("❌ Failed: %v\n", err)
+		return
+	}
+	fmt.Printf("✓ Success (%s)\n", resp.Code)
+
+	// Verify delete
+	fmt.Print("Verify deletion... ")
+	resp, err = config.SendReadFileRequest(serverAddr, testFile)
+	if err != nil {
+		fmt.Printf("❌ Network error: %v\n", err)
+		return
+	}
+	if resp.Code == "NOT_FOUND" {
+		fmt.Println("✓ File correctly deleted")
+	} else {
+		fmt.Printf("❌ File still exists (code: %s)\n", resp.Code)
+	}
+
+	fmt.Println("\n✓ Quick test completed successfully!")
+}
+
+// Additional helper functions for more comprehensive testing
+func init() {
+	// Set up logging
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	log.SetPrefix("[TEST] ")
 }
