@@ -17,10 +17,6 @@ type FileMetadata struct {
 }
 
 type MetadataService interface {
-	// Being deprecated
-	CreateFileMetadata(path string, size int64, chunks []chunk_service.FileChunk) error
-
-	// New method, will be renamed to CreateFileMetadata in the future
 	CreateFileMetadataFromStruct(metadata FileMetadata) error
 
 	GetFileMetadata(path string) (*FileMetadata, error)
