@@ -1,8 +1,10 @@
-package metadata_service
+package metadata_replicator
 
 import (
 	"sync"
 	"time"
+
+	"github.com/AnishMulay/sandstore/internal/metadata_service"
 )
 
 type MetadataLogEntry struct {
@@ -26,7 +28,7 @@ type MetadataOperation struct {
 }
 
 type CreateMetadataOp struct {
-	Metadata FileMetadata `json:"metadata"`
+	Metadata metadata_service.FileMetadata `json:"metadata"`
 }
 
 type DeleteMetadataOp struct {
