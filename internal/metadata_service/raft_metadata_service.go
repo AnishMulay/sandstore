@@ -94,3 +94,53 @@ func (ml *MetadataLog) GetEntryAtIndex(index int64) *MetadataLogEntry {
 
 	return &ml.entries[index-1]
 }
+
+func (ml *MetadataLog) SetCommitIndex(index int64) {
+	ml.mu.Lock()
+	defer ml.mu.Unlock()
+	ml.commitIndex = index
+}
+
+func (ml *MetadataLog) GetCommitIndex() int64 {
+	ml.mu.RLock()
+	defer ml.mu.RUnlock()
+	return ml.commitIndex
+}
+
+func (ml *MetadataLog) GetUncommittedEntries() []MetadataLogEntry {
+	ml.mu.RLock()
+	defer ml.mu.RUnlock()
+
+	if ml.lastApplied >= ml.commitIndex {
+		return []MetadataLogEntry{}
+	}
+
+	start := ml.lastApplied
+	end := ml.commitIndex
+
+	if start < 0 {
+		start = 0
+	}
+	if end > int64(len(ml.entries)) {
+		end = int64(len(ml.entries))
+	}
+
+	return ml.entries[start:end]
+}
+
+func (ml *MetadataLog) SetLastApplied(index int64) {
+	ml.mu.Lock()
+	defer ml.mu.Unlock()
+	ml.lastApplied = index
+}
+
+func (ml *MetadataLog) TruncateAfter(index int64) {
+	ml.mu.Lock()
+	defer ml.mu.Unlock()
+
+	if index < 0 {
+		ml.entries = []MetadataLogEntry{}
+	} else if index < int64(len(ml.entries)) {
+		ml.entries = ml.entries[:index]
+	}
+}
