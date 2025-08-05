@@ -157,6 +157,10 @@ func (r *RaftClusterService) resetElectionTimer() {
 	}
 
 	timeout := time.Duration(rand.Intn(150)+150) * time.Millisecond
+	r.ls.Debug(log_service.LogEvent{
+		Message:  "Resetting election timer",
+		Metadata: map[string]any{"timeout": timeout},
+	})
 	r.electionTimer = time.AfterFunc(timeout, r.startElection)
 }
 
@@ -182,6 +186,9 @@ func (r *RaftClusterService) startElection() {
 		})
 		return
 	}
+
+	// Start election timeout to reset if no leader elected
+	go r.electionTimeout(term)
 
 	for _, node := range nodes {
 		if node.ID == r.id {
@@ -240,6 +247,10 @@ func (r *RaftClusterService) registerVote() {
 	defer r.mu.Unlock()
 
 	r.voteCount++
+	r.ls.Debug(log_service.LogEvent{
+		Message:  "Registered vote",
+		Metadata: map[string]any{"voteCount": r.voteCount},
+	})
 	nodes, _ := r.GetHealthyNodes()
 	if r.state == Candidate && r.voteCount > int64(len(nodes))/2 {
 		r.becomeLeader()
@@ -426,6 +437,20 @@ func (r *RaftClusterService) IsLeader() bool {
 	defer r.mu.Unlock()
 
 	return r.state == Leader
+}
+
+func (r *RaftClusterService) electionTimeout(term int64) {
+	time.Sleep(500 * time.Millisecond) // Wait for election to complete
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	
+	if r.currentTerm == term && r.state == Candidate {
+		r.ls.Debug(log_service.LogEvent{
+			Message:  "Election timeout - restarting election",
+			Metadata: map[string]any{"term": term},
+		})
+		r.resetElectionTimer()
+	}
 }
 
 func (r *RaftClusterService) GetLeaderAddress() string {
