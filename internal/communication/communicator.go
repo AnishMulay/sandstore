@@ -58,7 +58,7 @@ type StoreMetadataRequest struct {
 }
 
 type DeleteMetadataRequest struct {
-	FileID string
+	Path string
 }
 
 type StopServerRequest struct {

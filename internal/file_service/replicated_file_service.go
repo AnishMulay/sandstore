@@ -113,7 +113,11 @@ func (fs *ReplicatedFileService) StoreFile(path string, data []byte) error {
 		Metadata: map[string]any{"path": path},
 	})
 
-	err = fs.mr.ReplicateMetadata(metadata)
+	op := metadata_replicator.MetadataReplicationOp{
+		Type:     metadata_replicator.CREATE,
+		Metadata: metadata,
+	}
+	err = fs.mr.Replicate(op)
 	if err != nil {
 		fs.ls.Error(log_service.LogEvent{
 			Message:  "Failed to replicate metadata",
@@ -207,6 +211,24 @@ func (fs *ReplicatedFileService) DeleteFile(path string) error {
 			})
 			return ErrChunkDeleteFailed
 		}
+	}
+
+	fs.ls.Debug(log_service.LogEvent{
+		Message:  "Replicating metadata deletion",
+		Metadata: map[string]any{"path": path},
+	})
+
+	op := metadata_replicator.MetadataReplicationOp{
+		Type:     metadata_replicator.DELETE,
+		Metadata: *metadata,
+	}
+	err = fs.mr.Replicate(op)
+	if err != nil {
+		fs.ls.Error(log_service.LogEvent{
+			Message:  "Failed to replicate metadata deletion",
+			Metadata: map[string]any{"path": path, "error": err.Error()},
+		})
+		return ErrMetadataReplicationFailed
 	}
 
 	fs.ls.Debug(log_service.LogEvent{
