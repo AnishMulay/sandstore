@@ -7,6 +7,7 @@ import (
 	"github.com/AnishMulay/sandstore/internal/metadata_service"
 )
 
+// might make this an interface later
 type MetadataLogEntry struct {
 	Index     int64             `json:"index"`
 	Term      int64             `json:"term"`
