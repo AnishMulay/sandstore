@@ -22,6 +22,18 @@ type RaftFileService struct {
 	chunkSize int64
 }
 
+func NewRaftFileService(ls log_service.LogService, mr *metadata_replicator.RaftMetadataReplicator, cs chunk_service.ChunkService, ms metadata_service.MetadataService, cr chunk_replicator.ChunkReplicator, chunkSize int64,
+) *RaftFileService {
+	return &RaftFileService{
+		ls:        ls,
+		mr:        mr,
+		cs:        cs,
+		ms:        ms,
+		cr:        cr,
+		chunkSize: chunkSize,
+	}
+}
+
 // right now the chunks are created and replicated first. but this will also change once an update metadata op is added
 func (fs *RaftFileService) StoreFile(path string, data []byte) error {
 	fs.ls.Info(log_service.LogEvent{
@@ -130,5 +142,53 @@ func (fs *RaftFileService) StoreFile(path string, data []byte) error {
 		Metadata: map[string]any{"path": path, "chunks": len(chunks)},
 	})
 
+	return nil
+}
+
+func (fs *RaftFileService) ReadFile(path string) ([]byte, error) {
+	fs.ls.Info(log_service.LogEvent{
+		Message:  "Reading file",
+		Metadata: map[string]any{"path": path},
+	})
+
+	metadata, err := fs.ms.GetFileMetadata(path)
+	if err != nil {
+		fs.ls.Error(log_service.LogEvent{
+			Message:  "Failed to get file metadata",
+			Metadata: map[string]any{"path": path, "error": err.Error()},
+		})
+		return nil, ErrMetadataGetFailed
+	}
+
+	var data []byte
+	for _, chunk := range metadata.Chunks {
+		chunkData, err := fs.cs.ReadChunk(chunk.ChunkID)
+		if err != nil {
+			fs.ls.Warn(log_service.LogEvent{
+				Message:  "Chunk not found locally, fetching from replicas",
+				Metadata: map[string]any{"path": path, "chunkID": chunk.ChunkID},
+			})
+			chunkData, err = fs.cr.FetchReplicatedChunk(chunk.ChunkID, chunk.Replicas)
+			if err != nil {
+				fs.ls.Error(log_service.LogEvent{
+					Message:  "Failed to fetch replicated chunk",
+					Metadata: map[string]any{"path": path, "chunkID": chunk.ChunkID, "error": err.Error()},
+				})
+				return nil, ErrReplicatedChunkFetchFailed
+			}
+		}
+
+		data = append(data, chunkData...)
+	}
+
+	fs.ls.Info(log_service.LogEvent{
+		Message:  "File read successfully",
+		Metadata: map[string]any{"path": path, "size": len(data), "chunks": len(metadata.Chunks)},
+	})
+
+	return data, nil
+}
+
+func (fs *RaftFileService) DeleteFile(path string) error {
 	return nil
 }
