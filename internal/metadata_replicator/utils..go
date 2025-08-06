@@ -9,19 +9,12 @@ import (
 
 // might make this an interface later
 type MetadataLogEntry struct {
-	Index     int64             `json:"index"`
-	Term      int64             `json:"term"`
-	Type      MetadataOpType    `json:"type"`
-	Operation MetadataOperation `json:"operation"`
-	Timestamp time.Time         `json:"timestamp"`
+	Index     int64                   `json:"index"`
+	Term      int64                   `json:"term"`
+	Type      MetadataOperationType   `json:"type"`
+	Operation MetadataOperation       `json:"operation"`
+	Timestamp time.Time               `json:"timestamp"`
 }
-
-type MetadataOpType string
-
-const (
-	OpTypeCreate MetadataOpType = "create"
-	OpTypeDelete MetadataOpType = "delete"
-)
 
 type MetadataOperation struct {
 	CreateOp *CreateMetadataOp `json:"create_op,omitempty"`
@@ -87,7 +80,7 @@ func (ml *MetadataLog) GetLastLogTerm() int64 {
 	return ml.entries[len(ml.entries)-1].Term
 }
 
-func (ml *MetadataLog) GetEntryAtIndex(index int64) *MetadataLogEntry {
+func (ml *MetadataLog) GetEntryAtIndex(index int64) interface{} {
 	ml.mu.RLock()
 	defer ml.mu.RUnlock()
 

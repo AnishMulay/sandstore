@@ -72,11 +72,12 @@ type RequestVoteRequest struct {
 }
 
 type AppendEntriesRequest struct {
-	Term               int64
-	LeaderID           string
-	PrevLogIndex       int64
-	PrevLogTerm        int64
-	MetadataLogEntries string
+	Term         int64
+	LeaderID     string
+	PrevLogIndex int64
+	PrevLogTerm  int64
+	Entries      []byte // Serialized metadata log entries
+	LeaderCommit int64  // Leader's commit index
 }
 
 type SandCode string

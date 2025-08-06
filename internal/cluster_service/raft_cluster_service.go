@@ -2,6 +2,7 @@ package cluster_service
 
 import (
 	"context"
+	"reflect"
 	"sync"
 	"time"
 
@@ -9,6 +10,13 @@ import (
 	"github.com/AnishMulay/sandstore/internal/log_service"
 	"golang.org/x/exp/rand"
 )
+
+// MetadataLogInterface defines the interface for accessing metadata log
+type MetadataLogInterface interface {
+	GetLastLogIndex() int64
+	GetLastLogTerm() int64
+	GetEntryAtIndex(index int64) interface{} // Returns entry with Index and Term fields
+}
 
 type RaftState int
 
@@ -31,6 +39,11 @@ type RaftClusterService struct {
 	comm communication.Communicator
 	ls   log_service.LogService
 	mu   sync.Mutex
+
+	// Raft log state tracking
+	nextIndex  map[string]int64 // next log index to send to each peer
+	matchIndex map[string]int64 // highest log index replicated on each peer
+	commitIndex int64           // highest log entry known to be committed
 }
 
 func NewRaftClusterService(id string, nodes []Node, comm communication.Communicator, ls log_service.LogService) *RaftClusterService {
@@ -44,6 +57,9 @@ func NewRaftClusterService(id string, nodes []Node, comm communication.Communica
 		leaderID:    "",
 		comm:        comm,
 		ls:          ls,
+		nextIndex:   make(map[string]int64),
+		matchIndex:  make(map[string]int64),
+		commitIndex: 0,
 	}
 }
 
@@ -384,22 +400,37 @@ func (r *RaftClusterService) sendHeartbeats(term int64) {
 		}
 
 		go func(n Node) {
-			r.sendAppendEntries(n.Address, term)
+			r.sendAppendEntries(n.Address, []byte{}, nil) // Empty for heartbeat, no log needed
 		}(node)
 	}
 }
 
-func (r *RaftClusterService) sendAppendEntries(nodeAddress string, term int64) {
-	r.ls.Debug(log_service.LogEvent{
-		Message:  "Sending append entries",
-		Metadata: map[string]any{"nodeAddress": nodeAddress, "term": term},
-	})
+// sendAppendEntries sends AppendEntries RPC (handles both heartbeats and data)
+func (r *RaftClusterService) sendAppendEntries(nodeAddress string, entriesData []byte, metadataLog MetadataLogInterface) bool {
+	// Get peer's next index (default to last log index + 1 for heartbeats)
+	var prevLogIndex, prevLogTerm int64
+	if metadataLog != nil {
+		// For replication, use proper prev log values
+		peerNextIndex := r.nextIndex[nodeAddress]
+		if peerNextIndex == 0 {
+			peerNextIndex = metadataLog.GetLastLogIndex() + 1
+		}
+		prevLogIndex = peerNextIndex - 1
+		
+		if prevLogIndex > 0 {
+			if prevEntryInterface := metadataLog.GetEntryAtIndex(prevLogIndex); prevEntryInterface != nil {
+				prevLogTerm = getTermFromEntry(prevEntryInterface)
+			}
+		}
+	}
 
 	req := communication.AppendEntriesRequest{
-		Term:         term,
+		Term:         r.currentTerm,
 		LeaderID:     r.id,
-		PrevLogIndex: 0, // TODO: Get from log service
-		PrevLogTerm:  0, // TODO: Get from log service
+		PrevLogIndex: prevLogIndex,
+		PrevLogTerm:  prevLogTerm,
+		Entries:      entriesData,
+		LeaderCommit: r.commitIndex,
 	}
 
 	msg := communication.Message{
@@ -409,27 +440,27 @@ func (r *RaftClusterService) sendAppendEntries(nodeAddress string, term int64) {
 	}
 
 	resp, err := r.comm.Send(context.Background(), nodeAddress, msg)
-	if err != nil {
-		r.ls.Error(log_service.LogEvent{
-			Message:  "Failed to send append entries",
-			Metadata: map[string]any{"nodeAddress": nodeAddress, "error": err.Error()},
-		})
-		return
-	}
+	return err == nil && resp.Code == communication.CodeOK
+}
 
-	// might need to change this later to differentiate between kinds of failures
-	if resp.Code != communication.CodeOK {
-		r.ls.Error(log_service.LogEvent{
-			Message:  "Failed to send append entries",
-			Metadata: map[string]any{"nodeAddress": nodeAddress, "error": err.Error()},
-		})
-		return
+// getTermFromEntry extracts Term field from any log entry using reflection
+func getTermFromEntry(entry interface{}) int64 {
+	if entry == nil {
+		return 0
 	}
-
-	r.ls.Debug(log_service.LogEvent{
-		Message:  "Received append entries response",
-		Metadata: map[string]any{"nodeAddress": nodeAddress},
-	})
+	v := reflect.ValueOf(entry)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	if v.Kind() == reflect.Struct {
+		termField := v.FieldByName("Term")
+		if termField.IsValid() && termField.CanInterface() {
+			if term, ok := termField.Interface().(int64); ok {
+				return term
+			}
+		}
+	}
+	return 0
 }
 
 func (r *RaftClusterService) IsLeader() bool {
@@ -469,3 +500,66 @@ func (r *RaftClusterService) GetLeaderAddress() string {
 
 	return "" // No known leader
 }
+
+// GetCurrentTerm returns the current term
+func (r *RaftClusterService) GetCurrentTerm() int64 {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.currentTerm
+}
+
+// ReplicateEntries replicates entries to all peers with proper Raft log tracking
+func (r *RaftClusterService) ReplicateEntries(entriesData []byte, logIndex int64, metadataLog MetadataLogInterface, callback func(int64, bool)) {
+	nodes, err := r.GetHealthyNodes()
+	if err != nil {
+		callback(logIndex, false)
+		return
+	}
+
+	// Initialize peer state for new peers
+	for _, node := range nodes {
+		if node.ID == r.id {
+			continue
+		}
+		if _, exists := r.nextIndex[node.ID]; !exists {
+			r.nextIndex[node.ID] = metadataLog.GetLastLogIndex() + 1
+			r.matchIndex[node.ID] = 0
+		}
+	}
+
+	// Simple quorum counting
+	ackCount := 1 // Leader counts
+	quorumSize := (len(nodes) / 2) + 1
+
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	for _, node := range nodes {
+		if node.ID == r.id {
+			continue
+		}
+
+		wg.Add(1)
+		go func(n Node) {
+			defer wg.Done()
+			if r.sendAppendEntries(n.Address, entriesData, metadataLog) {
+				mu.Lock()
+				r.matchIndex[n.ID] = logIndex
+				r.nextIndex[n.ID] = logIndex + 1
+				ackCount++
+				mu.Unlock()
+			}
+		}(node)
+	}
+
+	wg.Wait()
+
+	// Update commit index if we have quorum
+	if ackCount >= quorumSize {
+		r.commitIndex = logIndex
+	}
+
+	callback(logIndex, ackCount >= quorumSize)
+}
+
+
