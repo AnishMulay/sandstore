@@ -26,6 +26,10 @@ const (
 	Candidate
 )
 
+type LogEntryProcessor interface {
+	ProcessReceivedEntries(entriesData []byte, prevLogIndex, prevLogTerm, leaderCommit int64) bool
+}
+
 type RaftClusterService struct {
 	nodes         []Node
 	id            string
@@ -44,6 +48,9 @@ type RaftClusterService struct {
 	nextIndex  map[string]int64 // next log index to send to each peer
 	matchIndex map[string]int64 // highest log index replicated on each peer
 	commitIndex int64           // highest log entry known to be committed
+
+	// Log processing
+	logProcessor LogEntryProcessor
 }
 
 func NewRaftClusterService(id string, nodes []Node, comm communication.Communicator, ls log_service.LogService) *RaftClusterService {
@@ -61,6 +68,10 @@ func NewRaftClusterService(id string, nodes []Node, comm communication.Communica
 		matchIndex:  make(map[string]int64),
 		commitIndex: 0,
 	}
+}
+
+func (r *RaftClusterService) SetLogProcessor(processor LogEntryProcessor) {
+	r.logProcessor = processor
 }
 
 func (r *RaftClusterService) Start() {
@@ -320,18 +331,7 @@ func (r *RaftClusterService) HandleAppendEntries(req communication.AppendEntries
 		Metadata: map[string]any{"term": req.Term, "leaderID": req.LeaderID, "currentTerm": r.currentTerm},
 	})
 
-	if len(req.Entries) > 0 {
-		r.ls.Info(log_service.LogEvent{
-			Message:  "Received append entries with data",
-			Metadata: map[string]any{
-				"term": req.Term, 
-				"leaderID": req.LeaderID, 
-				"entriesSize": len(req.Entries),
-				"entries": string(req.Entries),
-			},
-		})
-	}
-
+	// Term validation
 	if req.Term < r.currentTerm {
 		r.ls.Debug(log_service.LogEvent{
 			Message:  "Rejecting append entries - stale term",
@@ -351,18 +351,24 @@ func (r *RaftClusterService) HandleAppendEntries(req communication.AppendEntries
 		r.state = Follower
 	}
 
+	// Update state and reset election timer
 	if r.state == Follower || r.state == Candidate {
 		r.state = Follower
 		r.leaderID = req.LeaderID
 		r.resetElectionTimer()
-
-		r.ls.Debug(log_service.LogEvent{
-			Message:  "Heartbeat received, election timer reset",
-			Metadata: map[string]any{"leaderID": req.LeaderID, "term": req.Term},
-		})
 	}
 
-	return true, nil
+	// Handle heartbeat (empty entries)
+	if len(req.Entries) == 0 {
+		r.ls.Debug(log_service.LogEvent{
+			Message:  "Heartbeat received",
+			Metadata: map[string]any{"leaderID": req.LeaderID, "term": req.Term},
+		})
+		return true, nil
+	}
+
+	// Process log entries
+	return r.processLogEntries(req)
 }
 
 func (r *RaftClusterService) startHeartbeats() {
@@ -423,7 +429,8 @@ func (r *RaftClusterService) sendAppendEntries(nodeAddress string, entriesData [
 	if metadataLog != nil {
 		peerNextIndex := r.nextIndex[nodeAddress]
 		if peerNextIndex == 0 {
-			peerNextIndex = metadataLog.GetLastLogIndex() + 1
+			// For the first entry, nextIndex should be 1
+			peerNextIndex = 1
 		}
 		prevLogIndex = peerNextIndex - 1
 		
@@ -523,6 +530,38 @@ func (r *RaftClusterService) GetCurrentTerm() int64 {
 	return r.currentTerm
 }
 
+func (r *RaftClusterService) processLogEntries(req communication.AppendEntriesRequest) (bool, error) {
+	r.ls.Info(log_service.LogEvent{
+		Message:  "Processing log entries",
+		Metadata: map[string]any{
+			"prevLogIndex": req.PrevLogIndex,
+			"prevLogTerm":  req.PrevLogTerm,
+			"entriesSize":  len(req.Entries),
+			"leaderCommit": req.LeaderCommit,
+		},
+	})
+
+	if r.logProcessor == nil {
+		r.ls.Warn(log_service.LogEvent{
+			Message: "No log processor set, cannot process entries",
+		})
+		return false, nil
+	}
+
+	success := r.logProcessor.ProcessReceivedEntries(req.Entries, req.PrevLogIndex, req.PrevLogTerm, req.LeaderCommit)
+	if success {
+		r.ls.Info(log_service.LogEvent{
+			Message: "Log entries processed successfully",
+		})
+	} else {
+		r.ls.Warn(log_service.LogEvent{
+			Message: "Failed to process log entries",
+		})
+	}
+
+	return success, nil
+}
+
 func (r *RaftClusterService) ReplicateEntries(entriesData []byte, logIndex int64, metadataLog MetadataLogInterface, callback func(int64, bool)) {	
 	r.ls.Info(log_service.LogEvent{
 		Message: "Starting entry replication",
@@ -557,7 +596,8 @@ func (r *RaftClusterService) ReplicateEntries(entriesData []byte, logIndex int64
 			continue
 		}
 		if _, exists := r.nextIndex[node.ID]; !exists {
-			r.nextIndex[node.ID] = metadataLog.GetLastLogIndex() + 1
+			// Initialize nextIndex to 1 for new followers (first log entry)
+			r.nextIndex[node.ID] = 1
 			r.matchIndex[node.ID] = 0
 		}
 	}

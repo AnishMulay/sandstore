@@ -2,6 +2,7 @@ package metadata_replicator
 
 import (
 	"encoding/json"
+	"reflect"
 	"sync"
 	"time"
 
@@ -19,12 +20,17 @@ type RaftMetadataReplicator struct {
 }
 
 func NewRaftMetadataReplicator(clusterService *cluster_service.RaftClusterService, ls log_service.LogService) *RaftMetadataReplicator {
-	return &RaftMetadataReplicator{
+	mr := &RaftMetadataReplicator{
 		clusterService: clusterService,
 		metadataLog:    NewMetadataLog(),
 		ls:             ls,
 		pendingOps:     make(map[int64]chan error),
 	}
+	
+	// Register this replicator as the log processor
+	clusterService.SetLogProcessor(mr)
+	
+	return mr
 }
 
 func (mr *RaftMetadataReplicator) Replicate(op MetadataReplicationOp) error {
@@ -90,6 +96,114 @@ func (mr *RaftMetadataReplicator) convertToMetadataOperation(op MetadataReplicat
 	default:
 		return MetadataOperation{}
 	}
+}
+
+func (mr *RaftMetadataReplicator) ProcessReceivedEntries(entriesData []byte, prevLogIndex, prevLogTerm, leaderCommit int64) bool {
+	mr.ls.Info(log_service.LogEvent{
+		Message: "Processing received log entries",
+		Metadata: map[string]any{
+			"prevLogIndex": prevLogIndex,
+			"prevLogTerm":  prevLogTerm,
+			"leaderCommit": leaderCommit,
+			"entriesSize":  len(entriesData),
+		},
+	})
+
+	// Log consistency check
+	if prevLogIndex > 0 {
+		if prevLogIndex > mr.metadataLog.GetLastLogIndex() {
+			mr.ls.Warn(log_service.LogEvent{
+				Message: "Log consistency check failed - missing entries",
+				Metadata: map[string]any{
+					"prevLogIndex": prevLogIndex,
+					"lastLogIndex": mr.metadataLog.GetLastLogIndex(),
+				},
+			})
+			return false
+		}
+
+		prevEntry := mr.metadataLog.GetEntryAtIndex(prevLogIndex)
+		if prevEntry != nil {
+			if getTermFromEntry(prevEntry) != prevLogTerm {
+				mr.ls.Warn(log_service.LogEvent{
+					Message: "Log consistency check failed - term mismatch",
+					Metadata: map[string]any{
+						"prevLogIndex": prevLogIndex,
+						"expectedTerm": prevLogTerm,
+						"actualTerm":   getTermFromEntry(prevEntry),
+					},
+				})
+				// Truncate conflicting entries
+				mr.metadataLog.TruncateAfter(prevLogIndex)
+				return false
+			}
+		}
+	}
+
+	// Deserialize and append entries
+	var entries []MetadataLogEntry
+	if err := json.Unmarshal(entriesData, &entries); err != nil {
+		mr.ls.Error(log_service.LogEvent{
+			Message: "Failed to deserialize log entries",
+			Metadata: map[string]any{"error": err.Error()},
+		})
+		return false
+	}
+
+	for _, entry := range entries {
+		mr.metadataLog.AppendEntry(entry)
+		mr.ls.Debug(log_service.LogEvent{
+			Message: "Appended log entry",
+			Metadata: map[string]any{
+				"index": entry.Index,
+				"term":  entry.Term,
+				"type":  entry.Type,
+			},
+		})
+	}
+
+	// Update commit index if leader's is higher
+	if leaderCommit > mr.metadataLog.GetCommitIndex() {
+		newCommitIndex := min(leaderCommit, mr.metadataLog.GetLastLogIndex())
+		mr.metadataLog.SetCommitIndex(newCommitIndex)
+		mr.ls.Info(log_service.LogEvent{
+			Message: "Updated commit index",
+			Metadata: map[string]any{
+				"oldCommitIndex": mr.metadataLog.GetCommitIndex(),
+				"newCommitIndex": newCommitIndex,
+			},
+		})
+	}
+
+	return true
+}
+
+// Helper function for min
+func min(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// Import getTermFromEntry from cluster_service
+func getTermFromEntry(entry interface{}) int64 {
+	if entry == nil {
+		return 0
+	}
+	v := reflect.ValueOf(entry)
+	if v.Kind() == reflect.Ptr {
+		v = v.Elem()
+	}
+	if v.Kind() == reflect.Struct {
+		termField := v.FieldByName("Term")
+		if termField.IsValid() && termField.CanInterface() {
+			if term, ok := termField.Interface().(int64); ok {
+				return term
+			}
+		}
+	}
+	return 0
 }
 
 func (mr *RaftMetadataReplicator) onReplicationComplete(logIndex int64, success bool) {
