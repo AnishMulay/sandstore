@@ -89,18 +89,18 @@ func (fs *RaftFileService) StoreFile(path string, data []byte) error {
 		})
 
 		counter++
+
+		fs.ls.Info(log_service.LogEvent{
+			Message:  "Counter for chunks",
+			Metadata: map[string]any{"counter": counter, "path": path},
+		})
+
 		offset = end
 		if counter >= 5 {
 			select {}
 		}
 	}
 
-	fs.ls.Debug(log_service.LogEvent{
-		Message:  "Successfully stored all chunks",
-		Metadata: map[string]any{"path": path, "fileID": fileID, "numChunks": len(chunks)},
-	})
-
-	// Create temporary metadata struct for Raft replication
 	tempMetadata := metadata_service.NewFileMetadata(path, int64(len(data)), chunks)
 
 	fs.ls.Debug(log_service.LogEvent{

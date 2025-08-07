@@ -320,6 +320,18 @@ func (r *RaftClusterService) HandleAppendEntries(req communication.AppendEntries
 		Metadata: map[string]any{"term": req.Term, "leaderID": req.LeaderID, "currentTerm": r.currentTerm},
 	})
 
+	if len(req.Entries) > 0 {
+		r.ls.Info(log_service.LogEvent{
+			Message:  "Received append entries with data",
+			Metadata: map[string]any{
+				"term": req.Term, 
+				"leaderID": req.LeaderID, 
+				"entriesSize": len(req.Entries),
+				"entries": string(req.Entries),
+			},
+		})
+	}
+
 	if req.Term < r.currentTerm {
 		r.ls.Debug(log_service.LogEvent{
 			Message:  "Rejecting append entries - stale term",
@@ -405,12 +417,10 @@ func (r *RaftClusterService) sendHeartbeats(term int64) {
 	}
 }
 
-// sendAppendEntries sends AppendEntries RPC (handles both heartbeats and data)
 func (r *RaftClusterService) sendAppendEntries(nodeAddress string, entriesData []byte, metadataLog MetadataLogInterface) bool {
-	// Get peer's next index (default to last log index + 1 for heartbeats)
 	var prevLogIndex, prevLogTerm int64
+
 	if metadataLog != nil {
-		// For replication, use proper prev log values
 		peerNextIndex := r.nextIndex[nodeAddress]
 		if peerNextIndex == 0 {
 			peerNextIndex = metadataLog.GetLastLogIndex() + 1
@@ -440,6 +450,12 @@ func (r *RaftClusterService) sendAppendEntries(nodeAddress string, entriesData [
 	}
 
 	resp, err := r.comm.Send(context.Background(), nodeAddress, msg)
+	
+	// r.ls.Info(log_service.LogEvent{
+	// 	Message:  "Response from append entries",
+	// 	Metadata: map[string]any{"nodeAddress": nodeAddress, "error": err, "response": resp},
+	// })
+
 	return err == nil && resp.Code == communication.CodeOK
 }
 
@@ -501,22 +517,41 @@ func (r *RaftClusterService) GetLeaderAddress() string {
 	return "" // No known leader
 }
 
-// GetCurrentTerm returns the current term
 func (r *RaftClusterService) GetCurrentTerm() int64 {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.currentTerm
 }
 
-// ReplicateEntries replicates entries to all peers with proper Raft log tracking
-func (r *RaftClusterService) ReplicateEntries(entriesData []byte, logIndex int64, metadataLog MetadataLogInterface, callback func(int64, bool)) {
+func (r *RaftClusterService) ReplicateEntries(entriesData []byte, logIndex int64, metadataLog MetadataLogInterface, callback func(int64, bool)) {	
+	r.ls.Info(log_service.LogEvent{
+		Message: "Starting entry replication",
+		Metadata: map[string]any{
+			"logIndex": logIndex,
+			"entriesSize": len(entriesData),
+			"currentTerm": r.currentTerm,
+		},
+	})
+
 	nodes, err := r.GetHealthyNodes()
 	if err != nil {
+		r.ls.Info(log_service.LogEvent{
+			Message: "Replication failed - no healthy nodes",
+			Metadata: map[string]any{"error": err.Error(), "logIndex": logIndex},
+		})
 		callback(logIndex, false)
 		return
 	}
 
-	// Initialize peer state for new peers
+	r.ls.Info(log_service.LogEvent{
+		Message: "Replication cluster info",
+		Metadata: map[string]any{
+			"totalNodes": len(nodes),
+			"quorumSize": (len(nodes) / 2) + 1,
+			"logIndex": logIndex,
+		},
+	})
+
 	for _, node := range nodes {
 		if node.ID == r.id {
 			continue
@@ -527,7 +562,6 @@ func (r *RaftClusterService) ReplicateEntries(entriesData []byte, logIndex int64
 		}
 	}
 
-	// Simple quorum counting
 	ackCount := 1 // Leader counts
 	quorumSize := (len(nodes) / 2) + 1
 
@@ -542,23 +576,64 @@ func (r *RaftClusterService) ReplicateEntries(entriesData []byte, logIndex int64
 		wg.Add(1)
 		go func(n Node) {
 			defer wg.Done()
+			
+			r.ls.Info(log_service.LogEvent{
+				Message: "Sending append entries to node",
+				Metadata: map[string]any{
+					"nodeID": n.ID,
+					"nodeAddress": n.Address,
+					"logIndex": logIndex,
+				},
+			})
+
 			if r.sendAppendEntries(n.Address, entriesData, metadataLog) {
 				mu.Lock()
 				r.matchIndex[n.ID] = logIndex
 				r.nextIndex[n.ID] = logIndex + 1
 				ackCount++
+				
+				r.ls.Info(log_service.LogEvent{
+					Message: "Received acknowledgment from node",
+					Metadata: map[string]any{
+						"nodeID": n.ID,
+						"ackCount": ackCount,
+						"quorumSize": quorumSize,
+						"logIndex": logIndex,
+					},
+				})
 				mu.Unlock()
+			} else {
+				r.ls.Info(log_service.LogEvent{
+					Message: "Failed to get acknowledgment from node",
+					Metadata: map[string]any{
+						"nodeID": n.ID,
+						"nodeAddress": n.Address,
+						"logIndex": logIndex,
+					},
+				})
 			}
 		}(node)
 	}
 
 	wg.Wait()
 
+	r.ls.Info(log_service.LogEvent{
+		Message: "Replication completed",
+		Metadata: map[string]any{
+			"ackCount": ackCount,
+			"quorumSize": quorumSize,
+			"quorumReached": ackCount >= quorumSize,
+			"logIndex": logIndex,
+			"commitIndex": r.commitIndex,
+		},
+	})
+
 	// Update commit index if we have quorum
 	if ackCount >= quorumSize {
 		r.commitIndex = logIndex
 	}
 
+	// Call callback immediately while we still have the context
 	callback(logIndex, ackCount >= quorumSize)
 }
 

@@ -14,7 +14,7 @@ type RaftMetadataReplicator struct {
 	metadataLog    *MetadataLog
 	ls             log_service.LogService
 
-	mu         sync.RWMutex
+	pendingMu  sync.Mutex
 	pendingOps map[int64]chan error
 }
 
@@ -29,13 +29,13 @@ func NewRaftMetadataReplicator(clusterService *cluster_service.RaftClusterServic
 
 func (mr *RaftMetadataReplicator) Replicate(op MetadataReplicationOp) error {
 	if !mr.clusterService.IsLeader() {
+		mr.ls.Info(log_service.LogEvent{
+			Message:  "Replication failed - not leader",
+			Metadata: map[string]any{"operation": op.Type},
+		})
 		return ErrNotLeader
 	}
 
-	mr.mu.Lock()
-	defer mr.mu.Unlock()
-
-	// Create log entry
 	entry := MetadataLogEntry{
 		Term:      mr.clusterService.GetCurrentTerm(),
 		Type:      op.Type,
@@ -43,28 +43,36 @@ func (mr *RaftMetadataReplicator) Replicate(op MetadataReplicationOp) error {
 		Timestamp: time.Now(),
 	}
 
-	// Append to local log
 	logIndex := mr.metadataLog.AppendEntry(entry)
 
-	// Create response channel
 	respChan := make(chan error, 1)
+	mr.pendingMu.Lock()
 	mr.pendingOps[logIndex] = respChan
+	mr.pendingMu.Unlock()
 
-	// Delegate replication to cluster service
 	entriesData, _ := json.Marshal([]MetadataLogEntry{entry})
-	go mr.clusterService.ReplicateEntries(entriesData, logIndex, mr.metadataLog, mr.onReplicationComplete)
+	mr.clusterService.ReplicateEntries(entriesData, logIndex, mr.metadataLog, mr.onReplicationComplete)
 
-	// Wait for result
 	select {
 	case err := <-respChan:
+		mr.pendingMu.Lock()
 		delete(mr.pendingOps, logIndex)
+		mr.pendingMu.Unlock()
 		return err
+		
 	case <-time.After(5 * time.Second):
+		mr.pendingMu.Lock()
 		delete(mr.pendingOps, logIndex)
+		mr.pendingMu.Unlock()
+		
+		mr.ls.Info(log_service.LogEvent{
+			Message:  "Replication timeout",
+			Metadata: map[string]any{"logIndex": logIndex},
+		})
 		return ErrReplicationTimeout
 	}
 }
-// convertToMetadataOperation converts MetadataReplicationOp to MetadataOperation
+
 func (mr *RaftMetadataReplicator) convertToMetadataOperation(op MetadataReplicationOp) MetadataOperation {
 	switch op.Type {
 	case CREATE:
@@ -84,18 +92,14 @@ func (mr *RaftMetadataReplicator) convertToMetadataOperation(op MetadataReplicat
 	}
 }
 
-
-
-// onReplicationComplete is called by cluster service when replication completes
 func (mr *RaftMetadataReplicator) onReplicationComplete(logIndex int64, success bool) {
-	mr.mu.Lock()
-	defer mr.mu.Unlock()
-
 	if success {
 		mr.metadataLog.SetCommitIndex(logIndex)
 	}
 
-	// Notify waiting operation
+	mr.pendingMu.Lock()
+	defer mr.pendingMu.Unlock()
+	
 	if respChan, exists := mr.pendingOps[logIndex]; exists {
 		if success {
 			respChan <- nil
