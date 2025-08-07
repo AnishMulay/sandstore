@@ -8,22 +8,25 @@ import (
 
 	"github.com/AnishMulay/sandstore/internal/cluster_service"
 	"github.com/AnishMulay/sandstore/internal/log_service"
+	"github.com/AnishMulay/sandstore/internal/metadata_service"
 )
 
 type RaftMetadataReplicator struct {
 	clusterService *cluster_service.RaftClusterService
 	metadataLog    *MetadataLog
 	ls             log_service.LogService
+	ms             metadata_service.MetadataService // For applying to state machine
 
 	pendingMu  sync.Mutex
 	pendingOps map[int64]chan error
 }
 
-func NewRaftMetadataReplicator(clusterService *cluster_service.RaftClusterService, ls log_service.LogService) *RaftMetadataReplicator {
+func NewRaftMetadataReplicator(clusterService *cluster_service.RaftClusterService, ls log_service.LogService, ms metadata_service.MetadataService) *RaftMetadataReplicator {
 	mr := &RaftMetadataReplicator{
 		clusterService: clusterService,
 		metadataLog:    NewMetadataLog(),
 		ls:             ls,
+		ms:             ms,
 		pendingOps:     make(map[int64]chan error),
 	}
 	
@@ -140,26 +143,28 @@ func (mr *RaftMetadataReplicator) ProcessReceivedEntries(entriesData []byte, pre
 		}
 	}
 
-	// Deserialize and append entries
-	var entries []MetadataLogEntry
-	if err := json.Unmarshal(entriesData, &entries); err != nil {
-		mr.ls.Error(log_service.LogEvent{
-			Message: "Failed to deserialize log entries",
-			Metadata: map[string]any{"error": err.Error()},
-		})
-		return false
-	}
+	// Deserialize and append entries (skip if empty - heartbeat case)
+	if len(entriesData) > 0 {
+		var entries []MetadataLogEntry
+		if err := json.Unmarshal(entriesData, &entries); err != nil {
+			mr.ls.Error(log_service.LogEvent{
+				Message: "Failed to deserialize log entries",
+				Metadata: map[string]any{"error": err.Error()},
+			})
+			return false
+		}
 
-	for _, entry := range entries {
-		mr.metadataLog.AppendEntry(entry)
-		mr.ls.Debug(log_service.LogEvent{
-			Message: "Appended log entry",
-			Metadata: map[string]any{
-				"index": entry.Index,
-				"term":  entry.Term,
-				"type":  entry.Type,
-			},
-		})
+		for _, entry := range entries {
+			mr.metadataLog.AppendEntry(entry)
+			mr.ls.Debug(log_service.LogEvent{
+				Message: "Appended log entry",
+				Metadata: map[string]any{
+					"index": entry.Index,
+					"term":  entry.Term,
+					"type":  entry.Type,
+				},
+			})
+		}
 	}
 
 	// Update commit index if leader's is higher
@@ -173,6 +178,9 @@ func (mr *RaftMetadataReplicator) ProcessReceivedEntries(entriesData []byte, pre
 				"newCommitIndex": newCommitIndex,
 			},
 		})
+		
+		// Apply committed entries to state machine
+		mr.applyCommittedEntries()
 	}
 
 	return true
@@ -206,9 +214,78 @@ func getTermFromEntry(entry interface{}) int64 {
 	return 0
 }
 
+func (mr *RaftMetadataReplicator) applyCommittedEntries() {
+	commitIndex := mr.metadataLog.GetCommitIndex()
+	lastApplied := mr.metadataLog.lastApplied
+
+	if lastApplied >= commitIndex {
+		return // Nothing to apply
+	}
+
+	mr.ls.Info(log_service.LogEvent{
+		Message: "Applying committed entries to state machine",
+		Metadata: map[string]any{
+			"lastApplied": lastApplied,
+			"commitIndex": commitIndex,
+		},
+	})
+
+	// Apply entries from lastApplied+1 to commitIndex
+	for i := lastApplied + 1; i <= commitIndex; i++ {
+		entry := mr.metadataLog.GetEntryAtIndex(i)
+		if entry == nil {
+			mr.ls.Error(log_service.LogEvent{
+				Message: "Missing log entry during application",
+				Metadata: map[string]any{"index": i},
+			})
+			continue
+		}
+
+		logEntry := entry.(*MetadataLogEntry)
+		err := mr.applyLogEntry(logEntry)
+		if err != nil {
+			mr.ls.Error(log_service.LogEvent{
+				Message: "Failed to apply log entry",
+				Metadata: map[string]any{
+					"index": i,
+					"error": err.Error(),
+				},
+			})
+			continue
+		}
+
+		mr.ls.Debug(log_service.LogEvent{
+			Message: "Applied log entry to state machine",
+			Metadata: map[string]any{
+				"index": i,
+				"type":  logEntry.Type,
+			},
+		})
+	}
+
+	// Update lastApplied
+	mr.metadataLog.SetLastApplied(commitIndex)
+}
+
+func (mr *RaftMetadataReplicator) applyLogEntry(entry *MetadataLogEntry) error {
+	switch entry.Type {
+	case CREATE:
+		if entry.Operation.CreateOp != nil {
+			return mr.ms.CreateFileMetadataFromStruct(entry.Operation.CreateOp.Metadata)
+		}
+	case DELETE:
+		if entry.Operation.DeleteOp != nil {
+			return mr.ms.DeleteFileMetadata(entry.Operation.DeleteOp.Path)
+		}
+	}
+	return nil
+}
+
 func (mr *RaftMetadataReplicator) onReplicationComplete(logIndex int64, success bool) {
 	if success {
 		mr.metadataLog.SetCommitIndex(logIndex)
+		// Apply committed entries to state machine (for leader)
+		mr.applyCommittedEntries()
 	}
 
 	mr.pendingMu.Lock()

@@ -30,7 +30,7 @@ func createRaftServer(port string, nodeID string, otherNodes []cluster_service.N
 	raftCluster := cluster_service.NewRaftClusterService(nodeID, otherNodes, comm, ls)
 	cr := chunk_replicator.NewDefaultChunkReplicator(raftCluster, comm, ls)
 	// mr := metadata_replicator.NewPushBasedMetadataReplicator(raftCluster, comm, ls)
-	mr := metadata_replicator.NewRaftMetadataReplicator(raftCluster, ls)
+	mr := metadata_replicator.NewRaftMetadataReplicator(raftCluster, ls, ms)
 	fs := file_service.NewRaftFileService(ls, mr, cs, ms, cr, chunkSize)
 	srv := server.NewRaftServer(comm, fs, cs, ms, ls, raftCluster)
 

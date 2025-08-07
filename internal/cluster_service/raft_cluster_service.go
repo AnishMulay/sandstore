@@ -362,8 +362,15 @@ func (r *RaftClusterService) HandleAppendEntries(req communication.AppendEntries
 	if len(req.Entries) == 0 {
 		r.ls.Debug(log_service.LogEvent{
 			Message:  "Heartbeat received",
-			Metadata: map[string]any{"leaderID": req.LeaderID, "term": req.Term},
+			Metadata: map[string]any{"leaderID": req.LeaderID, "term": req.Term, "leaderCommit": req.LeaderCommit},
 		})
+		
+		// Apply committed entries if leader's commit index is higher
+		if r.logProcessor != nil && req.LeaderCommit > r.commitIndex {
+			r.commitIndex = req.LeaderCommit
+			r.logProcessor.ProcessReceivedEntries([]byte{}, 0, 0, req.LeaderCommit)
+		}
+		
 		return true, nil
 	}
 
