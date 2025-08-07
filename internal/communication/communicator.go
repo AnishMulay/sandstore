@@ -58,7 +58,7 @@ type StoreMetadataRequest struct {
 }
 
 type DeleteMetadataRequest struct {
-	FileID string
+	Path string
 }
 
 type StopServerRequest struct {
@@ -76,6 +76,8 @@ type AppendEntriesRequest struct {
 	LeaderID     string
 	PrevLogIndex int64
 	PrevLogTerm  int64
+	Entries      []byte // Serialized metadata log entries
+	LeaderCommit int64  // Leader's commit index
 }
 
 type SandCode string

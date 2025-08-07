@@ -323,7 +323,8 @@ func (s *ReplicatedServer) HandleStoreMetadataMessage(msg communication.Message)
 		Metadata: map[string]any{"path": metadata.Path, "size": metadata.Size, "chunks": len(metadata.Chunks)},
 	})
 
-	err := s.ms.CreateFileMetadata(metadata.Path, metadata.Size, metadata.Chunks)
+	fileMetadata := metadata_service.NewFileMetadata(metadata.Path, metadata.Size, metadata.Chunks)
+	err := s.ms.CreateFileMetadataFromStruct(fileMetadata)
 	if err != nil {
 		s.ls.Error(log_service.LogEvent{
 			Message:  "Failed to store metadata",
@@ -338,6 +339,35 @@ func (s *ReplicatedServer) HandleStoreMetadataMessage(msg communication.Message)
 	s.ls.Info(log_service.LogEvent{
 		Message:  "Metadata stored successfully",
 		Metadata: map[string]any{"path": metadata.Path},
+	})
+
+	return &communication.Response{
+		Code: communication.CodeOK,
+	}, nil
+}
+func (s *ReplicatedServer) HandleDeleteMetadataMessage(msg communication.Message) (*communication.Response, error) {
+	request := msg.Payload.(communication.DeleteMetadataRequest)
+
+	s.ls.Info(log_service.LogEvent{
+		Message:  "Deleting metadata",
+		Metadata: map[string]any{"path": request.Path},
+	})
+
+	err := s.ms.DeleteFileMetadata(request.Path)
+	if err != nil {
+		s.ls.Error(log_service.LogEvent{
+			Message:  "Failed to delete metadata",
+			Metadata: map[string]any{"path": request.Path, "error": err.Error()},
+		})
+		return &communication.Response{
+			Code: communication.CodeInternal,
+			Body: []byte(ErrMetadataDeleteFailed.Error()),
+		}, nil
+	}
+
+	s.ls.Info(log_service.LogEvent{
+		Message:  "Metadata deleted successfully",
+		Metadata: map[string]any{"path": request.Path},
 	})
 
 	return &communication.Response{

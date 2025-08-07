@@ -13,29 +13,31 @@ import (
 	"github.com/google/uuid"
 )
 
-type ReplicatedFileService struct {
-	ms        metadata_service.MetadataService
-	cs        chunk_service.ChunkService
-	cr        chunk_replicator.ChunkReplicator
-	mr        metadata_replicator.MetadataReplicator
+type RaftFileService struct {
 	ls        log_service.LogService
+	mr        *metadata_replicator.RaftMetadataReplicator
+	cs        chunk_service.ChunkService
+	ms        metadata_service.MetadataService
+	cr        chunk_replicator.ChunkReplicator
 	chunkSize int64
 }
 
-func NewReplicatedFileService(ms metadata_service.MetadataService, cs chunk_service.ChunkService, cr chunk_replicator.ChunkReplicator, mr metadata_replicator.MetadataReplicator, ls log_service.LogService, chunkSize int64) *ReplicatedFileService {
-	return &ReplicatedFileService{
-		ms:        ms,
-		cs:        cs,
-		cr:        cr,
-		mr:        mr,
+func NewRaftFileService(ls log_service.LogService, mr *metadata_replicator.RaftMetadataReplicator, cs chunk_service.ChunkService, ms metadata_service.MetadataService, cr chunk_replicator.ChunkReplicator, chunkSize int64,
+) *RaftFileService {
+	return &RaftFileService{
 		ls:        ls,
+		mr:        mr,
+		cs:        cs,
+		ms:        ms,
+		cr:        cr,
 		chunkSize: chunkSize,
 	}
 }
 
-func (fs *ReplicatedFileService) StoreFile(path string, data []byte) error {
+// right now the chunks are created and replicated first. but this will also change once an update metadata op is added
+func (fs *RaftFileService) StoreFile(path string, data []byte) error {
 	fs.ls.Info(log_service.LogEvent{
-		Message:  "Storing file",
+		Message:  "Storing file (RaftFileService)",
 		Metadata: map[string]any{"path": path, "size": len(data)},
 	})
 
@@ -67,7 +69,7 @@ func (fs *ReplicatedFileService) StoreFile(path string, data []byte) error {
 			return ErrChunkStoreFailed
 		}
 
-		replicas, err := fs.cr.ReplicateChunk(chunkID, chunkData, 2) // Assuming replication factor of 3
+		replicas, err := fs.cr.ReplicateChunk(chunkID, chunkData, 2)
 		if err != nil {
 			fs.ls.Error(log_service.LogEvent{
 				Message:  "Failed to replicate chunk",
@@ -87,54 +89,53 @@ func (fs *ReplicatedFileService) StoreFile(path string, data []byte) error {
 		})
 
 		counter++
+
+		fs.ls.Info(log_service.LogEvent{
+			Message:  "Counter for chunks",
+			Metadata: map[string]any{"counter": counter, "path": path},
+		})
+
 		offset = end
 		if counter >= 5 {
 			select {}
 		}
 	}
 
-	fs.ls.Debug(log_service.LogEvent{
-		Message:  "Creating file metadata",
-		Metadata: map[string]any{"path": path, "chunks": len(chunks)},
-	})
-
-	metadata := metadata_service.NewFileMetadata(path, int64(len(data)), chunks)
-	err := fs.ms.CreateFileMetadataFromStruct(metadata)
-	if err != nil {
-		fs.ls.Error(log_service.LogEvent{
-			Message:  "Failed to create file metadata",
-			Metadata: map[string]any{"path": path, "error": err.Error()},
-		})
-		return ErrMetadataCreateFailed
-	}
+	tempMetadata := metadata_service.NewFileMetadata(path, int64(len(data)), chunks)
 
 	fs.ls.Debug(log_service.LogEvent{
-		Message:  "Replicating metadata",
+		Message:  "Replicating metadata via Raft",
 		Metadata: map[string]any{"path": path},
 	})
 
+	// Replicate via Raft first - only proceed if consensus is achieved
 	op := metadata_replicator.MetadataReplicationOp{
 		Type:     metadata_replicator.CREATE,
-		Metadata: metadata,
+		Metadata: tempMetadata,
 	}
-	err = fs.mr.Replicate(op)
+	err := fs.mr.Replicate(op)
 	if err != nil {
 		fs.ls.Error(log_service.LogEvent{
-			Message:  "Failed to replicate metadata",
+			Message:  "Failed to replicate metadata via Raft",
 			Metadata: map[string]any{"path": path, "error": err.Error()},
 		})
 		return ErrMetadataReplicationFailed
 	}
 
+	fs.ls.Debug(log_service.LogEvent{
+		Message:  "Raft replication successful, metadata will be applied by state machine",
+		Metadata: map[string]any{"path": path},
+	})
+
 	fs.ls.Info(log_service.LogEvent{
-		Message:  "File stored successfully",
+		Message:  "File stored successfully via Raft",
 		Metadata: map[string]any{"path": path, "chunks": len(chunks)},
 	})
 
 	return nil
 }
 
-func (fs *ReplicatedFileService) ReadFile(path string) ([]byte, error) {
+func (fs *RaftFileService) ReadFile(path string) ([]byte, error) {
 	fs.ls.Info(log_service.LogEvent{
 		Message:  "Reading file",
 		Metadata: map[string]any{"path": path},
@@ -178,77 +179,6 @@ func (fs *ReplicatedFileService) ReadFile(path string) ([]byte, error) {
 	return data, nil
 }
 
-func (fs *ReplicatedFileService) DeleteFile(path string) error {
-	fs.ls.Info(log_service.LogEvent{
-		Message:  "Deleting file",
-		Metadata: map[string]any{"path": path},
-	})
-
-	metadata, err := fs.ms.GetFileMetadata(path)
-	if err != nil {
-		fs.ls.Error(log_service.LogEvent{
-			Message:  "Failed to get file metadata",
-			Metadata: map[string]any{"path": path, "error": err.Error()},
-		})
-		return ErrMetadataGetFailed
-	}
-
-	for _, chunk := range metadata.Chunks {
-		err = fs.cr.DeleteReplicatedChunk(chunk.ChunkID, chunk.Replicas)
-		if err != nil {
-			fs.ls.Error(log_service.LogEvent{
-				Message:  "Failed to delete replicated chunk",
-				Metadata: map[string]any{"path": path, "chunkID": chunk.ChunkID, "error": err.Error()},
-			})
-			return ErrReplicatedChunkDeleteFailed
-		}
-
-		err = fs.cs.DeleteChunk(chunk.ChunkID)
-		if err != nil {
-			fs.ls.Error(log_service.LogEvent{
-				Message:  "Failed to delete chunk",
-				Metadata: map[string]any{"path": path, "chunkID": chunk.ChunkID, "error": err.Error()},
-			})
-			return ErrChunkDeleteFailed
-		}
-	}
-
-	fs.ls.Debug(log_service.LogEvent{
-		Message:  "Replicating metadata deletion",
-		Metadata: map[string]any{"path": path},
-	})
-
-	op := metadata_replicator.MetadataReplicationOp{
-		Type:     metadata_replicator.DELETE,
-		Metadata: *metadata,
-	}
-	err = fs.mr.Replicate(op)
-	if err != nil {
-		fs.ls.Error(log_service.LogEvent{
-			Message:  "Failed to replicate metadata deletion",
-			Metadata: map[string]any{"path": path, "error": err.Error()},
-		})
-		return ErrMetadataReplicationFailed
-	}
-
-	fs.ls.Debug(log_service.LogEvent{
-		Message:  "Deleting file metadata",
-		Metadata: map[string]any{"path": path},
-	})
-
-	err = fs.ms.DeleteFileMetadata(path)
-	if err != nil {
-		fs.ls.Error(log_service.LogEvent{
-			Message:  "Failed to delete file metadata",
-			Metadata: map[string]any{"path": path, "error": err.Error()},
-		})
-		return ErrMetadataDeleteFailed
-	}
-
-	fs.ls.Info(log_service.LogEvent{
-		Message:  "File deleted successfully",
-		Metadata: map[string]any{"path": path, "chunks": len(metadata.Chunks)},
-	})
-
+func (fs *RaftFileService) DeleteFile(path string) error {
 	return nil
 }

@@ -19,7 +19,7 @@ package main
 // 	"github.com/AnishMulay/sandstore/internal/server"
 // )
 
-// func createServer(port string, otherNodes []cluster_service.Node) *server.RaftServer {
+// func createServer(port string, otherNodes []cluster_service.Node) *server.ReplicatedServer {
 // 	logDir := "./logs"
 // 	nodeID := port[1:] // Use port as node ID
 // 	ls := log_service.NewLocalDiscLogService(logDir, nodeID)
@@ -32,7 +32,7 @@ package main
 // 	cr := chunk_replicator.NewDefaultChunkReplicator(clusterService, comm, ls)
 // 	mr := metadata_replicator.NewPushBasedMetadataReplicator(clusterService, comm, ls)
 // 	fs := file_service.NewReplicatedFileService(ms, cs, cr, mr, ls, chunkSize)
-// 	srv := server.NewRaftServer(comm, fs, cs, ms, ls, clusterService)
+// 	srv := server.NewReplicatedServer(comm, fs, cs, ms, ls, clusterService)
 
 // 	srv.RegisterTypedHandler(communication.MessageTypeStoreFile, reflect.TypeOf((*communication.StoreFileRequest)(nil)).Elem(), srv.HandleStoreFileMessage)
 // 	srv.RegisterTypedHandler(communication.MessageTypeReadFile, reflect.TypeOf((*communication.ReadFileRequest)(nil)).Elem(), srv.HandleReadFileMessage)
@@ -41,13 +41,14 @@ package main
 // 	srv.RegisterTypedHandler(communication.MessageTypeReadChunk, reflect.TypeOf((*communication.ReadChunkRequest)(nil)).Elem(), srv.HandleReadChunkMessage)
 // 	srv.RegisterTypedHandler(communication.MessageTypeDeleteChunk, reflect.TypeOf((*communication.DeleteChunkRequest)(nil)).Elem(), srv.HandleDeleteChunkMessage)
 // 	srv.RegisterTypedHandler(communication.MessageTypeStoreMetadata, reflect.TypeOf((*communication.StoreMetadataRequest)(nil)).Elem(), srv.HandleStoreMetadataMessage)
-// 	srv.RegisterTypedHandler(communication.MessageTypeStopServer, reflect.TypeOf((*communication.StopServerRequest)(nil)).Elem(), srv.HandleStopServerMessage)
+// 	srv.RegisterTypedHandler(communication.MessageTypeDeleteMetadata, reflect.TypeOf((*communication.DeleteMetadataRequest)(nil)).Elem(), srv.HandleDeleteMetadataMessage)
+
 
 // 	return srv
 // }
 
 // func main() {
-// 	servers := []*server.RaftServer{
+// 	servers := []*server.ReplicatedServer{
 // 		createServer(":8080", []cluster_service.Node{
 // 			{ID: "8081", Address: "localhost:8081", Healthy: true},
 // 			{ID: "8082", Address: "localhost:8082", Healthy: true},
@@ -65,7 +66,7 @@ package main
 // 	var wg sync.WaitGroup
 // 	for i, srv := range servers {
 // 		wg.Add(1)
-// 		go func(s *server.RaftServer, port int) {
+// 		go func(s *server.ReplicatedServer, port int) {
 // 			defer wg.Done()
 // 			log.Printf("Starting server on :808%d", port)
 // 			if err := s.Start(); err != nil {
@@ -82,7 +83,7 @@ package main
 // 	var shutdownWg sync.WaitGroup
 // 	for i, srv := range servers {
 // 		shutdownWg.Add(1)
-// 		go func(idx int, server *server.RaftServer) {
+// 		go func(idx int, server *server.ReplicatedServer) {
 // 			defer shutdownWg.Done()
 // 			if err := server.Stop(); err != nil {
 // 				log.Printf("Error stopping server %d: %v", idx, err)

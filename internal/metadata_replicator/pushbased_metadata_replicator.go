@@ -7,7 +7,6 @@ import (
 	"github.com/AnishMulay/sandstore/internal/cluster_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/log_service"
-	"github.com/AnishMulay/sandstore/internal/metadata_service"
 )
 
 type PushBasedMetadataReplicator struct {
@@ -24,36 +23,50 @@ func NewPushBasedMetadataReplicator(clusterService cluster_service.ClusterServic
 	}
 }
 
-func (mr *PushBasedMetadataReplicator) ReplicateMetadata(metadata metadata_service.FileMetadata) error {
+func (mr *PushBasedMetadataReplicator) Replicate(op MetadataReplicationOp) error {
+	opType := "create"
+	if op.Type == DELETE {
+		opType = "delete"
+	}
+
 	mr.ls.Info(log_service.LogEvent{
-		Message:  "Replicating metadata",
-		Metadata: map[string]any{"path": metadata.Path, "size": metadata.Size, "chunks": len(metadata.Chunks)},
+		Message:  "Replicating metadata operation",
+		Metadata: map[string]any{"path": op.Metadata.Path, "type": opType, "size": op.Metadata.Size, "chunks": len(op.Metadata.Chunks)},
 	})
 
 	nodes, err := mr.clusterService.GetHealthyNodes()
 	if err != nil {
 		mr.ls.Error(log_service.LogEvent{
 			Message:  "Failed to get healthy nodes for metadata replication",
-			Metadata: map[string]any{"path": metadata.Path, "error": err.Error()},
+			Metadata: map[string]any{"path": op.Metadata.Path, "error": err.Error()},
 		})
 		return ErrHealthyNodesGetFailed
 	}
 
 	mr.ls.Debug(log_service.LogEvent{
 		Message:  "Selected nodes for metadata replication",
-		Metadata: map[string]any{"path": metadata.Path, "nodes": len(nodes)},
+		Metadata: map[string]any{"path": op.Metadata.Path, "nodes": len(nodes)},
 	})
 
 	for _, node := range nodes {
 		mr.ls.Debug(log_service.LogEvent{
-			Message:  "Replicating metadata to node",
-			Metadata: map[string]any{"path": metadata.Path, "nodeID": node.ID, "address": node.Address},
+			Message:  "Replicating metadata operation to node",
+			Metadata: map[string]any{"path": op.Metadata.Path, "type": opType, "nodeID": node.ID, "address": node.Address},
 		})
 
-		msg := communication.Message{
-			From:    mr.comm.Address(),
-			Type:    communication.MessageTypeStoreMetadata,
-			Payload: communication.StoreMetadataRequest{Metadata: metadata},
+		var msg communication.Message
+		if op.Type == CREATE {
+			msg = communication.Message{
+				From:    mr.comm.Address(),
+				Type:    communication.MessageTypeStoreMetadata,
+				Payload: communication.StoreMetadataRequest{Metadata: op.Metadata},
+			}
+		} else {
+			msg = communication.Message{
+				From:    mr.comm.Address(),
+				Type:    communication.MessageTypeDeleteMetadata,
+				Payload: communication.DeleteMetadataRequest{Path: op.Metadata.Path},
+			}
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -62,29 +75,29 @@ func (mr *PushBasedMetadataReplicator) ReplicateMetadata(metadata metadata_servi
 		resp, err := mr.comm.Send(ctx, node.Address, msg)
 		if err != nil {
 			mr.ls.Error(log_service.LogEvent{
-				Message:  "Failed to send metadata to node",
-				Metadata: map[string]any{"path": metadata.Path, "nodeID": node.ID, "address": node.Address, "error": err.Error()},
+				Message:  "Failed to send metadata operation to node",
+				Metadata: map[string]any{"path": op.Metadata.Path, "type": opType, "nodeID": node.ID, "address": node.Address, "error": err.Error()},
 			})
 			return ErrMetadataSendFailed
 		}
 
 		if resp.Code != communication.CodeOK {
 			mr.ls.Error(log_service.LogEvent{
-				Message:  "Metadata replication failed",
-				Metadata: map[string]any{"path": metadata.Path, "nodeID": node.ID, "address": node.Address, "responseCode": resp.Code, "responseBody": string(resp.Body)},
+				Message:  "Metadata operation replication failed",
+				Metadata: map[string]any{"path": op.Metadata.Path, "type": opType, "nodeID": node.ID, "address": node.Address, "responseCode": resp.Code, "responseBody": string(resp.Body)},
 			})
 			return ErrMetadataReplicationFailed
 		} else {
 			mr.ls.Debug(log_service.LogEvent{
-				Message:  "Metadata replicated successfully to node",
-				Metadata: map[string]any{"path": metadata.Path, "nodeID": node.ID, "address": node.Address},
+				Message:  "Metadata operation replicated successfully to node",
+				Metadata: map[string]any{"path": op.Metadata.Path, "type": opType, "nodeID": node.ID, "address": node.Address},
 			})
 		}
 	}
 
 	mr.ls.Info(log_service.LogEvent{
-		Message:  "Metadata replication completed",
-		Metadata: map[string]any{"path": metadata.Path, "nodes": len(nodes)},
+		Message:  "Metadata operation replication completed",
+		Metadata: map[string]any{"path": op.Metadata.Path, "type": opType, "nodes": len(nodes)},
 	})
 
 	return nil

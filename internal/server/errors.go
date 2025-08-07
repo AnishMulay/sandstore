@@ -23,4 +23,5 @@ var (
 
 	// Metadata operation errors
 	ErrMetadataStoreFailed = errors.New("failed to store metadata")
+	ErrMetadataDeleteFailed = errors.New("failed to delete metadata")
 )
