@@ -123,19 +123,9 @@ func (fs *RaftFileService) StoreFile(path string, data []byte) error {
 	}
 
 	fs.ls.Debug(log_service.LogEvent{
-		Message:  "Raft replication successful, committing to local store",
+		Message:  "Raft replication successful, metadata will be applied by state machine",
 		Metadata: map[string]any{"path": path},
 	})
-
-	// Only commit to local metadata store after Raft consensus
-	err = fs.ms.CreateFileMetadataFromStruct(tempMetadata)
-	if err != nil {
-		fs.ls.Error(log_service.LogEvent{
-			Message:  "Failed to commit file metadata to local store",
-			Metadata: map[string]any{"path": path, "error": err.Error()},
-		})
-		return ErrMetadataCreateFailed
-	}
 
 	fs.ls.Info(log_service.LogEvent{
 		Message:  "File stored successfully via Raft",

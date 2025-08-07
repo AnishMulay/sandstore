@@ -271,10 +271,30 @@ func (mr *RaftMetadataReplicator) applyLogEntry(entry *MetadataLogEntry) error {
 	switch entry.Type {
 	case CREATE:
 		if entry.Operation.CreateOp != nil {
+			// Idempotent: check if metadata already exists
+			_, err := mr.ms.GetFileMetadata(entry.Operation.CreateOp.Metadata.Path)
+			if err == nil {
+				// Metadata already exists, operation is idempotent
+				mr.ls.Debug(log_service.LogEvent{
+					Message: "Metadata already exists, skipping create operation",
+					Metadata: map[string]any{"path": entry.Operation.CreateOp.Metadata.Path},
+				})
+				return nil
+			}
 			return mr.ms.CreateFileMetadataFromStruct(entry.Operation.CreateOp.Metadata)
 		}
 	case DELETE:
 		if entry.Operation.DeleteOp != nil {
+			// Idempotent: check if metadata exists before deleting
+			_, err := mr.ms.GetFileMetadata(entry.Operation.DeleteOp.Path)
+			if err != nil {
+				// Metadata doesn't exist, operation is idempotent
+				mr.ls.Debug(log_service.LogEvent{
+					Message: "Metadata doesn't exist, skipping delete operation",
+					Metadata: map[string]any{"path": entry.Operation.DeleteOp.Path},
+				})
+				return nil
+			}
 			return mr.ms.DeleteFileMetadata(entry.Operation.DeleteOp.Path)
 		}
 	}
