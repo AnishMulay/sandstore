@@ -1,5 +1,7 @@
 # Variables
-SERVER_BINARY=server
+BASIC_SERVER_BINARY=basic-server
+REPLICATED_SERVER_BINARY=replicated-server
+RAFT_SERVER_BINARY=raft-server
 CLIENT_BINARY=client
 MCP_BINARY=sandstore-mcp
 
@@ -10,11 +12,12 @@ proto:
 		--go-grpc_out=gen --go-grpc_opt=paths=source_relative \
 		proto/communication/communication.proto
 
-
-# Build both server and client
+# Build all binaries
 .PHONY: build
 build:
-	go build -o $(SERVER_BINARY) ./cmd/server
+	go build -o $(BASIC_SERVER_BINARY) ./cmd/basic-server
+	go build -o $(REPLICATED_SERVER_BINARY) ./cmd/replicated-server
+	go build -o $(RAFT_SERVER_BINARY) ./cmd/raft-server
 	go build -o $(CLIENT_BINARY) ./cmd/client
 
 # Build MCP server
@@ -22,24 +25,43 @@ build:
 mcp:
 	go build -o $(MCP_BINARY) ./cmd/mcp
 
-# Run the server
+# Run basic server (single node, no replication)
+.PHONY: server-basic
+server-basic:
+	go build -o $(BASIC_SERVER_BINARY) ./cmd/basic-server
+	./$(BASIC_SERVER_BINARY)
+
+# Run replicated server (3-node cluster with replication)
+.PHONY: server-replicated
+server-replicated:
+	go build -o $(REPLICATED_SERVER_BINARY) ./cmd/replicated-server
+	./$(REPLICATED_SERVER_BINARY)
+
+# Run Raft server (3-node cluster with Raft consensus)
+.PHONY: server-raft
+server-raft:
+	go build -o $(RAFT_SERVER_BINARY) ./cmd/raft-server
+	./$(RAFT_SERVER_BINARY)
+
+# Backward compatibility - defaults to Raft server
 .PHONY: server
-server: build
-	./$(SERVER_BINARY)
+server: server-raft
 
 # Run the client
 .PHONY: client
-client: build
+client:
+	go build -o $(CLIENT_BINARY) ./cmd/client
 	./$(CLIENT_BINARY)
 
-# Test server-client communication
+# Test server-client communication with Raft
 .PHONY: test-server
-test-server: build
-	@echo "Starting server..."
-	@./$(SERVER_BINARY) & SERVER_PID=$$!; \
-	sleep 2; \
+test-server:
+	@echo "Starting Raft server..."
+	@go build -o $(RAFT_SERVER_BINARY) ./cmd/raft-server
+	@./$(RAFT_SERVER_BINARY) & SERVER_PID=$$!; \
+	sleep 3; \
 	echo "Running client..."; \
-	./$(CLIENT_BINARY); \
+	go build -o $(CLIENT_BINARY) ./cmd/client && ./$(CLIENT_BINARY); \
 	echo "Stopping server..."; \
 	kill $$SERVER_PID
 
@@ -51,5 +73,5 @@ test:
 # Clean up
 .PHONY: clean
 clean:
-	rm -f $(SERVER_BINARY) $(CLIENT_BINARY) $(MCP_BINARY)
+	rm -f $(BASIC_SERVER_BINARY) $(REPLICATED_SERVER_BINARY) $(RAFT_SERVER_BINARY) $(CLIENT_BINARY) $(MCP_BINARY)
 	rm -rf chunks logs

@@ -20,18 +20,14 @@ import (
 )
 
 func createRaftServer(port string, nodeID string, otherNodes []cluster_service.Node) *server.RaftServer {
-	logDir := "./logs"
-	ls := log_service.NewLocalDiscLogService(logDir, nodeID, "INFO")
+	ls := log_service.NewLocalDiscLogService("./logs", nodeID, "INFO")
 	ms := metadata_service.NewInMemoryMetadataService(ls)
-	chunkPath := "./chunks/" + nodeID
-	cs := chunk_service.NewLocalDiscChunkService(chunkPath, ls)
-	chunkSize := int64(8 * 1024 * 1024)
+	cs := chunk_service.NewLocalDiscChunkService("./chunks/"+nodeID, ls)
 	comm := communication.NewGRPCCommunicator(port, ls)
 	raftCluster := cluster_service.NewRaftClusterService(nodeID, otherNodes, comm, ls)
 	cr := chunk_replicator.NewDefaultChunkReplicator(raftCluster, comm, ls)
-	// mr := metadata_replicator.NewPushBasedMetadataReplicator(raftCluster, comm, ls)
 	mr := metadata_replicator.NewRaftMetadataReplicator(raftCluster, ls, ms)
-	fs := file_service.NewRaftFileService(ls, mr, cs, ms, cr, chunkSize)
+	fs := file_service.NewRaftFileService(ls, mr, cs, ms, cr, 8*1024*1024)
 	srv := server.NewRaftServer(comm, fs, cs, ms, ls, raftCluster)
 
 	srv.RegisterTypedHandler(communication.MessageTypeRequestVote, reflect.TypeOf((*communication.RequestVoteRequest)(nil)).Elem(), srv.HandleRequestVoteMessage)
@@ -41,7 +37,6 @@ func createRaftServer(port string, nodeID string, otherNodes []cluster_service.N
 	srv.RegisterTypedHandler(communication.MessageTypeStoreChunk, reflect.TypeOf((*communication.StoreChunkRequest)(nil)).Elem(), srv.HandleStoreChunkMessage)
 	srv.RegisterTypedHandler(communication.MessageTypeReadChunk, reflect.TypeOf((*communication.ReadChunkRequest)(nil)).Elem(), srv.HandleReadChunkMessage)
 	srv.RegisterTypedHandler(communication.MessageTypeDeleteChunk, reflect.TypeOf((*communication.DeleteChunkRequest)(nil)).Elem(), srv.HandleDeleteChunkMessage)
-	// srv.RegisterTypedHandler(communication.MessageTypeStoreMetadata, reflect.TypeOf((*communication.StoreMetadataRequest)(nil)).Elem(), srv.HandleStoreMetadataMessage)
 	srv.RegisterTypedHandler(communication.MessageTypeStopServer, reflect.TypeOf((*communication.StopServerRequest)(nil)).Elem(), srv.HandleStopServerMessage)
 	srv.RegisterTypedHandler(communication.MessageTypeAppendEntries, reflect.TypeOf((*communication.AppendEntriesRequest)(nil)).Elem(), srv.HandleAppendEntriesMessage)
 
@@ -90,8 +85,6 @@ func main() {
 			defer shutdownWg.Done()
 			if err := server.Stop(); err != nil {
 				log.Printf("Error stopping server %d: %v", idx, err)
-			} else {
-				log.Printf("Server %d stopped successfully", idx)
 			}
 		}(i, srv)
 	}

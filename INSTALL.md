@@ -101,8 +101,10 @@ After installation, your directory should look like this:
 ```
 sandstore/
 ├── cmd/                    # Application entry points
-│   ├── server/            # Server main and configurations
-│   ├── client/            # Client examples and test scenarios  
+│   ├── basic-server/      # Single-node server (no replication)
+│   ├── replicated-server/ # Multi-node server with replication
+│   ├── raft-server/       # Multi-node server with Raft consensus
+│   ├── client/            # Test client
 │   └── mcp/               # MCP server integration
 ├── internal/              # Internal packages (not importable)
 │   ├── chunk_service/     # Chunk storage implementation
@@ -119,8 +121,17 @@ sandstore/
 
 ### Running Individual Components
 
-**Start just the server cluster:**
+**Start different server types:**
 ```bash
+# Basic server (single node, no replication)
+make server-basic
+
+# Replicated server (3-node cluster with replication)
+make server-replicated
+
+# Raft server (3-node cluster with Raft consensus)
+make server-raft
+# or simply:
 make server
 ```
 
@@ -176,16 +187,21 @@ make test-server
 
 ### Manual Testing
 
-1. **Start the servers** in one terminal:
+1. **Start a server** in one terminal (choose your complexity level):
    ```bash
-   make server
+   # For beginners - single node
+   make server-basic
+   
+   # For learning replication
+   make server-replicated
+   
+   # For full distributed experience
+   make server-raft
    ```
 
 2. **In another terminal**, interact with the cluster:
    ```bash
-   # Store a file
-   echo "Hello, Sandstore!" > test.txt
-   # Use the client examples in cmd/client/ for more complex operations
+   make client
    ```
 
 3. **Monitor the logs** to see distributed coordination:

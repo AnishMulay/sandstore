@@ -46,11 +46,32 @@ Whether you're a student diving into distributed systems for the first time or a
 
 ## Quick Start
 
+### Server Options
+
+Sandstore provides three server configurations for different learning stages:
+
+1. **Basic server** (single node, no replication):
+   ```bash
+   make server-basic
+   ```
+
+2. **Replicated server** (3-node cluster with replication):
+   ```bash
+   make server-replicated
+   ```
+
+3. **Raft server** (3-node cluster with Raft consensus):
+   ```bash
+   make server-raft
+   # or simply:
+   make server
+   ```
+
 ### Basic Usage
 
-1. **Start a 3-node Raft cluster:**
+1. **Start a server** (choose your complexity level):
    ```bash
-   make server
+   make server-raft  # Recommended for full distributed experience
    ```
 
 2. **Store a file from another terminal:**
@@ -59,9 +80,9 @@ Whether you're a student diving into distributed systems for the first time or a
    ```
 
 3. **Watch the magic happen:**
-   - Leader election occurs automatically
+   - Leader election occurs automatically (Raft mode)
    - File gets chunked and distributed
-   - Metadata is replicated via Raft consensus
+   - Metadata is replicated via consensus
    - Check logs in `./logs/` to see the distributed coordination
 
 ### Example Client Code
@@ -140,9 +161,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines on:
 
 New to distributed systems? Try this progression:
 
-1. **Start simple**: Run the basic server and understand file chunking
-2. **Add replication**: Explore how chunks get replicated across nodes
-3. **Dive into Raft**: Watch leader election and log replication in action
+1. **Start simple**: Run `make server-basic` and understand file chunking
+2. **Add replication**: Try `make server-replicated` to see chunk replication
+3. **Dive into Raft**: Use `make server-raft` for leader election and consensus
 4. **Simulate failures**: Kill nodes and see how the system recovers
 5. **Extend the system**: Add your own features and improvements
 
