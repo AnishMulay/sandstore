@@ -180,5 +180,39 @@ func (fs *RaftFileService) ReadFile(path string) ([]byte, error) {
 }
 
 func (fs *RaftFileService) DeleteFile(path string) error {
+	fs.ls.Info(log_service.LogEvent{
+		Message:  "Deleting file (RaftFileService)",
+		Metadata: map[string]any{"path": path},
+	})
+
+	// Check if file exists first
+	metadata, err := fs.ms.GetFileMetadata(path)
+	if err != nil {
+		fs.ls.Error(log_service.LogEvent{
+			Message:  "File not found for deletion",
+			Metadata: map[string]any{"path": path, "error": err.Error()},
+		})
+		return ErrFileNotFound
+	}
+
+	// Replicate delete operation via Raft
+	op := metadata_replicator.MetadataReplicationOp{
+		Type:     metadata_replicator.DELETE,
+		Metadata: *metadata, // Dereference pointer to get value
+	}
+	err = fs.mr.Replicate(op)
+	if err != nil {
+		fs.ls.Error(log_service.LogEvent{
+			Message:  "Failed to replicate delete operation via Raft",
+			Metadata: map[string]any{"path": path, "error": err.Error()},
+		})
+		return ErrMetadataReplicationFailed
+	}
+
+	fs.ls.Info(log_service.LogEvent{
+		Message:  "File deleted successfully via Raft",
+		Metadata: map[string]any{"path": path},
+	})
+
 	return nil
 }

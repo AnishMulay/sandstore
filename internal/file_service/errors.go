@@ -3,6 +3,9 @@ package file_service
 import "errors"
 
 var (
+	// File operation errors
+	ErrFileNotFound = errors.New("file not found")
+
 	// Chunk operation errors
 	ErrChunkStoreFailed  = errors.New("failed to store chunk")
 	ErrChunkReadFailed   = errors.New("failed to read chunk")
