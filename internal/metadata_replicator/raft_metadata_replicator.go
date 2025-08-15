@@ -112,8 +112,9 @@ func (mr *RaftMetadataReplicator) ProcessReceivedEntries(entriesData []byte, pre
 		},
 	})
 
-	// Log consistency check
+	// Enhanced log consistency check - Raft log matching property
 	if prevLogIndex > 0 {
+		// Check if we have the previous log entry
 		if prevLogIndex > mr.metadataLog.GetLastLogIndex() {
 			mr.ls.Warn(log_service.LogEvent{
 				Message: "Log consistency check failed - missing entries",
@@ -125,20 +126,46 @@ func (mr *RaftMetadataReplicator) ProcessReceivedEntries(entriesData []byte, pre
 			return false
 		}
 
+		// Validate term consistency at prevLogIndex
 		prevEntry := mr.metadataLog.GetEntryAtIndex(prevLogIndex)
-		if prevEntry != nil {
-			if getTermFromEntry(prevEntry) != prevLogTerm {
-				mr.ls.Warn(log_service.LogEvent{
-					Message: "Log consistency check failed - term mismatch",
-					Metadata: map[string]any{
-						"prevLogIndex": prevLogIndex,
-						"expectedTerm": prevLogTerm,
-						"actualTerm":   getTermFromEntry(prevEntry),
-					},
-				})
-				// Truncate conflicting entries
-				mr.metadataLog.TruncateAfter(prevLogIndex)
-				return false
+		if prevEntry == nil {
+			mr.ls.Error(log_service.LogEvent{
+				Message: "Log consistency check failed - entry not found",
+				Metadata: map[string]any{"prevLogIndex": prevLogIndex},
+			})
+			return false
+		}
+
+		actualTerm := getTermFromEntry(prevEntry)
+		if actualTerm != prevLogTerm {
+			mr.ls.Warn(log_service.LogEvent{
+				Message: "Log consistency check failed - term mismatch, truncating conflicting entries",
+				Metadata: map[string]any{
+					"prevLogIndex": prevLogIndex,
+					"expectedTerm": prevLogTerm,
+					"actualTerm":   actualTerm,
+				},
+			})
+			// Truncate all entries after the conflict point
+			mr.metadataLog.TruncateAfter(prevLogIndex - 1)
+			return false
+		}
+	} else if prevLogIndex == 0 && mr.metadataLog.GetLastLogIndex() > 0 {
+		// Leader expects empty log but we have entries - validate first entry
+		firstEntry := mr.metadataLog.GetEntryAtIndex(1)
+		if firstEntry != nil && len(entriesData) > 0 {
+			var newEntries []MetadataLogEntry
+			if err := json.Unmarshal(entriesData, &newEntries); err == nil && len(newEntries) > 0 {
+				if getTermFromEntry(firstEntry) != newEntries[0].Term {
+					mr.ls.Warn(log_service.LogEvent{
+						Message: "Log consistency check failed - first entry term mismatch, clearing log",
+						Metadata: map[string]any{
+							"existingTerm": getTermFromEntry(firstEntry),
+							"newTerm":      newEntries[0].Term,
+						},
+					})
+					mr.metadataLog.TruncateAfter(-1) // Clear entire log
+				}
 			}
 		}
 	}
@@ -154,7 +181,40 @@ func (mr *RaftMetadataReplicator) ProcessReceivedEntries(entriesData []byte, pre
 			return false
 		}
 
-		for _, entry := range entries {
+		// Validate entry sequence and append
+		expectedIndex := prevLogIndex + 1
+		for i, entry := range entries {
+			// Validate entry index sequence
+			if entry.Index != expectedIndex {
+				mr.ls.Error(log_service.LogEvent{
+					Message: "Log entry index mismatch",
+					Metadata: map[string]any{
+						"entryPosition": i,
+						"expectedIndex": expectedIndex,
+						"actualIndex":   entry.Index,
+					},
+				})
+				return false
+			}
+
+			// Check for existing conflicting entry
+			existingEntry := mr.metadataLog.GetEntryAtIndex(entry.Index)
+			if existingEntry != nil {
+				existingTerm := getTermFromEntry(existingEntry)
+				if existingTerm != entry.Term {
+					mr.ls.Warn(log_service.LogEvent{
+						Message: "Conflicting entry detected, truncating from conflict point",
+						Metadata: map[string]any{
+							"conflictIndex": entry.Index,
+							"existingTerm":  existingTerm,
+							"newTerm":       entry.Term,
+						},
+					})
+					// Truncate from conflict point and append new entries
+					mr.metadataLog.TruncateAfter(entry.Index - 1)
+				}
+			}
+
 			mr.metadataLog.AppendEntry(entry)
 			mr.ls.Debug(log_service.LogEvent{
 				Message: "Appended log entry",
@@ -164,6 +224,7 @@ func (mr *RaftMetadataReplicator) ProcessReceivedEntries(entriesData []byte, pre
 					"type":  entry.Type,
 				},
 			})
+			expectedIndex++
 		}
 	}
 
@@ -230,18 +291,36 @@ func (mr *RaftMetadataReplicator) applyCommittedEntries() {
 		},
 	})
 
-	// Apply entries from lastApplied+1 to commitIndex
+	// Apply entries from lastApplied+1 to commitIndex with validation
 	for i := lastApplied + 1; i <= commitIndex; i++ {
 		entry := mr.metadataLog.GetEntryAtIndex(i)
 		if entry == nil {
 			mr.ls.Error(log_service.LogEvent{
-				Message: "Missing log entry during application",
-				Metadata: map[string]any{"index": i},
+				Message: "Missing log entry during application - log inconsistency detected",
+				Metadata: map[string]any{
+					"index":       i,
+					"lastApplied": lastApplied,
+					"commitIndex": commitIndex,
+				},
 			})
-			continue
+			// Stop applying to maintain consistency
+			return
 		}
 
 		logEntry := entry.(*MetadataLogEntry)
+		
+		// Validate entry index matches expected sequence
+		if logEntry.Index != i {
+			mr.ls.Error(log_service.LogEvent{
+				Message: "Log entry index mismatch during application",
+				Metadata: map[string]any{
+					"expectedIndex": i,
+					"actualIndex":   logEntry.Index,
+				},
+			})
+			return
+		}
+
 		err := mr.applyLogEntry(logEntry)
 		if err != nil {
 			mr.ls.Error(log_service.LogEvent{
@@ -251,6 +330,7 @@ func (mr *RaftMetadataReplicator) applyCommittedEntries() {
 					"error": err.Error(),
 				},
 			})
+			// Continue applying other entries for availability
 			continue
 		}
 
@@ -261,10 +341,10 @@ func (mr *RaftMetadataReplicator) applyCommittedEntries() {
 				"type":  logEntry.Type,
 			},
 		})
+		
+		// Update lastApplied incrementally for better error recovery
+		mr.metadataLog.SetLastApplied(i)
 	}
-
-	// Update lastApplied
-	mr.metadataLog.SetLastApplied(commitIndex)
 }
 
 func (mr *RaftMetadataReplicator) applyLogEntry(entry *MetadataLogEntry) error {
