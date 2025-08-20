@@ -1,5 +1,24 @@
 # Sandstore
 
+<div align="center">
+
+![Go Version](https://img.shields.io/github/go-mod/go-version/AnishMulay/sandstore?style=flat-square&logo=go&color=00ADD8)
+![License](https://img.shields.io/github/license/AnishMulay/sandstore?style=flat-square&color=blue)
+![Language](https://img.shields.io/github/languages/top/AnishMulay/sandstore?style=flat-square&logo=go&color=00ADD8)
+![Last Commit](https://img.shields.io/github/last-commit/AnishMulay/sandstore?style=flat-square)
+
+![Commit Activity](https://img.shields.io/github/commit-activity/m/AnishMulay/sandstore?style=flat-square)
+![Repo Size](https://img.shields.io/github/repo-size/AnishMulay/sandstore?style=flat-square)
+![Issues](https://img.shields.io/github/issues/AnishMulay/sandstore?style=flat-square)
+![Contributors](https://img.shields.io/github/contributors/AnishMulay/sandstore?style=flat-square)
+
+![Stars](https://img.shields.io/github/stars/AnishMulay/sandstore?style=social)
+![Forks](https://img.shields.io/github/forks/AnishMulay/sandstore?style=social)
+
+</div>
+
+---
+
 **A modular distributed file storage system for learning and experimentation**
 
 Sandstore is a production-inspired distributed file storage system built in Go, designed as a hands-on learning playground for students and engineers exploring distributed systems concepts. Think of it as your personal sandbox for understanding how systems like Google File System (GFS) and Hadoop Distributed File System (HDFS) work under the hood.
