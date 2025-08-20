@@ -12,9 +12,6 @@
 ![Issues](https://img.shields.io/github/issues/AnishMulay/sandstore?style=flat-square)
 ![Contributors](https://img.shields.io/github/contributors/AnishMulay/sandstore?style=flat-square)
 
-![Stars](https://img.shields.io/github/stars/AnishMulay/sandstore?style=social)
-![Forks](https://img.shields.io/github/forks/AnishMulay/sandstore?style=social)
-
 </div>
 
 ---
