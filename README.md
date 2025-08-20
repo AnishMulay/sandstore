@@ -3,7 +3,7 @@
 # Sandstore
 
 ![Go Version](https://img.shields.io/github/go-mod/go-version/AnishMulay/sandstore?style=flat-square&logo=go&color=00ADD8)
-![License](https://img.shields.io/github/license/AnishMulay/sandstore?style=flat-square&color=blue)
+![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square&logo=opensource)
 ![Language](https://img.shields.io/github/languages/top/AnishMulay/sandstore?style=flat-square&logo=go&color=00ADD8)
 ![Last Commit](https://img.shields.io/github/last-commit/AnishMulay/sandstore?style=flat-square)
 
