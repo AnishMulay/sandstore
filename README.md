@@ -1,6 +1,6 @@
-# Sandstore
-
 <div align="center">
+
+# Sandstore
 
 ![Go Version](https://img.shields.io/github/go-mod/go-version/AnishMulay/sandstore?style=flat-square&logo=go&color=00ADD8)
 ![License](https://img.shields.io/github/license/AnishMulay/sandstore?style=flat-square&color=blue)
@@ -13,8 +13,6 @@
 ![Contributors](https://img.shields.io/github/contributors/AnishMulay/sandstore?style=flat-square)
 
 </div>
-
----
 
 **A modular distributed file storage system for learning and experimentation**
 
