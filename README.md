@@ -1,6 +1,7 @@
 <div align="center">
 
 # Sandstore
+<img width="1024" height="1024" alt="sandstore_logo" src="https://github.com/user-attachments/assets/509e0bb5-7fab-409f-ba59-a2b161b90923" />
 
 ![Go Version](https://img.shields.io/github/go-mod/go-version/AnishMulay/sandstore?style=flat-square&logo=go&color=00ADD8)
 ![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square&logo=opensource)
@@ -171,7 +172,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines on:
 - Submitting issues and pull requests
 - Joining our community discussions
 
-## 📚 Learning Path
+## Learning Path
 
 New to distributed systems? Try this progression:
 
