@@ -1,6 +1,5 @@
 <div align="center">
 
-<img width="1024" height="1024" alt="sandstore_logo" src="https://github.com/user-attachments/assets/509e0bb5-7fab-409f-ba59-a2b161b90923" />
 # Sandstore
 
 ![Go Version](https://img.shields.io/github/go-mod/go-version/AnishMulay/sandstore?style=flat-square&logo=go&color=00ADD8)
@@ -14,6 +13,8 @@
 ![Contributors](https://img.shields.io/github/contributors/AnishMulay/sandstore?style=flat-square)
 
 </div>
+
+<img width="1024" height="1024" alt="sandstore_logo" src="https://github.com/user-attachments/assets/509e0bb5-7fab-409f-ba59-a2b161b90923" />
 
 **A modular distributed file storage system for learning and experimentation**
 
