@@ -43,9 +43,10 @@ server-raft:
 	go build -o $(RAFT_SERVER_BINARY) ./cmd/raft-server
 	./$(RAFT_SERVER_BINARY)
 
-# Backward compatibility - defaults to Raft server
-.PHONY: server
-server: server-raft
+# Start 5-node Raft cluster
+.PHONY: cluster
+cluster:
+	./scripts/dev/run-5.sh
 
 # Run the client
 .PHONY: client
@@ -74,4 +75,4 @@ test:
 .PHONY: clean
 clean:
 	rm -f $(BASIC_SERVER_BINARY) $(REPLICATED_SERVER_BINARY) $(RAFT_SERVER_BINARY) $(CLIENT_BINARY) $(MCP_BINARY)
-	rm -rf chunks logs
+	rm -rf bin/ run/ chunks logs config.yaml

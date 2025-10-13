@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/log_service"
@@ -33,37 +32,6 @@ type ServerRegistry struct {
 }
 
 func LoadConfig(path string) (*MCPConfig, error) {
-	if _, err := os.Stat(path); os.IsNotExist(err) {
-		defaultConfig := &MCPConfig{}
-		defaultConfig.Communicator.Type = "grpc"
-		defaultConfig.DefaultServer = "server1"
-		defaultConfig.Servers = []struct {
-			ID      string `yaml:"id"`
-			Address string `yaml:"address"`
-			Healthy bool   `yaml:"healthy"`
-		}{
-			{ID: "server1", Address: "localhost:8080", Healthy: true},
-			{ID: "server2", Address: "localhost:8081", Healthy: true},
-			{ID: "server3", Address: "localhost:8082", Healthy: true},
-		}
-
-		dir := filepath.Dir(path)
-		if err := os.MkdirAll(dir, 0755); err != nil {
-			return nil, fmt.Errorf("Failed to create directory: %v", err)
-		}
-
-		data, err := yaml.Marshal(defaultConfig)
-		if err != nil {
-			return nil, fmt.Errorf("Failed to marshal default config: %v", err)
-		}
-
-		if err := os.WriteFile(path, data, 0644); err != nil {
-			return nil, fmt.Errorf("Failed to write default config: %v", err)
-		}
-
-		return defaultConfig, nil
-	}
-
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to read config file: %v", err)
@@ -288,15 +256,26 @@ func handleStopServer(ctx context.Context, request mcp.CallToolRequest, registry
 }
 
 func main() {
-	logDir := "./logs"
+	logDir := "./run/mcp/logs"
 	nodeID := "mcp-server"
-	ls := log_service.NewLocalDiscLogService(logDir, nodeID)
+	ls := log_service.NewLocalDiscLogService(logDir, nodeID, "INFO")
 
-	config, err := LoadConfig("config.yaml")
+	ls.Info(log_service.LogEvent{
+		Message: "Starting MCP server",
+	})
+
+	config, err := LoadConfig("mcp_config.yaml")
 	if err != nil {
-		fmt.Printf("Error loading config: %v\n", err)
+		ls.Error(log_service.LogEvent{
+			Message:  "Failed to load config",
+			Metadata: map[string]any{"error": err.Error()},
+		})
 		return
 	}
+
+	ls.Info(log_service.LogEvent{
+		Message: "Config loaded successfully",
+	})
 
 	registry := &ServerRegistry{
 		Servers:       make(map[string]string),
@@ -306,6 +285,18 @@ func main() {
 
 	for _, server := range config.Servers {
 		registry.Servers[server.ID] = server.Address
+	}
+
+	ls.Info(log_service.LogEvent{
+		Message:  "Loaded servers from config",
+		Metadata: map[string]any{"count": len(registry.Servers), "default": registry.DefaultServer},
+	})
+
+	for id, addr := range registry.Servers {
+		ls.Info(log_service.LogEvent{
+			Message:  "Registered server",
+			Metadata: map[string]any{"id": id, "address": addr},
+		})
 	}
 
 	var comm communication.Communicator
