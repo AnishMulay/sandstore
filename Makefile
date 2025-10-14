@@ -46,7 +46,7 @@ server-raft:
 # Start 5-node Raft cluster
 .PHONY: cluster
 cluster:
-	./scripts/dev/run-5.sh
+	-./scripts/dev/run-5.sh
 
 # Run the client
 .PHONY: client
