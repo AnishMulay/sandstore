@@ -68,29 +68,35 @@ This generates the gRPC client and server code from the `.proto` files in the `p
 
 ### 4. Build the Project
 
+You can build the main server and optional tools individually:
+
 ```bash
-make build
+go build -o bin/sandstore ./cmd/sandstore
+go build -o bin/sandstore-client ./cmd/client
+go build -o bin/sandstore-mcp ./cmd/mcp
 ```
 
-This creates two executables:
-- `server` - The Sandstore server binary
-- `client` - A test client for interacting with the server
+> `cmd/sandstore` is the only server entry point. Different behaviours (simple vs Raft) are selected with flags at runtime.
 
 ### 5. Verify Installation
 
-Run the test to ensure everything is working:
+Start a simple node and run the client to verify end-to-end behaviour:
 
 ```bash
-make test-server
+# Terminal 1
+make simple
+
+# Terminal 2
+make client
 ```
 
-This will:
-1. Start a 3-node Raft cluster
-2. Run a client that stores a test file
-3. Verify the distributed storage works correctly
-4. Clean up automatically
+For a multi-node Raft demonstration, run the 5-node script instead of `make simple`:
 
-You should see output indicating successful leader election and file storage.
+```bash
+make cluster
+```
+
+Logs are written under `run/logs/` while the script is running.
 
 ## Development Setup
 
@@ -101,11 +107,12 @@ After installation, your directory should look like this:
 ```
 sandstore/
 ├── cmd/                    # Application entry points
-│   ├── basic-server/      # Single-node server (no replication)
-│   ├── replicated-server/ # Multi-node server with replication
-│   ├── raft-server/       # Multi-node server with Raft consensus
+│   ├── sandstore/         # Unified server entry point (flags select simple/Raft)
 │   ├── client/            # Test client
 │   └── mcp/               # MCP server integration
+├── servers/               # Server compositions
+│   ├── simple/            # Simple single-node wiring
+│   └── raft/              # Raft-backed node wiring
 ├── internal/              # Internal packages (not importable)
 │   ├── chunk_service/     # Chunk storage implementation
 │   ├── file_service/      # High-level file operations
@@ -114,25 +121,28 @@ sandstore/
 │   └── communication/     # gRPC communication layer
 ├── proto/                 # Protocol buffer definitions
 ├── gen/                   # Generated protobuf code
-├── logs/                  # Runtime logs (created automatically)
-├── chunks/                # Chunk storage (created automatically)
-└── config.yaml           # Cluster configuration
+├── run/                   # Runtime data/logs created by helper scripts
+└── scripts/               # Utility scripts (dev tooling, demos)
 ```
 
 ### Running Individual Components
 
 **Start different server types:**
 ```bash
-# Basic server (single node, no replication)
-make server-basic
+# Simple server (single node, no replication)
+make simple
 
-# Replicated server (3-node cluster with replication)
-make server-replicated
+# Raft demo cluster (5-node example)
+make cluster
 
-# Raft server (3-node cluster with Raft consensus)
-make server-raft
-# or simply:
-make server
+# Manual single node with custom flags
+go run ./cmd/sandstore \
+  --server raft \
+  --node-id node1 \
+  --listen :8080 \
+  --data-dir ./run/raft/node1 \
+  --bootstrap \
+  --seeds "127.0.0.1:8080"
 ```
 
 **Run the test client:**
@@ -179,34 +189,36 @@ make test
 
 ### Integration Tests
 
-Test the full server-client interaction:
+Bring up the demo Raft cluster and exercise it with the client:
 
 ```bash
-make test-server
+# Terminal 1
+make cluster
+
+# Terminal 2
+make client
 ```
 
 ### Manual Testing
 
-1. **Start a server** in one terminal (choose your complexity level):
+1. **Start the simple server** (foreground process):
    ```bash
-   # For beginners - single node
-   make server-basic
-   
-   # For learning replication
-   make server-replicated
-   
-   # For full distributed experience
-   make server-raft
+   make simple
    ```
 
-2. **In another terminal**, interact with the cluster:
+   *or* bring up the full Raft demo cluster:
+   ```bash
+   make cluster
+   ```
+
+2. **In another terminal**, interact with the node or cluster:
    ```bash
    make client
    ```
 
 3. **Monitor the logs** to see distributed coordination:
    ```bash
-   tail -f logs/8080/sandstore.log
+   tail -f run/logs/node1.log   # Example log from the 5-node cluster
    ```
 
 ## Troubleshooting
