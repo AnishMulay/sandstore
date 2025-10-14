@@ -43,6 +43,11 @@ server-raft:
 	go build -o $(RAFT_SERVER_BINARY) ./cmd/raft-server
 	./$(RAFT_SERVER_BINARY)
 
+# Run simple server via cmd/sandstore
+.PHONY: simple
+simple:
+	./scripts/dev/run-simple.sh
+
 # Start 5-node Raft cluster
 .PHONY: cluster
 cluster:

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/AnishMulay/sandstore/servers/raft"
+	"github.com/AnishMulay/sandstore/servers/simple"
 )
 
 func main() {
@@ -28,17 +29,26 @@ func main() {
 		seedPeers = strings.Split(*seeds, ",")
 	}
 
-	opts := raft.Options{
-		NodeID:     *nodeID,
-		ListenAddr: *listen,
-		DataDir:    *dataDir,
-		SeedPeers:  seedPeers,
-		Bootstrap:  *bootstrap,
-	}
-
 	switch *serverType {
 	case "raft":
+		opts := raft.Options{
+			NodeID:     *nodeID,
+			ListenAddr: *listen,
+			DataDir:    *dataDir,
+			SeedPeers:  seedPeers,
+			Bootstrap:  *bootstrap,
+		}
 		server := raft.Build(opts)
+		if err := server.Run(); err != nil {
+			log.Fatalf("Server failed: %v", err)
+		}
+	case "simple":
+		opts := simple.Options{
+			NodeID:     *nodeID,
+			ListenAddr: *listen,
+			DataDir:    *dataDir,
+		}
+		server := simple.Build(opts)
 		if err := server.Run(); err != nil {
 			log.Fatalf("Server failed: %v", err)
 		}
