@@ -1,0 +1,4 @@
+./communicator.go
+./errors.go
+./grpc_communicator.go
+./http_communicator.go

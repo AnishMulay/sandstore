@@ -12,9 +12,11 @@ func main() {
 	ls := log_service.NewLocalDiscLogService("./logs", "client")
 	comm := communication.NewGRPCCommunicator(":8083", ls)
 	ctx := context.Background()
-	serverAddr := "localhost:8080"
+	serverAddr := "localhost:8101"
 
-	fileData := []byte("Hello, Sandstore! This is a test file for distributed storage.")
+	fileData := []byte("Hello, Sandstore! This is a test file for distributed storage. " +
+		"This file is intentionally made larger to test the chunking mechanism across the 5-node Raft cluster. " +
+		"The system should automatically chunk this file and distribute it across multiple nodes with proper replication.")
 	filePath := "test_file.txt"
 
 	storeRequest := communication.StoreFileRequest{

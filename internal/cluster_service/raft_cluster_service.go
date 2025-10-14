@@ -2,6 +2,7 @@ package cluster_service
 
 import (
 	"context"
+	"net"
 	"reflect"
 	"sync"
 	"time"
@@ -38,6 +39,7 @@ type RaftClusterService struct {
 	votedFor      string
 	voteCount     int64
 	leaderID      string
+	leaderAddress string
 	electionTimer *time.Timer
 
 	comm communication.Communicator
@@ -45,28 +47,38 @@ type RaftClusterService struct {
 	mu   sync.Mutex
 
 	// Raft log state tracking
-	nextIndex  map[string]int64 // next log index to send to each peer
-	matchIndex map[string]int64 // highest log index replicated on each peer
-	commitIndex int64           // highest log entry known to be committed
+	nextIndex   map[string]int64 // next log index to send to each peer
+	matchIndex  map[string]int64 // highest log index replicated on each peer
+	commitIndex int64            // highest log entry known to be committed
 
 	// Log processing
 	logProcessor LogEntryProcessor
+
+	peerAddresses map[string]string
 }
 
 func NewRaftClusterService(id string, nodes []Node, comm communication.Communicator, ls log_service.LogService) *RaftClusterService {
+	peerAddresses := make(map[string]string)
+	for _, n := range nodes {
+		if n.ID != "" && n.Address != "" {
+			peerAddresses[n.ID] = n.Address
+		}
+	}
+
 	return &RaftClusterService{
-		nodes:       nodes,
-		id:          id,
-		state:       Follower,
-		currentTerm: 0,
-		votedFor:    "",
-		voteCount:   0,
-		leaderID:    "",
-		comm:        comm,
-		ls:          ls,
-		nextIndex:   make(map[string]int64),
-		matchIndex:  make(map[string]int64),
-		commitIndex: 0,
+		nodes:         nodes,
+		id:            id,
+		state:         Follower,
+		currentTerm:   0,
+		votedFor:      "",
+		voteCount:     0,
+		leaderID:      "",
+		comm:          comm,
+		ls:            ls,
+		nextIndex:     make(map[string]int64),
+		matchIndex:    make(map[string]int64),
+		commitIndex:   0,
+		peerAddresses: peerAddresses,
 	}
 }
 
@@ -291,6 +303,7 @@ func (r *RaftClusterService) registerVote() {
 func (r *RaftClusterService) becomeLeader() {
 	r.state = Leader
 	r.leaderID = r.id
+	r.leaderAddress = r.normalizeAddressLocked(r.comm.Address())
 
 	if r.electionTimer != nil {
 		r.electionTimer.Stop()
@@ -355,6 +368,11 @@ func (r *RaftClusterService) HandleAppendEntries(req communication.AppendEntries
 	if r.state == Follower || r.state == Candidate {
 		r.state = Follower
 		r.leaderID = req.LeaderID
+		if addr, ok := r.peerAddresses[req.LeaderID]; ok {
+			r.leaderAddress = addr
+		} else {
+			r.leaderAddress = ""
+		}
 		r.resetElectionTimer()
 	}
 
@@ -364,13 +382,13 @@ func (r *RaftClusterService) HandleAppendEntries(req communication.AppendEntries
 			Message:  "Heartbeat received",
 			Metadata: map[string]any{"leaderID": req.LeaderID, "term": req.Term, "leaderCommit": req.LeaderCommit},
 		})
-		
+
 		// Apply committed entries if leader's commit index is higher
 		if r.logProcessor != nil && req.LeaderCommit > r.commitIndex {
 			r.commitIndex = req.LeaderCommit
 			r.logProcessor.ProcessReceivedEntries([]byte{}, 0, 0, req.LeaderCommit)
 		}
-		
+
 		return true, nil
 	}
 
@@ -440,7 +458,7 @@ func (r *RaftClusterService) sendAppendEntries(nodeAddress string, entriesData [
 			peerNextIndex = 1
 		}
 		prevLogIndex = peerNextIndex - 1
-		
+
 		if prevLogIndex > 0 {
 			if prevEntryInterface := metadataLog.GetEntryAtIndex(prevLogIndex); prevEntryInterface != nil {
 				prevLogTerm = getTermFromEntry(prevEntryInterface)
@@ -464,7 +482,7 @@ func (r *RaftClusterService) sendAppendEntries(nodeAddress string, entriesData [
 	}
 
 	resp, err := r.comm.Send(context.Background(), nodeAddress, msg)
-	
+
 	// r.ls.Info(log_service.LogEvent{
 	// 	Message:  "Response from append entries",
 	// 	Metadata: map[string]any{"nodeAddress": nodeAddress, "error": err, "response": resp},
@@ -500,11 +518,36 @@ func (r *RaftClusterService) IsLeader() bool {
 	return r.state == Leader
 }
 
+func (r *RaftClusterService) normalizeAddressLocked(addr string) string {
+	if addr == "" {
+		return ""
+	}
+
+	host, port, err := net.SplitHostPort(addr)
+	if err == nil {
+		if host == "" {
+			for _, node := range r.nodes {
+				if node.Address == "" {
+					continue
+				}
+				_, nodePort, err := net.SplitHostPort(node.Address)
+				if err == nil && nodePort == port {
+					return node.Address
+				}
+			}
+			host = "127.0.0.1"
+		}
+		return net.JoinHostPort(host, port)
+	}
+
+	return addr
+}
+
 func (r *RaftClusterService) electionTimeout(term int64) {
 	time.Sleep(500 * time.Millisecond) // Wait for election to complete
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	
+
 	if r.currentTerm == term && r.state == Candidate {
 		r.ls.Debug(log_service.LogEvent{
 			Message:  "Election timeout - restarting election",
@@ -519,12 +562,24 @@ func (r *RaftClusterService) GetLeaderAddress() string {
 	defer r.mu.Unlock()
 
 	if r.state == Leader {
-		return r.comm.Address()
+		return r.normalizeAddressLocked(r.comm.Address())
+	}
+
+	if r.leaderAddress != "" {
+		return r.leaderAddress
+	}
+
+	if addr, ok := r.peerAddresses[r.leaderID]; ok && addr != "" {
+		return addr
 	}
 
 	for _, node := range r.nodes {
 		if node.ID == r.leaderID {
-			return node.Address
+			normalized := r.normalizeAddressLocked(node.Address)
+			if normalized != "" {
+				r.peerAddresses[r.leaderID] = normalized
+			}
+			return normalized
 		}
 	}
 
@@ -539,7 +594,7 @@ func (r *RaftClusterService) GetCurrentTerm() int64 {
 
 func (r *RaftClusterService) processLogEntries(req communication.AppendEntriesRequest) (bool, error) {
 	r.ls.Info(log_service.LogEvent{
-		Message:  "Processing log entries",
+		Message: "Processing log entries",
 		Metadata: map[string]any{
 			"prevLogIndex": req.PrevLogIndex,
 			"prevLogTerm":  req.PrevLogTerm,
@@ -569,11 +624,38 @@ func (r *RaftClusterService) processLogEntries(req communication.AppendEntriesRe
 	return success, nil
 }
 
-func (r *RaftClusterService) ReplicateEntries(entriesData []byte, logIndex int64, metadataLog MetadataLogInterface, callback func(int64, bool)) {	
+func (r *RaftClusterService) UpdatePeerAddress(nodeID, rawAddress string) {
+	if nodeID == "" || rawAddress == "" {
+		return
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	normalized := r.normalizeAddressLocked(rawAddress)
+	if normalized == "" {
+		return
+	}
+
+	existing, ok := r.peerAddresses[nodeID]
+	if ok && existing == normalized {
+		if nodeID == r.leaderID && r.leaderAddress == "" {
+			r.leaderAddress = normalized
+		}
+		return
+	}
+
+	r.peerAddresses[nodeID] = normalized
+	if nodeID == r.leaderID {
+		r.leaderAddress = normalized
+	}
+}
+
+func (r *RaftClusterService) ReplicateEntries(entriesData []byte, logIndex int64, metadataLog MetadataLogInterface, callback func(int64, bool)) {
 	r.ls.Info(log_service.LogEvent{
 		Message: "Starting entry replication",
 		Metadata: map[string]any{
-			"logIndex": logIndex,
+			"logIndex":    logIndex,
 			"entriesSize": len(entriesData),
 			"currentTerm": r.currentTerm,
 		},
@@ -582,7 +664,7 @@ func (r *RaftClusterService) ReplicateEntries(entriesData []byte, logIndex int64
 	nodes, err := r.GetHealthyNodes()
 	if err != nil {
 		r.ls.Info(log_service.LogEvent{
-			Message: "Replication failed - no healthy nodes",
+			Message:  "Replication failed - no healthy nodes",
 			Metadata: map[string]any{"error": err.Error(), "logIndex": logIndex},
 		})
 		callback(logIndex, false)
@@ -594,7 +676,7 @@ func (r *RaftClusterService) ReplicateEntries(entriesData []byte, logIndex int64
 		Metadata: map[string]any{
 			"totalNodes": len(nodes),
 			"quorumSize": (len(nodes) / 2) + 1,
-			"logIndex": logIndex,
+			"logIndex":   logIndex,
 		},
 	})
 
@@ -623,13 +705,13 @@ func (r *RaftClusterService) ReplicateEntries(entriesData []byte, logIndex int64
 		wg.Add(1)
 		go func(n Node) {
 			defer wg.Done()
-			
+
 			r.ls.Info(log_service.LogEvent{
 				Message: "Sending append entries to node",
 				Metadata: map[string]any{
-					"nodeID": n.ID,
+					"nodeID":      n.ID,
 					"nodeAddress": n.Address,
-					"logIndex": logIndex,
+					"logIndex":    logIndex,
 				},
 			})
 
@@ -638,14 +720,14 @@ func (r *RaftClusterService) ReplicateEntries(entriesData []byte, logIndex int64
 				r.matchIndex[n.ID] = logIndex
 				r.nextIndex[n.ID] = logIndex + 1
 				ackCount++
-				
+
 				r.ls.Info(log_service.LogEvent{
 					Message: "Received acknowledgment from node",
 					Metadata: map[string]any{
-						"nodeID": n.ID,
-						"ackCount": ackCount,
+						"nodeID":     n.ID,
+						"ackCount":   ackCount,
 						"quorumSize": quorumSize,
-						"logIndex": logIndex,
+						"logIndex":   logIndex,
 					},
 				})
 				mu.Unlock()
@@ -653,9 +735,9 @@ func (r *RaftClusterService) ReplicateEntries(entriesData []byte, logIndex int64
 				r.ls.Info(log_service.LogEvent{
 					Message: "Failed to get acknowledgment from node",
 					Metadata: map[string]any{
-						"nodeID": n.ID,
+						"nodeID":      n.ID,
 						"nodeAddress": n.Address,
-						"logIndex": logIndex,
+						"logIndex":    logIndex,
 					},
 				})
 			}
@@ -667,11 +749,11 @@ func (r *RaftClusterService) ReplicateEntries(entriesData []byte, logIndex int64
 	r.ls.Info(log_service.LogEvent{
 		Message: "Replication completed",
 		Metadata: map[string]any{
-			"ackCount": ackCount,
-			"quorumSize": quorumSize,
+			"ackCount":      ackCount,
+			"quorumSize":    quorumSize,
 			"quorumReached": ackCount >= quorumSize,
-			"logIndex": logIndex,
-			"commitIndex": r.commitIndex,
+			"logIndex":      logIndex,
+			"commitIndex":   r.commitIndex,
 		},
 	})
 
@@ -683,5 +765,3 @@ func (r *RaftClusterService) ReplicateEntries(entriesData []byte, logIndex int64
 	// Call callback immediately while we still have the context
 	callback(logIndex, ackCount >= quorumSize)
 }
-
-

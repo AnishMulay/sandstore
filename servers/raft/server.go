@@ -57,7 +57,7 @@ func Build(opts Options) runnable {
 		}
 	}
 
-	ls := log_service.NewLocalDiscLogService(opts.DataDir+"/logs", opts.NodeID, "DEBUG")
+	ls := log_service.NewLocalDiscLogService(opts.DataDir+"/logs", opts.NodeID, "INFO")
 	ms := metadata_service.NewInMemoryMetadataService(ls)
 	cs := chunk_service.NewLocalDiscChunkService(opts.DataDir+"/chunks", ls)
 	comm := communication.NewGRPCCommunicator(opts.ListenAddr, ls)

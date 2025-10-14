@@ -376,6 +376,8 @@ func (s *RaftServer) HandleRequestVoteMessage(msg communication.Message) (*commu
 	})
 
 	if raftCluster, ok := s.clusterService.(*cluster_service.RaftClusterService); ok {
+		raftCluster.UpdatePeerAddress(request.CandidateID, msg.From)
+
 		voteGranted, err := raftCluster.HandleRequestVote(request)
 		if err != nil {
 			return &communication.Response{
@@ -410,6 +412,8 @@ func (s *RaftServer) HandleAppendEntriesMessage(msg communication.Message) (*com
 	})
 
 	if raftCluster, ok := s.clusterService.(*cluster_service.RaftClusterService); ok {
+		raftCluster.UpdatePeerAddress(request.LeaderID, msg.From)
+
 		success, err := raftCluster.HandleAppendEntries(request)
 		if err != nil {
 			return &communication.Response{
