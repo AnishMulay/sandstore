@@ -1,5 +1,0 @@
-./default_server.go
-./errors.go
-./raft_server.go
-./replicated_server.go
-./server.go

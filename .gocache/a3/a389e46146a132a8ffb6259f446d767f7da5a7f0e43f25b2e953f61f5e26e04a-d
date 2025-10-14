@@ -1,4 +1,0 @@
-./cluster_service.go
-./errors.go
-./inmemory_cluster_service.go
-./raft_cluster_service.go
