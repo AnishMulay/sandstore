@@ -8,6 +8,7 @@ import (
 
 	chunkservice "github.com/AnishMulay/sandstore/internal/chunk_service/localdisc"
 	"github.com/AnishMulay/sandstore/internal/cluster_service"
+	clusterinmemory "github.com/AnishMulay/sandstore/internal/cluster_service/inmemory"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/file_service/defaultfs"
 	"github.com/AnishMulay/sandstore/internal/log_service"
@@ -49,7 +50,7 @@ func Build(opts Options) runnable {
 	ms := metadata_service.NewInMemoryMetadataService(ls)
 	cs := chunkservice.NewLocalDiscChunkService(chunkDir, ls)
 	comm := communication.NewGRPCCommunicator(opts.ListenAddr, ls)
-	clusterService := cluster_service.NewInMemoryClusterService([]cluster_service.Node{}, ls)
+	clusterService := clusterinmemory.NewInMemoryClusterService([]cluster_service.Node{}, ls)
 	fs := defaultfs.NewDefaultFileService(ms, cs, ls, 8*1024*1024)
 
 	srv := server.NewDefaultServer(comm, fs, ls, clusterService)

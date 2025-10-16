@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/AnishMulay/sandstore/internal/cluster_service"
+	clusterraft "github.com/AnishMulay/sandstore/internal/cluster_service/raft"
 	"github.com/AnishMulay/sandstore/internal/log_service"
 	metadata_replicator "github.com/AnishMulay/sandstore/internal/metadata_replicator"
 	mrinternal "github.com/AnishMulay/sandstore/internal/metadata_replicator/internal"
@@ -14,7 +14,7 @@ import (
 )
 
 type RaftMetadataReplicator struct {
-	clusterService *cluster_service.RaftClusterService
+	clusterService *clusterraft.RaftClusterService
 	metadataLog    *mrinternal.MetadataLog
 	ls             log_service.LogService
 	ms             metadata_service.MetadataService // For applying to state machine
@@ -23,7 +23,7 @@ type RaftMetadataReplicator struct {
 	pendingOps map[int64]chan error
 }
 
-func NewRaftMetadataReplicator(clusterService *cluster_service.RaftClusterService, ls log_service.LogService, ms metadata_service.MetadataService) *RaftMetadataReplicator {
+func NewRaftMetadataReplicator(clusterService *clusterraft.RaftClusterService, ls log_service.LogService, ms metadata_service.MetadataService) *RaftMetadataReplicator {
 	mr := &RaftMetadataReplicator{
 		clusterService: clusterService,
 		metadataLog:    mrinternal.NewMetadataLog(),

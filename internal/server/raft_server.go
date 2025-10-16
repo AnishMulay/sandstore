@@ -4,9 +4,11 @@ import (
 	"context"
 	"reflect"
 	"sync"
+	"time"
 
 	"github.com/AnishMulay/sandstore/internal/chunk_service"
 	"github.com/AnishMulay/sandstore/internal/cluster_service"
+	clusterraft "github.com/AnishMulay/sandstore/internal/cluster_service/raft"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/file_service"
 	"github.com/AnishMulay/sandstore/internal/log_service"
@@ -58,7 +60,7 @@ func (s *RaftServer) Start() error {
 	}
 
 	// Start the Raft cluster service
-	if raftCluster, ok := s.clusterService.(*cluster_service.RaftClusterService); ok {
+	if raftCluster, ok := s.clusterService.(*clusterraft.RaftClusterService); ok {
 		raftCluster.Start()
 	}
 
@@ -155,7 +157,7 @@ func (s *RaftServer) HandleStoreFileMessage(msg communication.Message) (*communi
 	request := msg.Payload.(communication.StoreFileRequest)
 
 	// Check if this node is the leader
-	if raftCluster, ok := s.clusterService.(*cluster_service.RaftClusterService); ok {
+	if raftCluster, ok := s.clusterService.(*clusterraft.RaftClusterService); ok {
 		if !raftCluster.IsLeader() {
 			s.ls.Error(log_service.LogEvent{
 				Message:  "Store file request received by non-leader, redirecting",
@@ -223,7 +225,7 @@ func (s *RaftServer) HandleDeleteFileMessage(msg communication.Message) (*commun
 	request := msg.Payload.(communication.DeleteFileRequest)
 
 	// Check if this node is the leader
-	if raftCluster, ok := s.clusterService.(*cluster_service.RaftClusterService); ok {
+	if raftCluster, ok := s.clusterService.(*clusterraft.RaftClusterService); ok {
 		if !raftCluster.IsLeader() {
 			s.ls.Error(log_service.LogEvent{
 				Message:  "Delete file request received by non-leader, redirecting",
@@ -375,7 +377,7 @@ func (s *RaftServer) HandleRequestVoteMessage(msg communication.Message) (*commu
 		Metadata: map[string]any{"term": request.Term, "candidateID": request.CandidateID},
 	})
 
-	if raftCluster, ok := s.clusterService.(*cluster_service.RaftClusterService); ok {
+	if raftCluster, ok := s.clusterService.(*clusterraft.RaftClusterService); ok {
 		raftCluster.UpdatePeerAddress(request.CandidateID, msg.From)
 
 		voteGranted, err := raftCluster.HandleRequestVote(request)
@@ -411,7 +413,7 @@ func (s *RaftServer) HandleAppendEntriesMessage(msg communication.Message) (*com
 		Metadata: map[string]any{"term": request.Term, "leaderID": request.LeaderID},
 	})
 
-	if raftCluster, ok := s.clusterService.(*cluster_service.RaftClusterService); ok {
+	if raftCluster, ok := s.clusterService.(*clusterraft.RaftClusterService); ok {
 		raftCluster.UpdatePeerAddress(request.LeaderID, msg.From)
 
 		success, err := raftCluster.HandleAppendEntries(request)
@@ -440,50 +442,66 @@ func (s *RaftServer) HandleAppendEntriesMessage(msg communication.Message) (*com
 }
 
 func (s *RaftServer) redirectToLeader(msg communication.Message) (*communication.Response, error) {
-	if raftCluster, ok := s.clusterService.(*cluster_service.RaftClusterService); ok {
-		leaderAddress := raftCluster.GetLeaderAddress()
-		if leaderAddress == "" {
-			s.ls.Error(log_service.LogEvent{
-				Message:  "No known leader to redirect request",
-				Metadata: map[string]any{"messageType": msg.Type},
-			})
-			return &communication.Response{
-				Code: communication.CodeUnavailable,
-				Body: []byte("no leader available"),
-			}, nil
-		}
+	raftCluster, ok := s.clusterService.(*clusterraft.RaftClusterService)
+	if !ok {
+		return &communication.Response{
+			Code: communication.CodeInternal,
+			Body: []byte("cluster service not available"),
+		}, nil
+	}
 
+	leaderAddress := raftCluster.GetLeaderAddress()
+	if leaderAddress == "" {
+		timeout := time.NewTimer(2 * time.Second)
+		ticker := time.NewTicker(200 * time.Millisecond)
+		defer timeout.Stop()
+		defer ticker.Stop()
+
+	waitLoop:
+		for {
+			select {
+			case <-ticker.C:
+				leaderAddress = raftCluster.GetLeaderAddress()
+				if leaderAddress != "" {
+					break waitLoop
+				}
+			case <-timeout.C:
+				s.ls.Error(log_service.LogEvent{
+					Message:  "No known leader to redirect request",
+					Metadata: map[string]any{"messageType": msg.Type},
+				})
+				return &communication.Response{
+					Code: communication.CodeUnavailable,
+					Body: []byte("no leader available"),
+				}, nil
+			}
+		}
+	}
+
+	s.ls.Error(log_service.LogEvent{
+		Message: "Redirecting request to leader",
+		Metadata: map[string]any{
+			"messageType":   msg.Type,
+			"leaderAddress": leaderAddress,
+			"originalFrom":  msg.From,
+		},
+	})
+
+	response, err := s.comm.Send(context.Background(), leaderAddress, msg)
+	if err != nil {
 		s.ls.Error(log_service.LogEvent{
-			Message: "Redirecting request to leader",
+			Message: "Failed to redirect request to leader",
 			Metadata: map[string]any{
 				"messageType":   msg.Type,
 				"leaderAddress": leaderAddress,
-				"originalFrom":  msg.From,
+				"error":         err.Error(),
 			},
 		})
-
-		// Forward the original message to the leader
-		response, err := s.comm.Send(context.Background(), leaderAddress, msg)
-		if err != nil {
-			s.ls.Error(log_service.LogEvent{
-				Message: "Failed to redirect request to leader",
-				Metadata: map[string]any{
-					"messageType":   msg.Type,
-					"leaderAddress": leaderAddress,
-					"error":         err.Error(),
-				},
-			})
-			return &communication.Response{
-				Code: communication.CodeInternal,
-				Body: []byte("failed to redirect to leader"),
-			}, nil
-		}
-
-		return response, nil
+		return &communication.Response{
+			Code: communication.CodeInternal,
+			Body: []byte("failed to redirect to leader"),
+		}, nil
 	}
 
-	return &communication.Response{
-		Code: communication.CodeInternal,
-		Body: []byte("cluster service not available"),
-	}, nil
+	return response, nil
 }

@@ -1,4 +1,4 @@
-package cluster_service
+package internal
 
 import "errors"
 

@@ -1,4 +1,4 @@
-package cluster_service
+package raft
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	cluster "github.com/AnishMulay/sandstore/internal/cluster_service"
+	csinternal "github.com/AnishMulay/sandstore/internal/cluster_service/internal"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/log_service"
 	"golang.org/x/exp/rand"
@@ -32,7 +34,7 @@ type LogEntryProcessor interface {
 }
 
 type RaftClusterService struct {
-	nodes         []Node
+	nodes         []cluster.Node
 	id            string
 	state         RaftState
 	currentTerm   int64
@@ -57,7 +59,7 @@ type RaftClusterService struct {
 	peerAddresses map[string]string
 }
 
-func NewRaftClusterService(id string, nodes []Node, comm communication.Communicator, ls log_service.LogService) *RaftClusterService {
+func NewRaftClusterService(id string, nodes []cluster.Node, comm communication.Communicator, ls log_service.LogService) *RaftClusterService {
 	peerAddresses := make(map[string]string)
 	for _, n := range nodes {
 		if n.ID != "" && n.Address != "" {
@@ -94,7 +96,7 @@ func (r *RaftClusterService) Start() {
 	r.resetElectionTimer()
 }
 
-func (r *RaftClusterService) RegisterNode(node Node) error {
+func (r *RaftClusterService) RegisterNode(node cluster.Node) error {
 	r.ls.Info(log_service.LogEvent{
 		Message:  "Registering node",
 		Metadata: map[string]any{"nodeID": node.ID, "address": node.Address, "healthy": node.Healthy},
@@ -105,7 +107,7 @@ func (r *RaftClusterService) RegisterNode(node Node) error {
 			Message:  "Invalid node ID",
 			Metadata: map[string]any{"nodeID": node.ID},
 		})
-		return ErrInvalidNodeID
+		return csinternal.ErrInvalidNodeID
 	}
 
 	if node.Address == "" {
@@ -113,7 +115,7 @@ func (r *RaftClusterService) RegisterNode(node Node) error {
 			Message:  "Invalid node address",
 			Metadata: map[string]any{"nodeID": node.ID, "address": node.Address},
 		})
-		return ErrInvalidNodeAddress
+		return csinternal.ErrInvalidNodeAddress
 	}
 
 	for _, n := range r.nodes {
@@ -122,7 +124,7 @@ func (r *RaftClusterService) RegisterNode(node Node) error {
 				Message:  "Node already exists",
 				Metadata: map[string]any{"nodeID": node.ID},
 			})
-			return ErrNodeAlreadyExists
+			return csinternal.ErrNodeAlreadyExists
 		}
 	}
 
@@ -136,7 +138,7 @@ func (r *RaftClusterService) RegisterNode(node Node) error {
 	return nil
 }
 
-func (r *RaftClusterService) DeregisterNode(node Node) error {
+func (r *RaftClusterService) DeregisterNode(node cluster.Node) error {
 	r.ls.Info(log_service.LogEvent{
 		Message:  "Deregistering node",
 		Metadata: map[string]any{"nodeID": node.ID, "address": node.Address},
@@ -158,16 +160,16 @@ func (r *RaftClusterService) DeregisterNode(node Node) error {
 		Metadata: map[string]any{"nodeID": node.ID, "address": node.Address},
 	})
 
-	return ErrNodeNotFound
+	return csinternal.ErrNodeNotFound
 }
 
-func (r *RaftClusterService) GetHealthyNodes() ([]Node, error) {
+func (r *RaftClusterService) GetHealthyNodes() ([]cluster.Node, error) {
 	r.ls.Debug(log_service.LogEvent{
 		Message:  "Getting healthy nodes",
 		Metadata: map[string]any{"totalNodes": len(r.nodes)},
 	})
 
-	var healthyNodes []Node
+	var healthyNodes []cluster.Node
 	for _, node := range r.nodes {
 		if node.Healthy {
 			healthyNodes = append(healthyNodes, node)
@@ -179,7 +181,7 @@ func (r *RaftClusterService) GetHealthyNodes() ([]Node, error) {
 			Message:  "No healthy nodes available",
 			Metadata: map[string]any{"totalNodes": len(r.nodes)},
 		})
-		return nil, ErrNoHealthyNodes
+		return nil, csinternal.ErrNoHealthyNodes
 	}
 
 	r.ls.Debug(log_service.LogEvent{
@@ -234,7 +236,7 @@ func (r *RaftClusterService) startElection() {
 			continue
 		}
 
-		go func(n Node) {
+		go func(n cluster.Node) {
 			ok := r.sendRequestVote(n.Address, term)
 			if ok {
 				r.registerVote()
@@ -442,7 +444,7 @@ func (r *RaftClusterService) sendHeartbeats(term int64) {
 			continue
 		}
 
-		go func(n Node) {
+		go func(n cluster.Node) {
 			r.sendAppendEntries(n.Address, []byte{}, nil) // Empty for heartbeat, no log needed
 		}(node)
 	}
@@ -703,7 +705,7 @@ func (r *RaftClusterService) ReplicateEntries(entriesData []byte, logIndex int64
 		}
 
 		wg.Add(1)
-		go func(n Node) {
+		go func(n cluster.Node) {
 			defer wg.Done()
 
 			r.ls.Info(log_service.LogEvent{
@@ -765,3 +767,5 @@ func (r *RaftClusterService) ReplicateEntries(entriesData []byte, logIndex int64
 	// Call callback immediately while we still have the context
 	callback(logIndex, ackCount >= quorumSize)
 }
+
+var _ cluster.ClusterService = (*RaftClusterService)(nil)

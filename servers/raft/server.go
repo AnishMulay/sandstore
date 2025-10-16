@@ -9,6 +9,7 @@ import (
 	chunkreplicator "github.com/AnishMulay/sandstore/internal/chunk_replicator/defaultreplicator"
 	chunkservice "github.com/AnishMulay/sandstore/internal/chunk_service/localdisc"
 	"github.com/AnishMulay/sandstore/internal/cluster_service"
+	clusterraft "github.com/AnishMulay/sandstore/internal/cluster_service/raft"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	fileserviceraft "github.com/AnishMulay/sandstore/internal/file_service/raft"
 	"github.com/AnishMulay/sandstore/internal/log_service"
@@ -61,7 +62,7 @@ func Build(opts Options) runnable {
 	ms := metadata_service.NewInMemoryMetadataService(ls)
 	cs := chunkservice.NewLocalDiscChunkService(opts.DataDir+"/chunks", ls)
 	comm := communication.NewGRPCCommunicator(opts.ListenAddr, ls)
-	raftCluster := cluster_service.NewRaftClusterService(opts.NodeID, otherNodes, comm, ls)
+	raftCluster := clusterraft.NewRaftClusterService(opts.NodeID, otherNodes, comm, ls)
 	cr := chunkreplicator.NewDefaultChunkReplicator(raftCluster, comm, ls)
 	mr := metadataraft.NewRaftMetadataReplicator(raftCluster, ls, ms)
 	fs := fileserviceraft.NewRaftFileService(ls, mr, cs, ms, cr, 8*1024*1024)

@@ -1,20 +1,24 @@
-package cluster_service
+package inmemory
 
-import "github.com/AnishMulay/sandstore/internal/log_service"
+import (
+	cluster "github.com/AnishMulay/sandstore/internal/cluster_service"
+	csinternal "github.com/AnishMulay/sandstore/internal/cluster_service/internal"
+	"github.com/AnishMulay/sandstore/internal/log_service"
+)
 
 type InMemoryClusterService struct {
-	nodes []Node
+	nodes []cluster.Node
 	ls    log_service.LogService
 }
 
-func NewInMemoryClusterService(nodes []Node, ls log_service.LogService) *InMemoryClusterService {
+func NewInMemoryClusterService(nodes []cluster.Node, ls log_service.LogService) *InMemoryClusterService {
 	return &InMemoryClusterService{
 		nodes: nodes,
 		ls:    ls,
 	}
 }
 
-func (r *InMemoryClusterService) RegisterNode(node Node) error {
+func (r *InMemoryClusterService) RegisterNode(node cluster.Node) error {
 	r.ls.Info(log_service.LogEvent{
 		Message:  "Registering node",
 		Metadata: map[string]any{"nodeID": node.ID, "address": node.Address, "healthy": node.Healthy},
@@ -25,7 +29,7 @@ func (r *InMemoryClusterService) RegisterNode(node Node) error {
 			Message:  "Invalid node ID",
 			Metadata: map[string]any{"nodeID": node.ID},
 		})
-		return ErrInvalidNodeID
+		return csinternal.ErrInvalidNodeID
 	}
 
 	if node.Address == "" {
@@ -33,7 +37,7 @@ func (r *InMemoryClusterService) RegisterNode(node Node) error {
 			Message:  "Invalid node address",
 			Metadata: map[string]any{"nodeID": node.ID, "address": node.Address},
 		})
-		return ErrInvalidNodeAddress
+		return csinternal.ErrInvalidNodeAddress
 	}
 
 	for _, n := range r.nodes {
@@ -42,7 +46,7 @@ func (r *InMemoryClusterService) RegisterNode(node Node) error {
 				Message:  "Node already exists",
 				Metadata: map[string]any{"nodeID": node.ID},
 			})
-			return ErrNodeAlreadyExists
+			return csinternal.ErrNodeAlreadyExists
 		}
 	}
 
@@ -56,7 +60,7 @@ func (r *InMemoryClusterService) RegisterNode(node Node) error {
 	return nil
 }
 
-func (r *InMemoryClusterService) DeregisterNode(node Node) error {
+func (r *InMemoryClusterService) DeregisterNode(node cluster.Node) error {
 	r.ls.Info(log_service.LogEvent{
 		Message:  "Deregistering node",
 		Metadata: map[string]any{"nodeID": node.ID, "address": node.Address},
@@ -78,16 +82,16 @@ func (r *InMemoryClusterService) DeregisterNode(node Node) error {
 		Metadata: map[string]any{"nodeID": node.ID, "address": node.Address},
 	})
 
-	return ErrNodeNotFound
+	return csinternal.ErrNodeNotFound
 }
 
-func (r *InMemoryClusterService) GetHealthyNodes() ([]Node, error) {
+func (r *InMemoryClusterService) GetHealthyNodes() ([]cluster.Node, error) {
 	r.ls.Debug(log_service.LogEvent{
 		Message:  "Getting healthy nodes",
 		Metadata: map[string]any{"totalNodes": len(r.nodes)},
 	})
 
-	var healthyNodes []Node
+	var healthyNodes []cluster.Node
 	for _, node := range r.nodes {
 		if node.Healthy {
 			healthyNodes = append(healthyNodes, node)
@@ -99,7 +103,7 @@ func (r *InMemoryClusterService) GetHealthyNodes() ([]Node, error) {
 			Message:  "No healthy nodes available",
 			Metadata: map[string]any{"totalNodes": len(r.nodes)},
 		})
-		return nil, ErrNoHealthyNodes
+		return nil, csinternal.ErrNoHealthyNodes
 	}
 
 	r.ls.Debug(log_service.LogEvent{
@@ -109,3 +113,5 @@ func (r *InMemoryClusterService) GetHealthyNodes() ([]Node, error) {
 
 	return healthyNodes, nil
 }
+
+var _ cluster.ClusterService = (*InMemoryClusterService)(nil)
