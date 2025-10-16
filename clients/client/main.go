@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	ls := log_service.NewLocalDiscLogService("./client/logs", "client")
+	ls := log_service.NewLocalDiscLogService("./run/client/logs", "client")
 	comm := communication.NewGRPCCommunicator(":8083", ls)
 	ctx := context.Background()
 	serverAddr := "localhost:8101"

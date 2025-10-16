@@ -1,10 +1,12 @@
-package chunk_replicator
+package defaultreplicator
 
 import (
 	"context"
 	"net"
 	"time"
 
+	"github.com/AnishMulay/sandstore/internal/chunk_replicator"
+	mrinternal "github.com/AnishMulay/sandstore/internal/chunk_replicator/internal"
 	"github.com/AnishMulay/sandstore/internal/chunk_service"
 	"github.com/AnishMulay/sandstore/internal/cluster_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
@@ -45,7 +47,7 @@ func (cr *DefaultChunkReplicator) ReplicateChunk(chunkID string, data []byte, re
 			Message:  "Insufficient nodes for replication",
 			Metadata: map[string]any{"chunkID": chunkID, "availableNodes": len(nodes), "required": replicationFactor},
 		})
-		return nil, ErrInsufficientNodes
+		return nil, mrinternal.ErrInsufficientNodes
 	}
 
 	var replicas []chunk_service.ChunkReplica
@@ -97,7 +99,7 @@ func (cr *DefaultChunkReplicator) ReplicateChunk(chunkID string, data []byte, re
 				Message:  "Chunk replication failed",
 				Metadata: map[string]any{"chunkID": chunkID, "nodeID": node.ID, "address": node.Address, "responseCode": resp.Code},
 			})
-			return nil, ErrReplicationFailed
+			return nil, mrinternal.ErrReplicationFailed
 		} else {
 			cr.ls.Debug(log_service.LogEvent{
 				Message:  "Chunk replicated successfully to node",
@@ -170,7 +172,7 @@ func (cr *DefaultChunkReplicator) FetchReplicatedChunk(chunkID string, replicas 
 		Metadata: map[string]any{"chunkID": chunkID, "replicas": len(replicas)},
 	})
 
-	return nil, ErrReplicatedChunkNotFound
+	return nil, mrinternal.ErrReplicatedChunkNotFound
 }
 
 func (cr *DefaultChunkReplicator) DeleteReplicatedChunk(chunkID string, replicas []chunk_service.ChunkReplica) error {
@@ -209,7 +211,7 @@ func (cr *DefaultChunkReplicator) DeleteReplicatedChunk(chunkID string, replicas
 				Message:  "Failed to delete chunk from replica",
 				Metadata: map[string]any{"chunkID": chunkID, "nodeID": replica.NodeID, "address": replica.Address, "responseCode": resp.Code},
 			})
-			return ErrDeletionFailed
+			return mrinternal.ErrDeletionFailed
 		} else {
 			cr.ls.Debug(log_service.LogEvent{
 				Message:  "Chunk deleted successfully from replica",
@@ -225,3 +227,5 @@ func (cr *DefaultChunkReplicator) DeleteReplicatedChunk(chunkID string, replicas
 
 	return nil
 }
+
+var _ chunk_replicator.ChunkReplicator = (*DefaultChunkReplicator)(nil)
