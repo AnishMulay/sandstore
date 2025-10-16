@@ -1,4 +1,4 @@
-package chunk_service
+package internal
 
 import "errors"
 
