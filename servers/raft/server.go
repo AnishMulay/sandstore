@@ -13,7 +13,8 @@ import (
 	"github.com/AnishMulay/sandstore/internal/communication"
 	grpccomm "github.com/AnishMulay/sandstore/internal/communication/grpc"
 	fileserviceraft "github.com/AnishMulay/sandstore/internal/file_service/raft"
-	"github.com/AnishMulay/sandstore/internal/log_service"
+	logservice "github.com/AnishMulay/sandstore/internal/log_service"
+	locallog "github.com/AnishMulay/sandstore/internal/log_service/localdisc"
 	metadataraft "github.com/AnishMulay/sandstore/internal/metadata_replicator/raft"
 	inmemory "github.com/AnishMulay/sandstore/internal/metadata_service/inmemory"
 	"github.com/AnishMulay/sandstore/internal/server"
@@ -60,7 +61,7 @@ func Build(opts Options) runnable {
 		}
 	}
 
-	ls := log_service.NewLocalDiscLogService(opts.DataDir+"/logs", opts.NodeID, "INFO")
+	ls := locallog.NewLocalDiscLogService(opts.DataDir+"/logs", opts.NodeID, logservice.InfoLevel)
 	ms := inmemory.NewInMemoryMetadataService(ls)
 	cs := chunkservice.NewLocalDiscChunkService(opts.DataDir+"/chunks", ls)
 	comm := grpccomm.NewGRPCCommunicator(opts.ListenAddr, ls)

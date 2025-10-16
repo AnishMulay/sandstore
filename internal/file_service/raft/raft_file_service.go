@@ -7,7 +7,7 @@ import (
 
 	"github.com/AnishMulay/sandstore/internal/chunk_replicator"
 	"github.com/AnishMulay/sandstore/internal/chunk_service"
-	"github.com/AnishMulay/sandstore/internal/file_service"
+	fsinternal "github.com/AnishMulay/sandstore/internal/file_service/internal"
 	"github.com/AnishMulay/sandstore/internal/log_service"
 	"github.com/AnishMulay/sandstore/internal/metadata_replicator"
 	"github.com/AnishMulay/sandstore/internal/metadata_service"
@@ -67,7 +67,7 @@ func (fs *RaftFileService) StoreFile(path string, data []byte) error {
 				Message:  "Failed to store chunk",
 				Metadata: map[string]any{"path": path, "chunkID": chunkID, "error": err.Error()},
 			})
-			return file_service.ErrChunkStoreFailed
+			return fsinternal.ErrChunkStoreFailed
 		}
 
 		replicas, err := fs.cr.ReplicateChunk(chunkID, chunkData, 2)
@@ -76,7 +76,7 @@ func (fs *RaftFileService) StoreFile(path string, data []byte) error {
 				Message:  "Failed to replicate chunk",
 				Metadata: map[string]any{"path": path, "chunkID": chunkID, "error": err.Error()},
 			})
-			return file_service.ErrChunkReplicationFailed
+			return fsinternal.ErrChunkReplicationFailed
 		}
 
 		chunks = append(chunks, chunk_service.FileChunk{
@@ -120,7 +120,7 @@ func (fs *RaftFileService) StoreFile(path string, data []byte) error {
 			Message:  "Failed to replicate metadata via Raft",
 			Metadata: map[string]any{"path": path, "error": err.Error()},
 		})
-		return file_service.ErrMetadataReplicationFailed
+		return fsinternal.ErrMetadataReplicationFailed
 	}
 
 	fs.ls.Debug(log_service.LogEvent{
@@ -148,7 +148,7 @@ func (fs *RaftFileService) ReadFile(path string) ([]byte, error) {
 			Message:  "Failed to get file metadata",
 			Metadata: map[string]any{"path": path, "error": err.Error()},
 		})
-		return nil, file_service.ErrMetadataGetFailed
+		return nil, fsinternal.ErrMetadataGetFailed
 	}
 
 	var data []byte
@@ -165,7 +165,7 @@ func (fs *RaftFileService) ReadFile(path string) ([]byte, error) {
 					Message:  "Failed to fetch replicated chunk",
 					Metadata: map[string]any{"path": path, "chunkID": chunk.ChunkID, "error": err.Error()},
 				})
-				return nil, file_service.ErrReplicatedChunkFetchFailed
+				return nil, fsinternal.ErrReplicatedChunkFetchFailed
 			}
 		}
 
@@ -192,7 +192,7 @@ func (fs *RaftFileService) DeleteFile(path string) error {
 			Message:  "Failed to get file metadata",
 			Metadata: map[string]any{"path": path, "error": err.Error()},
 		})
-		return file_service.ErrMetadataGetFailed
+		return fsinternal.ErrMetadataGetFailed
 	}
 
 	for _, chunk := range metadata.Chunks {
@@ -202,7 +202,7 @@ func (fs *RaftFileService) DeleteFile(path string) error {
 				Message:  "Failed to delete replicated chunk",
 				Metadata: map[string]any{"path": path, "chunkID": chunk.ChunkID, "error": err.Error()},
 			})
-			return file_service.ErrReplicatedChunkDeleteFailed
+			return fsinternal.ErrReplicatedChunkDeleteFailed
 		}
 
 		err = fs.cs.DeleteChunk(chunk.ChunkID)
@@ -211,7 +211,7 @@ func (fs *RaftFileService) DeleteFile(path string) error {
 				Message:  "Failed to delete chunk",
 				Metadata: map[string]any{"path": path, "chunkID": chunk.ChunkID, "error": err.Error()},
 			})
-			return file_service.ErrChunkDeleteFailed
+			return fsinternal.ErrChunkDeleteFailed
 		}
 	}
 
@@ -230,7 +230,7 @@ func (fs *RaftFileService) DeleteFile(path string) error {
 			Message:  "Failed to replicate metadata deletion via Raft",
 			Metadata: map[string]any{"path": path, "error": err.Error()},
 		})
-		return file_service.ErrMetadataReplicationFailed
+		return fsinternal.ErrMetadataReplicationFailed
 	}
 
 	fs.ls.Debug(log_service.LogEvent{
@@ -244,7 +244,7 @@ func (fs *RaftFileService) DeleteFile(path string) error {
 			Message:  "Failed to delete file metadata",
 			Metadata: map[string]any{"path": path, "error": err.Error()},
 		})
-		return file_service.ErrMetadataDeleteFailed
+		return fsinternal.ErrMetadataDeleteFailed
 	}
 
 	fs.ls.Info(log_service.LogEvent{

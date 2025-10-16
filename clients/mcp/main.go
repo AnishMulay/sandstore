@@ -8,7 +8,8 @@ import (
 	"github.com/AnishMulay/sandstore/internal/communication"
 	grpccomm "github.com/AnishMulay/sandstore/internal/communication/grpc"
 	httpcomm "github.com/AnishMulay/sandstore/internal/communication/http"
-	"github.com/AnishMulay/sandstore/internal/log_service"
+	logservice "github.com/AnishMulay/sandstore/internal/log_service"
+	locallog "github.com/AnishMulay/sandstore/internal/log_service/localdisc"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
 	"gopkg.in/yaml.v3"
@@ -30,7 +31,7 @@ type ServerRegistry struct {
 	Servers       map[string]string
 	DefaultServer string
 	Communicator  communication.Communicator
-	LogServer     log_service.LogService
+	LogServer     logservice.LogService
 }
 
 func LoadConfig(path string) (*MCPConfig, error) {
@@ -260,22 +261,22 @@ func handleStopServer(ctx context.Context, request mcp.CallToolRequest, registry
 func main() {
 	logDir := "./run/mcp/logs"
 	nodeID := "mcp-server"
-	ls := log_service.NewLocalDiscLogService(logDir, nodeID, "INFO")
+    ls := locallog.NewLocalDiscLogService(logDir, nodeID, logservice.InfoLevel)
 
-	ls.Info(log_service.LogEvent{
+    ls.Info(logservice.LogEvent{
 		Message: "Starting MCP server",
 	})
 
 	config, err := LoadConfig("mcp_config.yaml")
-	if err != nil {
-		ls.Error(log_service.LogEvent{
+    if err != nil {
+        ls.Error(logservice.LogEvent{
 			Message:  "Failed to load config",
 			Metadata: map[string]any{"error": err.Error()},
 		})
 		return
 	}
 
-	ls.Info(log_service.LogEvent{
+    ls.Info(logservice.LogEvent{
 		Message: "Config loaded successfully",
 	})
 
@@ -289,13 +290,13 @@ func main() {
 		registry.Servers[server.ID] = server.Address
 	}
 
-	ls.Info(log_service.LogEvent{
+        ls.Info(logservice.LogEvent{
 		Message:  "Loaded servers from config",
 		Metadata: map[string]any{"count": len(registry.Servers), "default": registry.DefaultServer},
 	})
 
 	for id, addr := range registry.Servers {
-		ls.Info(log_service.LogEvent{
+        ls.Info(logservice.LogEvent{
 			Message:  "Registered server",
 			Metadata: map[string]any{"id": id, "address": addr},
 		})

@@ -1,6 +1,6 @@
 # Variables
 SANDSTORE_BINARY=sandstore
-CLIENT_BINARY=client
+CLIENT_BINARY=bin/client
 MCP_BINARY=sandstore-mcp
 
 # Generate protobuf files
@@ -14,6 +14,7 @@ proto:
 .PHONY: build
 build:
 	go build -o $(SANDSTORE_BINARY) ./cmd/sandstore
+	@mkdir -p $(dir $(CLIENT_BINARY))
 	go build -o $(CLIENT_BINARY) ./cmd/client
 
 # Build MCP server
@@ -34,6 +35,7 @@ cluster:
 # Run the client
 .PHONY: client
 client:
+	@mkdir -p $(dir $(CLIENT_BINARY))
 	go build -o $(CLIENT_BINARY) ./clients/client
 	./$(CLIENT_BINARY)
 
