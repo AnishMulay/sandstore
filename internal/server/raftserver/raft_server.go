@@ -1,4 +1,4 @@
-package server
+package raftserver
 
 import (
 	"context"
@@ -13,6 +13,8 @@ import (
 	"github.com/AnishMulay/sandstore/internal/file_service"
 	"github.com/AnishMulay/sandstore/internal/log_service"
 	"github.com/AnishMulay/sandstore/internal/metadata_service"
+	"github.com/AnishMulay/sandstore/internal/server"
+	internalerrors "github.com/AnishMulay/sandstore/internal/server/internal"
 )
 
 type RaftServer struct {
@@ -23,7 +25,7 @@ type RaftServer struct {
 	ls             log_service.LogService
 	ctx            context.Context
 	cancel         context.CancelFunc
-	typedHandlers  map[string]*TypedHandler
+	typedHandlers  map[string]*server.TypedHandler
 	clusterService cluster_service.ClusterService
 	stopped        bool
 	stopMutex      sync.RWMutex
@@ -39,34 +41,28 @@ func NewRaftServer(comm communication.Communicator, fs file_service.FileService,
 		ls:             ls,
 		ctx:            ctx,
 		cancel:         cancel,
-		typedHandlers:  make(map[string]*TypedHandler),
+		typedHandlers:  make(map[string]*server.TypedHandler),
 		clusterService: clusterService,
 		stopped:        false,
 	}
 }
 
 func (s *RaftServer) Start() error {
-	s.ls.Info(log_service.LogEvent{
-		Message: "Starting raft server",
-	})
+	s.ls.Info(log_service.LogEvent{Message: "Starting raft server"})
 
-	err := s.comm.Start(s.handleMessage)
-	if err != nil {
+	if err := s.comm.Start(s.handleMessage); err != nil {
 		s.ls.Error(log_service.LogEvent{
 			Message:  "Failed to start server",
 			Metadata: map[string]any{"error": err.Error()},
 		})
-		return ErrServerStartFailed
+		return internalerrors.ErrServerStartFailed
 	}
 
-	// Start the Raft cluster service
 	if raftCluster, ok := s.clusterService.(*clusterraft.RaftClusterService); ok {
 		raftCluster.Start()
 	}
 
-	s.ls.Info(log_service.LogEvent{
-		Message: "Raft server started successfully",
-	})
+	s.ls.Info(log_service.LogEvent{Message: "Raft server started successfully"})
 	return nil
 }
 
@@ -75,30 +71,23 @@ func (s *RaftServer) Stop() error {
 	defer s.stopMutex.Unlock()
 
 	if s.stopped {
-		s.ls.Debug(log_service.LogEvent{
-			Message: "Server already stopped, skipping",
-		})
+		s.ls.Debug(log_service.LogEvent{Message: "Server already stopped, skipping"})
 		return nil
 	}
 
-	s.ls.Info(log_service.LogEvent{
-		Message: "Stopping raft server",
-	})
+	s.ls.Info(log_service.LogEvent{Message: "Stopping raft server"})
 
 	s.cancel()
-	err := s.comm.Stop()
-	if err != nil {
+	if err := s.comm.Stop(); err != nil {
 		s.ls.Error(log_service.LogEvent{
 			Message:  "Failed to stop server",
 			Metadata: map[string]any{"error": err.Error()},
 		})
-		return ErrServerStopFailed
+		return internalerrors.ErrServerStopFailed
 	}
 
 	s.stopped = true
-	s.ls.Info(log_service.LogEvent{
-		Message: "raft server stopped successfully",
-	})
+	s.ls.Info(log_service.LogEvent{Message: "raft server stopped successfully"})
 	return nil
 }
 
@@ -108,7 +97,7 @@ func (s *RaftServer) RegisterTypedHandler(msgType string, payloadType reflect.Ty
 		Metadata: map[string]any{"messageType": msgType, "payloadType": payloadType.String()},
 	})
 
-	s.typedHandlers[msgType] = &TypedHandler{
+	s.typedHandlers[msgType] = &server.TypedHandler{
 		Handler:     handler,
 		PayloadType: payloadType,
 	}
@@ -121,7 +110,6 @@ func (s *RaftServer) handleMessage(msg communication.Message) (*communication.Re
 	})
 
 	if typedHandler, exists := s.typedHandlers[msg.Type]; exists {
-		// Type check the payload
 		if msg.Payload != nil {
 			actualType := reflect.TypeOf(msg.Payload)
 			if actualType != typedHandler.PayloadType {
@@ -135,7 +123,7 @@ func (s *RaftServer) handleMessage(msg communication.Message) (*communication.Re
 				})
 				return &communication.Response{
 					Code: communication.CodeBadRequest,
-					Body: []byte(ErrInvalidPayloadType.Error()),
+					Body: []byte(internalerrors.ErrInvalidPayloadType.Error()),
 				}, nil
 			}
 		}
@@ -149,14 +137,13 @@ func (s *RaftServer) handleMessage(msg communication.Message) (*communication.Re
 
 	return &communication.Response{
 		Code: communication.CodeBadRequest,
-		Body: []byte(ErrHandlerNotRegistered.Error()),
+		Body: []byte(internalerrors.ErrHandlerNotRegistered.Error()),
 	}, nil
 }
 
 func (s *RaftServer) HandleStoreFileMessage(msg communication.Message) (*communication.Response, error) {
 	request := msg.Payload.(communication.StoreFileRequest)
 
-	// Check if this node is the leader
 	if raftCluster, ok := s.clusterService.(*clusterraft.RaftClusterService); ok {
 		if !raftCluster.IsLeader() {
 			s.ls.Error(log_service.LogEvent{
@@ -167,27 +154,23 @@ func (s *RaftServer) HandleStoreFileMessage(msg communication.Message) (*communi
 		}
 	}
 
-	// Only leaders process the actual store operation
 	s.ls.Error(log_service.LogEvent{
 		Message:  "Processing store file as leader",
 		Metadata: map[string]any{"path": request.Path, "size": len(request.Data)},
 	})
 
-	err := s.fs.StoreFile(request.Path, request.Data)
-	if err != nil {
+	if err := s.fs.StoreFile(request.Path, request.Data); err != nil {
 		s.ls.Error(log_service.LogEvent{
 			Message:  "Failed to store file",
 			Metadata: map[string]any{"path": request.Path, "error": err.Error()},
 		})
 		return &communication.Response{
 			Code: communication.CodeInternal,
-			Body: []byte(ErrFileStoreFailed.Error()),
+			Body: []byte(internalerrors.ErrFileStoreFailed.Error()),
 		}, nil
 	}
 
-	return &communication.Response{
-		Code: communication.CodeOK,
-	}, nil
+	return &communication.Response{Code: communication.CodeOK}, nil
 }
 
 func (s *RaftServer) HandleReadFileMessage(msg communication.Message) (*communication.Response, error) {
@@ -206,7 +189,7 @@ func (s *RaftServer) HandleReadFileMessage(msg communication.Message) (*communic
 		})
 		return &communication.Response{
 			Code: communication.CodeInternal,
-			Body: []byte(ErrFileReadFailed.Error()),
+			Body: []byte(internalerrors.ErrFileReadFailed.Error()),
 		}, nil
 	}
 
@@ -224,7 +207,6 @@ func (s *RaftServer) HandleReadFileMessage(msg communication.Message) (*communic
 func (s *RaftServer) HandleDeleteFileMessage(msg communication.Message) (*communication.Response, error) {
 	request := msg.Payload.(communication.DeleteFileRequest)
 
-	// Check if this node is the leader
 	if raftCluster, ok := s.clusterService.(*clusterraft.RaftClusterService); ok {
 		if !raftCluster.IsLeader() {
 			s.ls.Error(log_service.LogEvent{
@@ -235,27 +217,23 @@ func (s *RaftServer) HandleDeleteFileMessage(msg communication.Message) (*commun
 		}
 	}
 
-	// Only leaders process the actual delete operation
 	s.ls.Error(log_service.LogEvent{
 		Message:  "Processing delete file as leader",
 		Metadata: map[string]any{"path": request.Path},
 	})
 
-	err := s.fs.DeleteFile(request.Path)
-	if err != nil {
+	if err := s.fs.DeleteFile(request.Path); err != nil {
 		s.ls.Error(log_service.LogEvent{
 			Message:  "Failed to delete file",
 			Metadata: map[string]any{"path": request.Path, "error": err.Error()},
 		})
 		return &communication.Response{
 			Code: communication.CodeInternal,
-			Body: []byte(ErrFileDeleteFailed.Error()),
+			Body: []byte(internalerrors.ErrFileDeleteFailed.Error()),
 		}, nil
 	}
 
-	return &communication.Response{
-		Code: communication.CodeOK,
-	}, nil
+	return &communication.Response{Code: communication.CodeOK}, nil
 }
 
 func (s *RaftServer) HandleStoreChunkMessage(msg communication.Message) (*communication.Response, error) {
@@ -266,15 +244,14 @@ func (s *RaftServer) HandleStoreChunkMessage(msg communication.Message) (*commun
 		Metadata: map[string]any{"chunkID": request.ChunkID, "size": len(request.Data)},
 	})
 
-	err := s.cs.WriteChunk(request.ChunkID, request.Data)
-	if err != nil {
+	if err := s.cs.WriteChunk(request.ChunkID, request.Data); err != nil {
 		s.ls.Error(log_service.LogEvent{
 			Message:  "Failed to store chunk",
 			Metadata: map[string]any{"chunkID": request.ChunkID, "error": err.Error()},
 		})
 		return &communication.Response{
 			Code: communication.CodeInternal,
-			Body: []byte(ErrChunkStoreFailed.Error()),
+			Body: []byte(internalerrors.ErrChunkStoreFailed.Error()),
 		}, nil
 	}
 
@@ -283,9 +260,7 @@ func (s *RaftServer) HandleStoreChunkMessage(msg communication.Message) (*commun
 		Metadata: map[string]any{"chunkID": request.ChunkID},
 	})
 
-	return &communication.Response{
-		Code: communication.CodeOK,
-	}, nil
+	return &communication.Response{Code: communication.CodeOK}, nil
 }
 
 func (s *RaftServer) HandleReadChunkMessage(msg communication.Message) (*communication.Response, error) {
@@ -304,7 +279,7 @@ func (s *RaftServer) HandleReadChunkMessage(msg communication.Message) (*communi
 		})
 		return &communication.Response{
 			Code: communication.CodeInternal,
-			Body: []byte(ErrChunkReadFailed.Error()),
+			Body: []byte(internalerrors.ErrChunkReadFailed.Error()),
 		}, nil
 	}
 
@@ -327,15 +302,14 @@ func (s *RaftServer) HandleDeleteChunkMessage(msg communication.Message) (*commu
 		Metadata: map[string]any{"chunkID": request.ChunkID},
 	})
 
-	err := s.cs.DeleteChunk(request.ChunkID)
-	if err != nil {
+	if err := s.cs.DeleteChunk(request.ChunkID); err != nil {
 		s.ls.Error(log_service.LogEvent{
 			Message:  "Failed to delete chunk",
 			Metadata: map[string]any{"chunkID": request.ChunkID, "error": err.Error()},
 		})
 		return &communication.Response{
 			Code: communication.CodeInternal,
-			Body: []byte(ErrChunkDeleteFailed.Error()),
+			Body: []byte(internalerrors.ErrChunkDeleteFailed.Error()),
 		}, nil
 	}
 
@@ -344,17 +318,56 @@ func (s *RaftServer) HandleDeleteChunkMessage(msg communication.Message) (*commu
 		Metadata: map[string]any{"chunkID": request.ChunkID},
 	})
 
-	return &communication.Response{
-		Code: communication.CodeOK,
-	}, nil
+	return &communication.Response{Code: communication.CodeOK}, nil
+}
+
+func (s *RaftServer) HandleStoreMetadataMessage(msg communication.Message) (*communication.Response, error) {
+	request := msg.Payload.(communication.StoreMetadataRequest)
+
+	s.ls.Info(log_service.LogEvent{
+		Message:  "Storing metadata",
+		Metadata: map[string]any{"path": request.Metadata.Path},
+	})
+
+	if err := s.ms.CreateFileMetadataFromStruct(request.Metadata); err != nil {
+		s.ls.Error(log_service.LogEvent{
+			Message:  "Failed to store metadata",
+			Metadata: map[string]any{"path": request.Metadata.Path, "error": err.Error()},
+		})
+		return &communication.Response{
+			Code: communication.CodeInternal,
+			Body: []byte(internalerrors.ErrMetadataStoreFailed.Error()),
+		}, nil
+	}
+
+	return &communication.Response{Code: communication.CodeOK}, nil
+}
+
+func (s *RaftServer) HandleDeleteMetadataMessage(msg communication.Message) (*communication.Response, error) {
+	request := msg.Payload.(communication.DeleteMetadataRequest)
+
+	s.ls.Info(log_service.LogEvent{
+		Message:  "Deleting metadata",
+		Metadata: map[string]any{"path": request.Path},
+	})
+
+	if err := s.ms.DeleteFileMetadata(request.Path); err != nil {
+		s.ls.Error(log_service.LogEvent{
+			Message:  "Failed to delete metadata",
+			Metadata: map[string]any{"path": request.Path, "error": err.Error()},
+		})
+		return &communication.Response{
+			Code: communication.CodeInternal,
+			Body: []byte(internalerrors.ErrMetadataDeleteFailed.Error()),
+		}, nil
+	}
+
+	return &communication.Response{Code: communication.CodeOK}, nil
 }
 
 func (s *RaftServer) HandleStopServerMessage(msg communication.Message) (*communication.Response, error) {
-	s.ls.Info(log_service.LogEvent{
-		Message: "Received stop server message",
-	})
+	s.ls.Info(log_service.LogEvent{Message: "Received stop server message"})
 
-	// Stop the server in a goroutine to avoid blocking the response
 	go func() {
 		if err := s.Stop(); err != nil {
 			s.ls.Error(log_service.LogEvent{
@@ -364,9 +377,7 @@ func (s *RaftServer) HandleStopServerMessage(msg communication.Message) (*commun
 		}
 	}()
 
-	return &communication.Response{
-		Code: communication.CodeOK,
-	}, nil
+	return &communication.Response{Code: communication.CodeOK}, nil
 }
 
 func (s *RaftServer) HandleRequestVoteMessage(msg communication.Message) (*communication.Response, error) {
@@ -389,14 +400,9 @@ func (s *RaftServer) HandleRequestVoteMessage(msg communication.Message) (*commu
 		}
 
 		if voteGranted {
-			return &communication.Response{
-				Code: communication.CodeOK,
-			}, nil
-		} else {
-			return &communication.Response{
-				Code: communication.CodeBadRequest,
-			}, nil
+			return &communication.Response{Code: communication.CodeOK}, nil
 		}
+		return &communication.Response{Code: communication.CodeBadRequest}, nil
 	}
 
 	return &communication.Response{
@@ -425,14 +431,9 @@ func (s *RaftServer) HandleAppendEntriesMessage(msg communication.Message) (*com
 		}
 
 		if success {
-			return &communication.Response{
-				Code: communication.CodeOK,
-			}, nil
-		} else {
-			return &communication.Response{
-				Code: communication.CodeBadRequest,
-			}, nil
+			return &communication.Response{Code: communication.CodeOK}, nil
 		}
+		return &communication.Response{Code: communication.CodeBadRequest}, nil
 	}
 
 	return &communication.Response{
@@ -505,3 +506,5 @@ func (s *RaftServer) redirectToLeader(msg communication.Message) (*communication
 
 	return response, nil
 }
+
+var _ server.Server = (*RaftServer)(nil)

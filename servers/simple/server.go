@@ -15,6 +15,7 @@ import (
 	"github.com/AnishMulay/sandstore/internal/log_service"
 	"github.com/AnishMulay/sandstore/internal/metadata_service"
 	"github.com/AnishMulay/sandstore/internal/server"
+	defaultserver "github.com/AnishMulay/sandstore/internal/server/defaultserver"
 )
 
 type Options struct {
@@ -28,7 +29,7 @@ type runnable interface {
 }
 
 type singleNodeServer struct {
-	server *server.DefaultServer
+	server server.Server
 }
 
 func (s *singleNodeServer) Run() error {
@@ -54,7 +55,7 @@ func Build(opts Options) runnable {
 	clusterService := clusterinmemory.NewInMemoryClusterService([]cluster_service.Node{}, ls)
 	fs := defaultfs.NewDefaultFileService(ms, cs, ls, 8*1024*1024)
 
-	srv := server.NewDefaultServer(comm, fs, ls, clusterService)
+	srv := defaultserver.NewDefaultServer(comm, fs, ls, clusterService)
 
 	srv.RegisterTypedHandler(communication.MessageTypeStoreFile, reflect.TypeOf((*communication.StoreFileRequest)(nil)).Elem(), srv.HandleStoreFileMessage)
 	srv.RegisterTypedHandler(communication.MessageTypeReadFile, reflect.TypeOf((*communication.ReadFileRequest)(nil)).Elem(), srv.HandleReadFileMessage)

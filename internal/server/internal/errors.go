@@ -1,4 +1,4 @@
-package server
+package internal
 
 import "errors"
 
@@ -8,8 +8,8 @@ var (
 	ErrServerStopFailed  = errors.New("failed to stop server")
 
 	// Message handling errors
-	ErrInvalidPayloadType    = errors.New("invalid payload type for message")
-	ErrHandlerNotRegistered  = errors.New("no handler registered for message type")
+	ErrInvalidPayloadType   = errors.New("invalid payload type for message")
+	ErrHandlerNotRegistered = errors.New("no handler registered for message type")
 
 	// File operation errors
 	ErrFileStoreFailed  = errors.New("failed to store file")
@@ -22,6 +22,6 @@ var (
 	ErrChunkDeleteFailed = errors.New("failed to delete chunk")
 
 	// Metadata operation errors
-	ErrMetadataStoreFailed = errors.New("failed to store metadata")
+	ErrMetadataStoreFailed  = errors.New("failed to store metadata")
 	ErrMetadataDeleteFailed = errors.New("failed to delete metadata")
 )

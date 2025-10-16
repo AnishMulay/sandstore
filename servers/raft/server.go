@@ -17,6 +17,7 @@ import (
 	metadataraft "github.com/AnishMulay/sandstore/internal/metadata_replicator/raft"
 	"github.com/AnishMulay/sandstore/internal/metadata_service"
 	"github.com/AnishMulay/sandstore/internal/server"
+	raftserver "github.com/AnishMulay/sandstore/internal/server/raftserver"
 )
 
 type Options struct {
@@ -32,7 +33,7 @@ type runnable interface {
 }
 
 type singleNodeServer struct {
-	server *server.RaftServer
+	server server.Server
 }
 
 func (s *singleNodeServer) Run() error {
@@ -67,7 +68,7 @@ func Build(opts Options) runnable {
 	cr := chunkreplicator.NewDefaultChunkReplicator(raftCluster, comm, ls)
 	mr := metadataraft.NewRaftMetadataReplicator(raftCluster, ls, ms)
 	fs := fileserviceraft.NewRaftFileService(ls, mr, cs, ms, cr, 8*1024*1024)
-	srv := server.NewRaftServer(comm, fs, cs, ms, ls, raftCluster)
+	srv := raftserver.NewRaftServer(comm, fs, cs, ms, ls, raftCluster)
 
 	srv.RegisterTypedHandler(communication.MessageTypeRequestVote, reflect.TypeOf((*communication.RequestVoteRequest)(nil)).Elem(), srv.HandleRequestVoteMessage)
 	srv.RegisterTypedHandler(communication.MessageTypeStoreFile, reflect.TypeOf((*communication.StoreFileRequest)(nil)).Elem(), srv.HandleStoreFileMessage)
