@@ -1,4 +1,4 @@
-package metadata_replicator
+package raft
 
 import (
 	"encoding/json"
@@ -8,12 +8,14 @@ import (
 
 	"github.com/AnishMulay/sandstore/internal/cluster_service"
 	"github.com/AnishMulay/sandstore/internal/log_service"
+	metadata_replicator "github.com/AnishMulay/sandstore/internal/metadata_replicator"
+	mrinternal "github.com/AnishMulay/sandstore/internal/metadata_replicator/internal"
 	"github.com/AnishMulay/sandstore/internal/metadata_service"
 )
 
 type RaftMetadataReplicator struct {
 	clusterService *cluster_service.RaftClusterService
-	metadataLog    *MetadataLog
+	metadataLog    *mrinternal.MetadataLog
 	ls             log_service.LogService
 	ms             metadata_service.MetadataService // For applying to state machine
 
@@ -24,28 +26,28 @@ type RaftMetadataReplicator struct {
 func NewRaftMetadataReplicator(clusterService *cluster_service.RaftClusterService, ls log_service.LogService, ms metadata_service.MetadataService) *RaftMetadataReplicator {
 	mr := &RaftMetadataReplicator{
 		clusterService: clusterService,
-		metadataLog:    NewMetadataLog(),
+		metadataLog:    mrinternal.NewMetadataLog(),
 		ls:             ls,
 		ms:             ms,
 		pendingOps:     make(map[int64]chan error),
 	}
-	
+
 	// Register this replicator as the log processor
 	clusterService.SetLogProcessor(mr)
-	
+
 	return mr
 }
 
-func (mr *RaftMetadataReplicator) Replicate(op MetadataReplicationOp) error {
+func (mr *RaftMetadataReplicator) Replicate(op metadata_replicator.MetadataReplicationOp) error {
 	if !mr.clusterService.IsLeader() {
 		mr.ls.Info(log_service.LogEvent{
 			Message:  "Replication failed - not leader",
 			Metadata: map[string]any{"operation": op.Type},
 		})
-		return ErrNotLeader
+		return mrinternal.ErrNotLeader
 	}
 
-	entry := MetadataLogEntry{
+	entry := mrinternal.MetadataLogEntry{
 		Term:      mr.clusterService.GetCurrentTerm(),
 		Type:      op.Type,
 		Operation: mr.convertToMetadataOperation(op),
@@ -59,7 +61,7 @@ func (mr *RaftMetadataReplicator) Replicate(op MetadataReplicationOp) error {
 	mr.pendingOps[logIndex] = respChan
 	mr.pendingMu.Unlock()
 
-	entriesData, _ := json.Marshal([]MetadataLogEntry{entry})
+	entriesData, _ := json.Marshal([]mrinternal.MetadataLogEntry{entry})
 	mr.clusterService.ReplicateEntries(entriesData, logIndex, mr.metadataLog, mr.onReplicationComplete)
 
 	select {
@@ -68,36 +70,36 @@ func (mr *RaftMetadataReplicator) Replicate(op MetadataReplicationOp) error {
 		delete(mr.pendingOps, logIndex)
 		mr.pendingMu.Unlock()
 		return err
-		
+
 	case <-time.After(5 * time.Second):
 		mr.pendingMu.Lock()
 		delete(mr.pendingOps, logIndex)
 		mr.pendingMu.Unlock()
-		
+
 		mr.ls.Info(log_service.LogEvent{
 			Message:  "Replication timeout",
 			Metadata: map[string]any{"logIndex": logIndex},
 		})
-		return ErrReplicationTimeout
+		return mrinternal.ErrReplicationTimeout
 	}
 }
 
-func (mr *RaftMetadataReplicator) convertToMetadataOperation(op MetadataReplicationOp) MetadataOperation {
+func (mr *RaftMetadataReplicator) convertToMetadataOperation(op metadata_replicator.MetadataReplicationOp) mrinternal.MetadataOperation {
 	switch op.Type {
-	case CREATE:
-		return MetadataOperation{
-			CreateOp: &CreateMetadataOp{
+	case metadata_replicator.CREATE:
+		return mrinternal.MetadataOperation{
+			CreateOp: &mrinternal.CreateMetadataOp{
 				Metadata: op.Metadata,
 			},
 		}
-	case DELETE:
-		return MetadataOperation{
-			DeleteOp: &DeleteMetadataOp{
+	case metadata_replicator.DELETE:
+		return mrinternal.MetadataOperation{
+			DeleteOp: &mrinternal.DeleteMetadataOp{
 				Path: op.Metadata.Path,
 			},
 		}
 	default:
-		return MetadataOperation{}
+		return mrinternal.MetadataOperation{}
 	}
 }
 
@@ -145,10 +147,10 @@ func (mr *RaftMetadataReplicator) ProcessReceivedEntries(entriesData []byte, pre
 
 	// Deserialize and append entries (skip if empty - heartbeat case)
 	if len(entriesData) > 0 {
-		var entries []MetadataLogEntry
+		var entries []mrinternal.MetadataLogEntry
 		if err := json.Unmarshal(entriesData, &entries); err != nil {
 			mr.ls.Error(log_service.LogEvent{
-				Message: "Failed to deserialize log entries",
+				Message:  "Failed to deserialize log entries",
 				Metadata: map[string]any{"error": err.Error()},
 			})
 			return false
@@ -178,7 +180,7 @@ func (mr *RaftMetadataReplicator) ProcessReceivedEntries(entriesData []byte, pre
 				"newCommitIndex": newCommitIndex,
 			},
 		})
-		
+
 		// Apply committed entries to state machine
 		mr.applyCommittedEntries()
 	}
@@ -216,7 +218,7 @@ func getTermFromEntry(entry interface{}) int64 {
 
 func (mr *RaftMetadataReplicator) applyCommittedEntries() {
 	commitIndex := mr.metadataLog.GetCommitIndex()
-	lastApplied := mr.metadataLog.lastApplied
+	lastApplied := mr.metadataLog.GetLastApplied()
 
 	if lastApplied >= commitIndex {
 		return // Nothing to apply
@@ -235,13 +237,13 @@ func (mr *RaftMetadataReplicator) applyCommittedEntries() {
 		entry := mr.metadataLog.GetEntryAtIndex(i)
 		if entry == nil {
 			mr.ls.Error(log_service.LogEvent{
-				Message: "Missing log entry during application",
+				Message:  "Missing log entry during application",
 				Metadata: map[string]any{"index": i},
 			})
 			continue
 		}
 
-		logEntry := entry.(*MetadataLogEntry)
+		logEntry := entry.(*mrinternal.MetadataLogEntry)
 		err := mr.applyLogEntry(logEntry)
 		if err != nil {
 			mr.ls.Error(log_service.LogEvent{
@@ -267,30 +269,30 @@ func (mr *RaftMetadataReplicator) applyCommittedEntries() {
 	mr.metadataLog.SetLastApplied(commitIndex)
 }
 
-func (mr *RaftMetadataReplicator) applyLogEntry(entry *MetadataLogEntry) error {
+func (mr *RaftMetadataReplicator) applyLogEntry(entry *mrinternal.MetadataLogEntry) error {
 	switch entry.Type {
-	case CREATE:
+	case metadata_replicator.CREATE:
 		if entry.Operation.CreateOp != nil {
 			// Idempotent: check if metadata already exists
 			_, err := mr.ms.GetFileMetadata(entry.Operation.CreateOp.Metadata.Path)
 			if err == nil {
 				// Metadata already exists, operation is idempotent
 				mr.ls.Debug(log_service.LogEvent{
-					Message: "Metadata already exists, skipping create operation",
+					Message:  "Metadata already exists, skipping create operation",
 					Metadata: map[string]any{"path": entry.Operation.CreateOp.Metadata.Path},
 				})
 				return nil
 			}
 			return mr.ms.CreateFileMetadataFromStruct(entry.Operation.CreateOp.Metadata)
 		}
-	case DELETE:
+	case metadata_replicator.DELETE:
 		if entry.Operation.DeleteOp != nil {
 			// Idempotent: check if metadata exists before deleting
 			_, err := mr.ms.GetFileMetadata(entry.Operation.DeleteOp.Path)
 			if err != nil {
 				// Metadata doesn't exist, operation is idempotent
 				mr.ls.Debug(log_service.LogEvent{
-					Message: "Metadata doesn't exist, skipping delete operation",
+					Message:  "Metadata doesn't exist, skipping delete operation",
 					Metadata: map[string]any{"path": entry.Operation.DeleteOp.Path},
 				})
 				return nil
@@ -310,12 +312,12 @@ func (mr *RaftMetadataReplicator) onReplicationComplete(logIndex int64, success 
 
 	mr.pendingMu.Lock()
 	defer mr.pendingMu.Unlock()
-	
+
 	if respChan, exists := mr.pendingOps[logIndex]; exists {
 		if success {
 			respChan <- nil
 		} else {
-			respChan <- ErrMetadataReplicationFailed
+			respChan <- mrinternal.ErrMetadataReplicationFailed
 		}
 	}
 }

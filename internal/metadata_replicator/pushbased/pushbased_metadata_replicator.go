@@ -1,4 +1,4 @@
-package metadata_replicator
+package pushbased
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"github.com/AnishMulay/sandstore/internal/cluster_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/log_service"
+	metadata_replicator "github.com/AnishMulay/sandstore/internal/metadata_replicator"
+	mrinternal "github.com/AnishMulay/sandstore/internal/metadata_replicator/internal"
 )
 
 type PushBasedMetadataReplicator struct {
@@ -23,9 +25,9 @@ func NewPushBasedMetadataReplicator(clusterService cluster_service.ClusterServic
 	}
 }
 
-func (mr *PushBasedMetadataReplicator) Replicate(op MetadataReplicationOp) error {
+func (mr *PushBasedMetadataReplicator) Replicate(op metadata_replicator.MetadataReplicationOp) error {
 	opType := "create"
-	if op.Type == DELETE {
+	if op.Type == metadata_replicator.DELETE {
 		opType = "delete"
 	}
 
@@ -40,7 +42,7 @@ func (mr *PushBasedMetadataReplicator) Replicate(op MetadataReplicationOp) error
 			Message:  "Failed to get healthy nodes for metadata replication",
 			Metadata: map[string]any{"path": op.Metadata.Path, "error": err.Error()},
 		})
-		return ErrHealthyNodesGetFailed
+		return mrinternal.ErrHealthyNodesGetFailed
 	}
 
 	mr.ls.Debug(log_service.LogEvent{
@@ -55,7 +57,7 @@ func (mr *PushBasedMetadataReplicator) Replicate(op MetadataReplicationOp) error
 		})
 
 		var msg communication.Message
-		if op.Type == CREATE {
+		if op.Type == metadata_replicator.CREATE {
 			msg = communication.Message{
 				From:    mr.comm.Address(),
 				Type:    communication.MessageTypeStoreMetadata,
@@ -78,7 +80,7 @@ func (mr *PushBasedMetadataReplicator) Replicate(op MetadataReplicationOp) error
 				Message:  "Failed to send metadata operation to node",
 				Metadata: map[string]any{"path": op.Metadata.Path, "type": opType, "nodeID": node.ID, "address": node.Address, "error": err.Error()},
 			})
-			return ErrMetadataSendFailed
+			return mrinternal.ErrMetadataSendFailed
 		}
 
 		if resp.Code != communication.CodeOK {
@@ -86,7 +88,7 @@ func (mr *PushBasedMetadataReplicator) Replicate(op MetadataReplicationOp) error
 				Message:  "Metadata operation replication failed",
 				Metadata: map[string]any{"path": op.Metadata.Path, "type": opType, "nodeID": node.ID, "address": node.Address, "responseCode": resp.Code, "responseBody": string(resp.Body)},
 			})
-			return ErrMetadataReplicationFailed
+			return mrinternal.ErrMetadataReplicationFailed
 		} else {
 			mr.ls.Debug(log_service.LogEvent{
 				Message:  "Metadata operation replicated successfully to node",

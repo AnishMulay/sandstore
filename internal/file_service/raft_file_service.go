@@ -15,14 +15,14 @@ import (
 
 type RaftFileService struct {
 	ls        log_service.LogService
-	mr        *metadata_replicator.RaftMetadataReplicator
+	mr        metadata_replicator.MetadataReplicator
 	cs        chunk_service.ChunkService
 	ms        metadata_service.MetadataService
 	cr        chunk_replicator.ChunkReplicator
 	chunkSize int64
 }
 
-func NewRaftFileService(ls log_service.LogService, mr *metadata_replicator.RaftMetadataReplicator, cs chunk_service.ChunkService, ms metadata_service.MetadataService, cr chunk_replicator.ChunkReplicator, chunkSize int64,
+func NewRaftFileService(ls log_service.LogService, mr metadata_replicator.MetadataReplicator, cs chunk_service.ChunkService, ms metadata_service.MetadataService, cr chunk_replicator.ChunkReplicator, chunkSize int64,
 ) *RaftFileService {
 	return &RaftFileService{
 		ls:        ls,

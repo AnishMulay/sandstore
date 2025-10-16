@@ -1,19 +1,20 @@
-package metadata_replicator
+package internal
 
 import (
 	"sync"
 	"time"
 
+	metadata_replicator "github.com/AnishMulay/sandstore/internal/metadata_replicator"
 	"github.com/AnishMulay/sandstore/internal/metadata_service"
 )
 
 // might make this an interface later
 type MetadataLogEntry struct {
-	Index     int64                   `json:"index"`
-	Term      int64                   `json:"term"`
-	Type      MetadataOperationType   `json:"type"`
-	Operation MetadataOperation       `json:"operation"`
-	Timestamp time.Time               `json:"timestamp"`
+	Index     int64                                     `json:"index"`
+	Term      int64                                     `json:"term"`
+	Type      metadata_replicator.MetadataOperationType `json:"type"`
+	Operation MetadataOperation                         `json:"operation"`
+	Timestamp time.Time                                 `json:"timestamp"`
 }
 
 type MetadataOperation struct {
@@ -128,6 +129,12 @@ func (ml *MetadataLog) SetLastApplied(index int64) {
 	ml.mu.Lock()
 	defer ml.mu.Unlock()
 	ml.lastApplied = index
+}
+
+func (ml *MetadataLog) GetLastApplied() int64 {
+	ml.mu.RLock()
+	defer ml.mu.RUnlock()
+	return ml.lastApplied
 }
 
 func (ml *MetadataLog) TruncateAfter(index int64) {

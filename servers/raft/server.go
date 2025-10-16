@@ -12,7 +12,7 @@ import (
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/file_service"
 	"github.com/AnishMulay/sandstore/internal/log_service"
-	"github.com/AnishMulay/sandstore/internal/metadata_replicator"
+	"github.com/AnishMulay/sandstore/internal/metadata_replicator/raft"
 	"github.com/AnishMulay/sandstore/internal/metadata_service"
 	"github.com/AnishMulay/sandstore/internal/server"
 )
@@ -63,7 +63,7 @@ func Build(opts Options) runnable {
 	comm := communication.NewGRPCCommunicator(opts.ListenAddr, ls)
 	raftCluster := cluster_service.NewRaftClusterService(opts.NodeID, otherNodes, comm, ls)
 	cr := chunk_replicator.NewDefaultChunkReplicator(raftCluster, comm, ls)
-	mr := metadata_replicator.NewRaftMetadataReplicator(raftCluster, ls, ms)
+	mr := raft.NewRaftMetadataReplicator(raftCluster, ls, ms)
 	fs := file_service.NewRaftFileService(ls, mr, cs, ms, cr, 8*1024*1024)
 	srv := server.NewRaftServer(comm, fs, cs, ms, ls, raftCluster)
 
