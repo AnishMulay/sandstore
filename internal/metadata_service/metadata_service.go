@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/AnishMulay/sandstore/internal/chunk_service"
+	errorsinternal "github.com/AnishMulay/sandstore/internal/metadata_service/internal"
 )
 
 type FileMetadata struct {
@@ -27,22 +28,22 @@ type MetadataService interface {
 
 func (fm FileMetadata) Validate() error {
 	if fm.Path == "" {
-		return ErrInvalidPath
+		return errorsinternal.ErrInvalidPath
 	}
 	if fm.FileID == "" {
-		return ErrMissingFileID
+		return errorsinternal.ErrMissingFileID
 	}
 	if fm.Size < 0 {
-		return ErrInvalidSize
+		return errorsinternal.ErrInvalidSize
 	}
 	if fm.CreatedAt.IsZero() {
-		return ErrMissingCreatedAt
+		return errorsinternal.ErrMissingCreatedAt
 	}
 	if fm.ModifiedAt.IsZero() {
-		return ErrMissingModifiedAt
+		return errorsinternal.ErrMissingModifiedAt
 	}
 	if fm.Permissions == "" {
-		return ErrMissingPermissions
+		return errorsinternal.ErrMissingPermissions
 	}
 	return nil
 }

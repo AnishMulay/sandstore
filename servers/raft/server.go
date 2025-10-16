@@ -15,7 +15,7 @@ import (
 	fileserviceraft "github.com/AnishMulay/sandstore/internal/file_service/raft"
 	"github.com/AnishMulay/sandstore/internal/log_service"
 	metadataraft "github.com/AnishMulay/sandstore/internal/metadata_replicator/raft"
-	"github.com/AnishMulay/sandstore/internal/metadata_service"
+	inmemory "github.com/AnishMulay/sandstore/internal/metadata_service/inmemory"
 	"github.com/AnishMulay/sandstore/internal/server"
 	raftserver "github.com/AnishMulay/sandstore/internal/server/raftserver"
 )
@@ -61,7 +61,7 @@ func Build(opts Options) runnable {
 	}
 
 	ls := log_service.NewLocalDiscLogService(opts.DataDir+"/logs", opts.NodeID, "INFO")
-	ms := metadata_service.NewInMemoryMetadataService(ls)
+	ms := inmemory.NewInMemoryMetadataService(ls)
 	cs := chunkservice.NewLocalDiscChunkService(opts.DataDir+"/chunks", ls)
 	comm := grpccomm.NewGRPCCommunicator(opts.ListenAddr, ls)
 	raftCluster := clusterraft.NewRaftClusterService(opts.NodeID, otherNodes, comm, ls)

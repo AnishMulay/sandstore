@@ -1,4 +1,4 @@
-package metadata_service
+package internal
 
 import "errors"
 

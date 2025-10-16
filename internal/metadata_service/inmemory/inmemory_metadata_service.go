@@ -1,4 +1,4 @@
-package metadata_service
+package inmemory
 
 import (
 	"sync"
@@ -6,22 +6,24 @@ import (
 
 	"github.com/AnishMulay/sandstore/internal/chunk_service"
 	"github.com/AnishMulay/sandstore/internal/log_service"
+	"github.com/AnishMulay/sandstore/internal/metadata_service"
+	errorsinternal "github.com/AnishMulay/sandstore/internal/metadata_service/internal"
 )
 
 type InMemoryMetadataService struct {
 	mu    sync.RWMutex
-	files map[string]*FileMetadata
+	files map[string]*metadata_service.FileMetadata
 	ls    log_service.LogService
 }
 
 func NewInMemoryMetadataService(ls log_service.LogService) *InMemoryMetadataService {
 	return &InMemoryMetadataService{
-		files: make(map[string]*FileMetadata),
+		files: make(map[string]*metadata_service.FileMetadata),
 		ls:    ls,
 	}
 }
 
-func (ms *InMemoryMetadataService) CreateFileMetadataFromStruct(metadata FileMetadata) error {
+func (ms *InMemoryMetadataService) CreateFileMetadataFromStruct(metadata metadata_service.FileMetadata) error {
 	ms.ls.Info(log_service.LogEvent{
 		Message: "Creating file metadata from struct",
 		Metadata: map[string]any{
@@ -32,7 +34,6 @@ func (ms *InMemoryMetadataService) CreateFileMetadataFromStruct(metadata FileMet
 		},
 	})
 
-	// Validate the metadata
 	if err := metadata.Validate(); err != nil {
 		ms.ls.Error(log_service.LogEvent{
 			Message:  "Invalid metadata provided",
@@ -50,11 +51,10 @@ func (ms *InMemoryMetadataService) CreateFileMetadataFromStruct(metadata FileMet
 			Message:  "File metadata already exists",
 			Metadata: map[string]any{"path": metadata.Path},
 		})
-		return ErrFileAlreadyExists
+		return errorsinternal.ErrFileAlreadyExists
 	}
 
-	// Make a copy to avoid external mutations
-	file := &FileMetadata{
+	file := &metadata_service.FileMetadata{
 		FileID:      metadata.FileID,
 		Path:        metadata.Path,
 		Size:        metadata.Size,
@@ -81,7 +81,6 @@ func (ms *InMemoryMetadataService) CreateFileMetadataFromStruct(metadata FileMet
 	return nil
 }
 
-// CreateFileMetadata is deprecated and will be removed in future versions.
 func (ms *InMemoryMetadataService) CreateFileMetadata(path string, size int64, chunks []chunk_service.FileChunk) error {
 	ms.ls.Info(log_service.LogEvent{
 		Message:  "Creating file metadata",
@@ -97,10 +96,10 @@ func (ms *InMemoryMetadataService) CreateFileMetadata(path string, size int64, c
 			Message:  "File metadata already exists",
 			Metadata: map[string]any{"path": path},
 		})
-		return ErrFileAlreadyExists
+		return errorsinternal.ErrFileAlreadyExists
 	}
 
-	file := &FileMetadata{
+	file := &metadata_service.FileMetadata{
 		Path:        path,
 		Size:        size,
 		CreatedAt:   time.Now(),
@@ -121,7 +120,7 @@ func (ms *InMemoryMetadataService) CreateFileMetadata(path string, size int64, c
 	return nil
 }
 
-func (ms *InMemoryMetadataService) GetFileMetadata(path string) (*FileMetadata, error) {
+func (ms *InMemoryMetadataService) GetFileMetadata(path string) (*metadata_service.FileMetadata, error) {
 	ms.ls.Debug(log_service.LogEvent{
 		Message:  "Getting file metadata",
 		Metadata: map[string]any{"path": path},
@@ -136,7 +135,7 @@ func (ms *InMemoryMetadataService) GetFileMetadata(path string) (*FileMetadata, 
 			Message:  "File metadata not found",
 			Metadata: map[string]any{"path": path},
 		})
-		return nil, ErrFileNotFound
+		return nil, errorsinternal.ErrFileNotFound
 	}
 
 	ms.ls.Debug(log_service.LogEvent{
@@ -161,7 +160,7 @@ func (ms *InMemoryMetadataService) DeleteFileMetadata(path string) error {
 			Message:  "File metadata not found for deletion",
 			Metadata: map[string]any{"path": path},
 		})
-		return ErrFileNotFound
+		return errorsinternal.ErrFileNotFound
 	}
 
 	delete(ms.files, path)
@@ -174,7 +173,7 @@ func (ms *InMemoryMetadataService) DeleteFileMetadata(path string) error {
 	return nil
 }
 
-func (ms *InMemoryMetadataService) ListDirectory(path string) ([]FileMetadata, error) {
+func (ms *InMemoryMetadataService) ListDirectory(path string) ([]metadata_service.FileMetadata, error) {
 	ms.ls.Debug(log_service.LogEvent{
 		Message:  "Listing directory",
 		Metadata: map[string]any{"path": path},
@@ -183,11 +182,11 @@ func (ms *InMemoryMetadataService) ListDirectory(path string) ([]FileMetadata, e
 	ms.mu.RLock()
 	defer ms.mu.RUnlock()
 
-	var files []FileMetadata
+	var files []metadata_service.FileMetadata
 	for _, file := range ms.files {
 		if path == "/" {
 			files = append(files, *file)
-		} else if file.Path == path || (len(file.Path) > len(path) && file.Path[:len(path)] == path && file.Path[len(path):][0] == '/') {
+		} else if file.Path == path || (len(file.Path) > len(path) && file.Path[:len(path)] == path && len(file.Path) > len(path) && file.Path[len(path)] == '/') {
 			files = append(files, *file)
 		}
 	}
@@ -200,7 +199,7 @@ func (ms *InMemoryMetadataService) ListDirectory(path string) ([]FileMetadata, e
 	return files, nil
 }
 
-func (ms *InMemoryMetadataService) UpdateFileMetadata(path string, metadata FileMetadata) error {
+func (ms *InMemoryMetadataService) UpdateFileMetadata(path string, metadata metadata_service.FileMetadata) error {
 	ms.ls.Info(log_service.LogEvent{
 		Message:  "Updating file metadata",
 		Metadata: map[string]any{"path": path, "size": metadata.Size, "chunks": len(metadata.Chunks)},
@@ -214,16 +213,14 @@ func (ms *InMemoryMetadataService) UpdateFileMetadata(path string, metadata File
 			Message:  "File metadata not found for update",
 			Metadata: map[string]any{"path": path},
 		})
-		return ErrFileNotFound
+		return errorsinternal.ErrFileNotFound
 	}
 
-	// Update the file metadata
 	file := ms.files[path]
 	file.Size = metadata.Size
 	file.ModifiedAt = time.Now()
 	file.Permissions = metadata.Permissions
 	file.Chunks = metadata.Chunks
-
 	ms.files[path] = file
 
 	ms.ls.Info(log_service.LogEvent{
@@ -233,3 +230,5 @@ func (ms *InMemoryMetadataService) UpdateFileMetadata(path string, metadata File
 
 	return nil
 }
+
+var _ metadata_service.MetadataService = (*InMemoryMetadataService)(nil)
