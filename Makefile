@@ -19,7 +19,7 @@ build:
 # Build MCP server
 .PHONY: mcp
 mcp:
-	go build -o $(MCP_BINARY) ./cmd/mcp
+	go build -o $(MCP_BINARY) ./clients/mcp
 
 # Run simple server via cmd/sandstore
 .PHONY: simple
