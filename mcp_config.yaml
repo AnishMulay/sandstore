@@ -1,0 +1,22 @@
+# config.yaml
+communicator:
+  type: "grpc"  # or "http"
+  
+servers:
+  - id: "node-1"
+    address: "localhost:8101"
+    healthy: true
+  - id: "node-2"
+    address: "localhost:8102"
+    healthy: true
+  - id: "node-3"
+    address: "localhost:8103"
+    healthy: true
+  - id: "node-4"
+    address: "localhost:8104"
+    healthy: true
+  - id: "node-5"
+    address: "localhost:8105"
+    healthy: true
+
+default_server: "node-1"

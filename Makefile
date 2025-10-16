@@ -1,8 +1,6 @@
 # Variables
-BASIC_SERVER_BINARY=basic-server
-REPLICATED_SERVER_BINARY=replicated-server
-RAFT_SERVER_BINARY=raft-server
-CLIENT_BINARY=client
+SANDSTORE_BINARY=sandstore
+CLIENT_BINARY=bin/client
 MCP_BINARY=sandstore-mcp
 
 # Generate protobuf files
@@ -15,55 +13,31 @@ proto:
 # Build all binaries
 .PHONY: build
 build:
-	go build -o $(BASIC_SERVER_BINARY) ./cmd/basic-server
-	go build -o $(REPLICATED_SERVER_BINARY) ./cmd/replicated-server
-	go build -o $(RAFT_SERVER_BINARY) ./cmd/raft-server
+	go build -o $(SANDSTORE_BINARY) ./cmd/sandstore
+	@mkdir -p $(dir $(CLIENT_BINARY))
 	go build -o $(CLIENT_BINARY) ./cmd/client
 
 # Build MCP server
 .PHONY: mcp
 mcp:
-	go build -o $(MCP_BINARY) ./cmd/mcp
+	go build -o $(MCP_BINARY) ./clients/mcp
 
-# Run basic server (single node, no replication)
-.PHONY: server-basic
-server-basic:
-	go build -o $(BASIC_SERVER_BINARY) ./cmd/basic-server
-	./$(BASIC_SERVER_BINARY)
+# Run simple server via cmd/sandstore
+.PHONY: simple
+simple:
+	./scripts/dev/run-simple.sh
 
-# Run replicated server (3-node cluster with replication)
-.PHONY: server-replicated
-server-replicated:
-	go build -o $(REPLICATED_SERVER_BINARY) ./cmd/replicated-server
-	./$(REPLICATED_SERVER_BINARY)
-
-# Run Raft server (3-node cluster with Raft consensus)
-.PHONY: server-raft
-server-raft:
-	go build -o $(RAFT_SERVER_BINARY) ./cmd/raft-server
-	./$(RAFT_SERVER_BINARY)
-
-# Backward compatibility - defaults to Raft server
-.PHONY: server
-server: server-raft
+# Start 5-node Raft cluster
+.PHONY: cluster
+cluster:
+	-./scripts/dev/run-5.sh
 
 # Run the client
 .PHONY: client
 client:
-	go build -o $(CLIENT_BINARY) ./cmd/client
+	@mkdir -p $(dir $(CLIENT_BINARY))
+	go build -o $(CLIENT_BINARY) ./clients/client
 	./$(CLIENT_BINARY)
-
-# Test server-client communication with Raft
-.PHONY: test-server
-test-server:
-	@echo "Starting Raft server..."
-	@go build -o $(RAFT_SERVER_BINARY) ./cmd/raft-server
-	@./$(RAFT_SERVER_BINARY) & SERVER_PID=$$!; \
-	sleep 3; \
-	echo "Running client..."; \
-	go build -o $(CLIENT_BINARY) ./cmd/client && ./$(CLIENT_BINARY); \
-	echo "Stopping server..."; \
-	kill $$SERVER_PID
 
 # Run Go tests
 .PHONY: test
@@ -73,5 +47,5 @@ test:
 # Clean up
 .PHONY: clean
 clean:
-	rm -f $(BASIC_SERVER_BINARY) $(REPLICATED_SERVER_BINARY) $(RAFT_SERVER_BINARY) $(CLIENT_BINARY) $(MCP_BINARY)
-	rm -rf chunks logs
+	rm -f $(SANDSTORE_BINARY) $(CLIENT_BINARY) $(MCP_BINARY)
+	rm -rf bin/ run/ chunks logs config.yaml

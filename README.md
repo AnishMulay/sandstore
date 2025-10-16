@@ -64,30 +64,32 @@ Whether you're a student diving into distributed systems for the first time or a
 
 ### Server Options
 
-Sandstore provides three server configurations for different learning stages:
+Sandstore now ships with a single configurable entry point (`cmd/sandstore`) that can start different server modes:
 
-1. **Basic server** (single node, no replication):
-   ```bash
-   make server-basic
-   ```
+- **Simple server** (single node, no replication):
+  ```bash
+  make simple
+  ```
+  This uses `scripts/dev/run-simple.sh` and keeps the server in the foreground so you can stop it with `Ctrl+C`.  
+  Optional overrides: `NODE_ID=<id> LISTEN_ADDR=:8090 DATA_DIR=./run/simple make simple`
 
-2. **Replicated server** (3-node cluster with replication):
-   ```bash
-   make server-replicated
-   ```
+- **Raft demo cluster** (5 nodes with consensus and replication):
+  ```bash
+  make cluster
+  ```
+  This runs `scripts/dev/run-5.sh`, launches five Raft nodes, and tails their logs to `run/logs/`. Stop the cluster with `Ctrl+C`.
 
-3. **Raft server** (3-node cluster with Raft consensus):
-   ```bash
-   make server-raft
-   # or simply:
-   make server
-   ```
+If you prefer to run individual nodes manually, you can call `go run ./cmd/sandstore --server raft ...` directly (see below for flag details).
 
 ### Basic Usage
 
 1. **Start a server** (choose your complexity level):
    ```bash
-   make server-raft  # Recommended for full distributed experience
+   # Single-node sandbox
+   make simple
+
+   # Multi-node Raft example
+   make cluster
    ```
 
 2. **Store a file from another terminal:**
@@ -96,10 +98,10 @@ Sandstore provides three server configurations for different learning stages:
    ```
 
 3. **Watch the magic happen:**
-   - Leader election occurs automatically (Raft mode)
-   - File gets chunked and distributed
+   - Leader election occurs automatically when you run the Raft cluster
+   - Files get chunked and distributed across nodes
    - Metadata is replicated via consensus
-   - Check logs in `./logs/` to see the distributed coordination
+   - Logs are written under `run/logs/` (cluster) or the configured `DATA_DIR` (simple server)
 
 ### Example Client Code
 
@@ -177,11 +179,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines on:
 
 New to distributed systems? Try this progression:
 
-1. **Start simple**: Run `make server-basic` and understand file chunking
-2. **Add replication**: Try `make server-replicated` to see chunk replication
-3. **Dive into Raft**: Use `make server-raft` for leader election and consensus
-4. **Simulate failures**: Kill nodes and see how the system recovers
-5. **Extend the system**: Add your own features and improvements
+1. **Start simple**: Run `make simple` to explore single-node behavior
+2. **Scale out**: Use `make cluster` (or customize `scripts/dev/run-5.sh`) for a full Raft experience
+3. **Simulate failures**: Kill nodes from the cluster and observe recovery
+4. **Extend the system**: Tweak the services in `servers/` and `cmd/sandstore`
 
 ## License
 

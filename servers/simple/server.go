@@ -1,0 +1,66 @@
+package simple
+
+import (
+	"os"
+	"os/signal"
+	"reflect"
+	"syscall"
+
+	chunkservice "github.com/AnishMulay/sandstore/internal/chunk_service/localdisc"
+	"github.com/AnishMulay/sandstore/internal/cluster_service"
+	clusterinmemory "github.com/AnishMulay/sandstore/internal/cluster_service/inmemory"
+	"github.com/AnishMulay/sandstore/internal/communication"
+	grpccomm "github.com/AnishMulay/sandstore/internal/communication/grpc"
+	defaultfs "github.com/AnishMulay/sandstore/internal/file_service/defaultfs"
+	logservice "github.com/AnishMulay/sandstore/internal/log_service"
+	locallog "github.com/AnishMulay/sandstore/internal/log_service/localdisc"
+	inmemory "github.com/AnishMulay/sandstore/internal/metadata_service/inmemory"
+	"github.com/AnishMulay/sandstore/internal/server"
+	defaultserver "github.com/AnishMulay/sandstore/internal/server/defaultserver"
+)
+
+type Options struct {
+	NodeID     string
+	ListenAddr string
+	DataDir    string
+}
+
+type runnable interface {
+	Run() error
+}
+
+type singleNodeServer struct {
+	server server.Server
+}
+
+func (s *singleNodeServer) Run() error {
+	if err := s.server.Start(); err != nil {
+		return err
+	}
+
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	<-c
+
+	return s.server.Stop()
+}
+
+func Build(opts Options) runnable {
+	logDir := opts.DataDir + "/logs"
+	chunkDir := opts.DataDir + "/chunks/" + opts.NodeID
+
+	ls := locallog.NewLocalDiscLogService(logDir, opts.NodeID, logservice.InfoLevel)
+	ms := inmemory.NewInMemoryMetadataService(ls)
+	cs := chunkservice.NewLocalDiscChunkService(chunkDir, ls)
+	comm := grpccomm.NewGRPCCommunicator(opts.ListenAddr, ls)
+	clusterService := clusterinmemory.NewInMemoryClusterService([]cluster_service.Node{}, ls)
+	fs := defaultfs.NewDefaultFileService(ms, cs, ls, 8*1024*1024)
+
+	srv := defaultserver.NewDefaultServer(comm, fs, ls, clusterService)
+
+	srv.RegisterTypedHandler(communication.MessageTypeStoreFile, reflect.TypeOf((*communication.StoreFileRequest)(nil)).Elem(), srv.HandleStoreFileMessage)
+	srv.RegisterTypedHandler(communication.MessageTypeReadFile, reflect.TypeOf((*communication.ReadFileRequest)(nil)).Elem(), srv.HandleReadFileMessage)
+	srv.RegisterTypedHandler(communication.MessageTypeDeleteFile, reflect.TypeOf((*communication.DeleteFileRequest)(nil)).Elem(), srv.HandleDeleteFileMessage)
+
+	return &singleNodeServer{server: srv}
+}
