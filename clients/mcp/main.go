@@ -6,6 +6,8 @@ import (
 	"os"
 
 	"github.com/AnishMulay/sandstore/internal/communication"
+	grpccomm "github.com/AnishMulay/sandstore/internal/communication/grpc"
+	httpcomm "github.com/AnishMulay/sandstore/internal/communication/http"
 	"github.com/AnishMulay/sandstore/internal/log_service"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
@@ -302,9 +304,9 @@ func main() {
 	var comm communication.Communicator
 	switch config.Communicator.Type {
 	case "grpc":
-		comm = communication.NewGRPCCommunicator(":9000", ls)
+		comm = grpccomm.NewGRPCCommunicator(":9000", ls)
 	case "http":
-		comm = communication.NewHTTPCommunicator(":9000", ls)
+		comm = httpcomm.NewHTTPCommunicator(":9000", ls)
 	default:
 		fmt.Printf("Unknown communicator type: %s\n", config.Communicator.Type)
 	}

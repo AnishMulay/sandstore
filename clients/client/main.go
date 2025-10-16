@@ -5,12 +5,13 @@ import (
 	"log"
 
 	"github.com/AnishMulay/sandstore/internal/communication"
+	grpccomm "github.com/AnishMulay/sandstore/internal/communication/grpc"
 	"github.com/AnishMulay/sandstore/internal/log_service"
 )
 
 func main() {
 	ls := log_service.NewLocalDiscLogService("./run/client/logs", "client")
-	comm := communication.NewGRPCCommunicator(":8083", ls)
+	comm := grpccomm.NewGRPCCommunicator(":8083", ls)
 	ctx := context.Background()
 	serverAddr := "localhost:8101"
 
