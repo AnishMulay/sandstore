@@ -34,7 +34,7 @@ cluster:
 # Run the client
 .PHONY: client
 client:
-	go build -o $(CLIENT_BINARY) ./cmd/client
+	go build -o $(CLIENT_BINARY) ./clients/client
 	./$(CLIENT_BINARY)
 
 # Run Go tests
