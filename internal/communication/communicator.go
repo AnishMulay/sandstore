@@ -25,7 +25,26 @@ const (
 	MessageTypeStopServer     = "stop_server"
 	MessageTypeRequestVote    = "request_vote"
 	MessageTypeAppendEntries  = "append_entries"
+    // POSIX Specific Chunk Messages
+    MessageTypePosixWriteChunk  = "posix_write_chunk"  // Replaces "store_chunk"
+    MessageTypePosixReadChunk   = "posix_read_chunk"
+    MessageTypePosixDeleteChunk = "posix_delete_chunk"
 )
+
+type PosixWriteChunkRequest struct {
+    ChunkID string
+    Data    []byte
+    // Future-proofing: We could add 'Offset' here later for partial updates!
+    // Offset int64 
+}
+
+type PosixReadChunkRequest struct {
+    ChunkID string
+}
+
+type PosixDeleteChunkRequest struct {
+    ChunkID string
+}
 
 type StoreFileRequest struct {
 	Path string
