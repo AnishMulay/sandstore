@@ -36,8 +36,6 @@ type LogEntry struct {
 }
 
 // --- RPC Request/Response Structs ---
-// We define these here to keep the Raft logic self-contained. 
-// In a real system, these might map to the protobufs in /proto.
 
 type RequestVoteArgs struct {
 	Term         int64
@@ -63,7 +61,6 @@ type AppendEntriesArgs struct {
 type AppendEntriesReply struct {
 	Term      int64
 	Success   bool
-	// Optimization for faster catch-up (optional but good for stability)
 	ConflictIndex int64
 	ConflictTerm  int64
 }
