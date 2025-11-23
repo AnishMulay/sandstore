@@ -376,13 +376,3 @@ func (r *RaftPosixMetadataReplicator) broadcastAppendEntries() {
 		}(work)
 	}
 }
-
-// --- RPC Handlers (Called by Server wrapper) ---
-
-// These are already fully implemented in core_logic.go (HandleRequestVote, HandleAppendEntries).
-// The server wrapper (e.g., PosixServer) will need to:
-// 1. Receive the message
-// 2. Deserialize payload into RequestVoteArgs
-// 3. Call replicator.HandleRequestVote(args)
-// 4. Serialize the returned reply to JSON
-// 5. Send back in communication.Response
