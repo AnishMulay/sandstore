@@ -8,7 +8,7 @@ import (
 	"github.com/AnishMulay/sandstore/internal/communication"
 	grpccomm "github.com/AnishMulay/sandstore/internal/communication/grpc"
 	"github.com/AnishMulay/sandstore/internal/log_service"
-	crep "github.com/AnishMulay/sandstore/internal/posix_chunk_replicator/defaultreplicator"
+	crep "github.com/AnishMulay/sandstore/internal/posix_chunk_replicator/default_replicator"
 	pfs "github.com/AnishMulay/sandstore/internal/posix_file_service"
 	raft "github.com/AnishMulay/sandstore/internal/posix_metadata_replicator/raft_replicator"
 	ps "github.com/AnishMulay/sandstore/internal/posix_server"
@@ -82,6 +82,16 @@ func (s *SimplePosixServer) registerPayloads() {
 	// Replicator Payloads
 	s.comm.RegisterPayloadType(ps.MsgPosixRaftRequestVote, reflect.TypeOf(raft.RequestVoteArgs{}))
 	s.comm.RegisterPayloadType(ps.MsgPosixRaftAppendEntries, reflect.TypeOf(raft.AppendEntriesArgs{}))
+}
+
+func (s *SimplePosixServer) RegisterTypedHandler(messageType string, payloadType reflect.Type, handler func(msg communication.Message) (*communication.Response, error)) {
+	// This is a placeholder to satisfy the interface.
+	// In a real implementation, we might want to allow dynamic registration of handlers.
+	// For now, our handleMessage router handles everything.
+	s.ls.Warn(log_service.LogEvent{
+		Message:  "RegisterTypedHandler called but not implemented (using central router)",
+		Metadata: map[string]any{"type": messageType},
+	})
 }
 
 // Central Router for all incoming messages

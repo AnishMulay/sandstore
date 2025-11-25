@@ -1,12 +1,20 @@
 package localdisc
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 
 	"github.com/AnishMulay/sandstore/internal/log_service"
 	"github.com/AnishMulay/sandstore/internal/posix_chunk_replicator"
-	csinternal "github.com/AnishMulay/sandstore/internal/posix_chunk_service/internal"
+)
+
+var (
+	// Chunk operation errors
+	ErrChunkWriteFailed  = errors.New("failed to write chunk")
+	ErrChunkReadFailed   = errors.New("failed to read chunk")
+	ErrChunkDeleteFailed = errors.New("failed to delete chunk")
+	ErrChunkNotFound     = errors.New("chunk not found")
 )
 
 type PosixLocalDiscChunkService struct {
@@ -53,7 +61,7 @@ func (cs *PosixLocalDiscChunkService) WriteChunk(chunkID string, data []byte) er
 			Message:  "Failed to write chunk locally",
 			Metadata: map[string]any{"chunkID": chunkID, "error": err.Error()},
 		})
-		return csinternal.ErrChunkWriteFailed
+		return ErrChunkWriteFailed
 	}
 
 	// 2. Synchronous Replication
@@ -63,12 +71,12 @@ func (cs *PosixLocalDiscChunkService) WriteChunk(chunkID string, data []byte) er
 			Message:  "Replication failed, rolling back local write",
 			Metadata: map[string]any{"chunkID": chunkID, "error": err.Error()},
 		})
-		
+
 		// ROLLBACK: Delete the local file so we don't have inconsistent state
 		// (Data existing locally but considered "failed" by the client)
 		_ = os.Remove(path)
-		
-		return csinternal.ErrChunkWriteFailed
+
+		return ErrChunkWriteFailed
 	}
 
 	cs.ls.Info(log_service.LogEvent{
@@ -94,7 +102,7 @@ func (cs *PosixLocalDiscChunkService) ReadChunk(chunkID string) ([]byte, error) 
 
 	data, err = cs.replicator.FetchReplicatedChunk(chunkID)
 	if err != nil {
-		return nil, csinternal.ErrChunkReadFailed
+		return nil, ErrChunkReadFailed
 	}
 
 	// OPTIONAL: Read Repair (Self-Healing)
@@ -102,7 +110,7 @@ func (cs *PosixLocalDiscChunkService) ReadChunk(chunkID string) ([]byte, error) 
 	go func() {
 		_ = os.WriteFile(path, data, 0644)
 		cs.ls.Info(log_service.LogEvent{
-			Message: "Performed read-repair on chunk",
+			Message:  "Performed read-repair on chunk",
 			Metadata: map[string]any{"chunkID": chunkID},
 		})
 	}()
@@ -112,13 +120,13 @@ func (cs *PosixLocalDiscChunkService) ReadChunk(chunkID string) ([]byte, error) 
 
 func (cs *PosixLocalDiscChunkService) DeleteChunk(chunkID string) error {
 	// We attempt both deletions regardless of errors to ensure eventual consistency
-	
+
 	// 1. Delete local
 	path := cs.chunkPath(chunkID)
 	localErr := os.Remove(path)
 	if localErr != nil && !os.IsNotExist(localErr) {
 		cs.ls.Warn(log_service.LogEvent{
-			Message: "Failed to delete local chunk", 
+			Message:  "Failed to delete local chunk",
 			Metadata: map[string]any{"chunkID": chunkID, "error": localErr.Error()},
 		})
 	}
@@ -127,13 +135,13 @@ func (cs *PosixLocalDiscChunkService) DeleteChunk(chunkID string) error {
 	replicaErr := cs.replicator.DeleteReplicatedChunk(chunkID)
 	if replicaErr != nil {
 		cs.ls.Warn(log_service.LogEvent{
-			Message: "Failed to delete replicated chunks", 
+			Message:  "Failed to delete replicated chunks",
 			Metadata: map[string]any{"chunkID": chunkID, "error": replicaErr.Error()},
 		})
 	}
 
 	if localErr != nil || replicaErr != nil {
-		return csinternal.ErrChunkDeleteFailed
+		return ErrChunkDeleteFailed
 	}
 	return nil
 }

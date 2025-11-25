@@ -21,6 +21,9 @@ type PosixMetadataService interface {
 	// Lookup resolves a child name within a directory to an InodeID.
 	Lookup(ctx context.Context, parentInodeID string, name string) (string, error)
 
+	// LookupPath resolves a full path to an InodeID.
+	LookupPath(ctx context.Context, path string) (string, error)
+
 	// --- 4. ACCESS ---
 	// Access checks if the user (uid/gid) has the requested permission mask for the inode.
 	Access(ctx context.Context, inodeID string, uid, gid uint32, accessMask uint32) error

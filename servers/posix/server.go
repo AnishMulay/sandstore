@@ -14,12 +14,12 @@ import (
 	"github.com/AnishMulay/sandstore/internal/server"
 
 	// POSIX Components
-	chunkrepl "github.com/AnishMulay/sandstore/internal/posix_chunk_replicator/defaultreplicator"
-	chunkservice "github.com/AnishMulay/sandstore/internal/posix_chunk_service/localdisc"
+	chunkrepl "github.com/AnishMulay/sandstore/internal/posix_chunk_replicator/default_replicator"
+	chunkservice "github.com/AnishMulay/sandstore/internal/posix_chunk_service/local_disc"
 	fileservice "github.com/AnishMulay/sandstore/internal/posix_file_service/simple"
 	metadatarepl "github.com/AnishMulay/sandstore/internal/posix_metadata_replicator/raft_replicator"
 	// Note: We imported the in-memory implementation from the location generated previously
-	metadataservice "github.com/AnishMulay/sandstore/internal/metadata_service/inmemory"
+	posixmetadataservice "github.com/AnishMulay/sandstore/internal/posix_metadata_service/inmemory"
 	posixserver "github.com/AnishMulay/sandstore/internal/posix_server/simple"
 )
 
@@ -89,7 +89,7 @@ func Build(opts Options) runnable {
 
 	// 5. Core Services (The Logic Layer)
 	// Metadata
-	ms := metadataservice.NewInMemoryPosixMetadataService(metaRepl, ls)
+	ms := posixmetadataservice.NewInMemoryPosixMetadataService(metaRepl, ls)
 	
 	// Chunks
 	chunkDir := opts.DataDir + "/chunks/" + opts.NodeID

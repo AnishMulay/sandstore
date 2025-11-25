@@ -26,6 +26,7 @@ type RaftPosixMetadataReplicator struct {
 	state       RaftState
 	currentTerm int64
 	votedFor    string
+	voteCount   int
 	log         []LogEntry
 
 	// Volatile State
@@ -168,7 +169,7 @@ func (r *RaftPosixMetadataReplicator) run() {
 				r.mu.Unlock()
 				r.broadcastAppendEntries()
 				r.mu.Lock()
-				
+
 				r.electionResetEvent = time.Now()
 			}
 			r.mu.Unlock()
@@ -193,7 +194,7 @@ func (r *RaftPosixMetadataReplicator) startElection() {
 	}
 
 	votesReceived := 1 // Vote for self
-	
+
 	for _, peer := range peers {
 		go func(peer cluster_service.Node) {
 			args := RequestVoteArgs{
@@ -261,9 +262,9 @@ func (r *RaftPosixMetadataReplicator) broadcastAppendEntries() {
 	savedTerm := r.currentTerm
 	savedCommitIndex := r.commitIndex
 	leaderID := r.id
-	
+
 	nodes, _ := r.clusterService.GetHealthyNodes()
-	
+
 	type peerState struct {
 		node         cluster_service.Node
 		nextIndex    int64
@@ -271,9 +272,9 @@ func (r *RaftPosixMetadataReplicator) broadcastAppendEntries() {
 		prevLogTerm  int64
 		entries      []LogEntry
 	}
-	
+
 	var workList []peerState
-	
+
 	for _, node := range nodes {
 		if node.ID == r.id {
 			continue
@@ -284,13 +285,13 @@ func (r *RaftPosixMetadataReplicator) broadcastAppendEntries() {
 		if nextIdx == 0 {
 			nextIdx = 1
 		}
-		
+
 		prevLogIndex := nextIdx - 1
 		prevLogTerm := r.getLogTerm(prevLogIndex)
 
 		var entries []LogEntry
 		lastLogIdx := r.getLastLogIndex()
-		
+
 		if nextIdx <= lastLogIdx {
 			start := nextIdx - 1
 			if start < int64(len(r.log)) {
@@ -299,7 +300,7 @@ func (r *RaftPosixMetadataReplicator) broadcastAppendEntries() {
 				copy(entries, src)
 			}
 		}
-		
+
 		workList = append(workList, peerState{
 			node:         node,
 			nextIndex:    nextIdx,
@@ -368,11 +369,128 @@ func (r *RaftPosixMetadataReplicator) broadcastAppendEntries() {
 					newNext = 1
 				}
 				r.nextIndex[w.node.ID] = newNext
-				
+
 				if reply.ConflictIndex > 0 {
 					r.nextIndex[w.node.ID] = reply.ConflictIndex
 				}
 			}
 		}(work)
 	}
+}
+
+// --- RPC Handlers ---
+
+func (r *RaftPosixMetadataReplicator) HandleRequestVote(args RequestVoteArgs) (*RequestVoteReply, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	reply := &RequestVoteReply{
+		Term:        r.currentTerm,
+		VoteGranted: false,
+	}
+
+	// 1. Term Check
+	if args.Term > r.currentTerm {
+		r.becomeFollower(args.Term)
+	}
+
+	if args.Term < r.currentTerm {
+		return reply, nil
+	}
+
+	// 2. Vote Check
+	// If we haven't voted, or we voted for this candidate
+	if (r.votedFor == "" || r.votedFor == args.CandidateID) &&
+		r.isLogUpToDate(args.LastLogIndex, args.LastLogTerm) {
+
+		r.votedFor = args.CandidateID
+		r.electionResetEvent = time.Now()
+		reply.VoteGranted = true
+		reply.Term = r.currentTerm
+
+		r.ls.Info(log_service.LogEvent{
+			Message:  "Vote Granted",
+			Metadata: map[string]any{"candidate": args.CandidateID, "term": args.Term},
+		})
+	}
+
+	return reply, nil
+}
+
+func (r *RaftPosixMetadataReplicator) HandleAppendEntries(args AppendEntriesArgs) (*AppendEntriesReply, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	reply := &AppendEntriesReply{
+		Term:    r.currentTerm,
+		Success: false,
+	}
+
+	// 1. Term Check
+	if args.Term > r.currentTerm {
+		r.becomeFollower(args.Term)
+	}
+
+	if args.Term < r.currentTerm {
+		return reply, nil
+	}
+
+	// We recognize the leader
+	r.electionResetEvent = time.Now()
+	r.leaderID = args.LeaderID
+	if r.state != Follower {
+		r.becomeFollower(args.Term)
+	}
+
+	// 2. Log Consistency Check
+	// Does our log contain an entry at PrevLogIndex with PrevLogTerm?
+	if args.PrevLogIndex > 0 {
+		lastIndex := r.getLastLogIndex()
+		if args.PrevLogIndex > lastIndex {
+			reply.ConflictIndex = lastIndex + 1
+			return reply, nil
+		}
+
+		term := r.getLogTerm(args.PrevLogIndex)
+		if term != args.PrevLogTerm {
+			reply.ConflictTerm = term
+			// Optimization: Find first index of ConflictTerm
+			// For now, just fail
+			return reply, nil
+		}
+	}
+
+	// 3. Append New Entries
+	for i, entry := range args.Entries {
+		index := entry.Index
+		if index > r.getLastLogIndex() {
+			r.log = append(r.log, args.Entries[i:]...)
+			break
+		}
+
+		// If existing entry conflicts (same index, different term), delete existing and all that follow
+		existingTerm := r.getLogTerm(index)
+		if existingTerm != entry.Term {
+			// Delete from here onwards
+			// Adjust slice index (1-based log index vs 0-based slice)
+			sliceIdx := index - 1
+			r.log = r.log[:sliceIdx]
+			r.log = append(r.log, args.Entries[i:]...)
+			break
+		}
+	}
+
+	// 4. Update Commit Index
+	if args.LeaderCommit > r.commitIndex {
+		lastNewIndex := args.PrevLogIndex + int64(len(args.Entries))
+		if args.LeaderCommit < lastNewIndex {
+			r.commitIndex = args.LeaderCommit
+		} else {
+			r.commitIndex = lastNewIndex
+		}
+		r.applyLogs()
+	}
+
+	reply.Success = true
+	return reply, nil
 }

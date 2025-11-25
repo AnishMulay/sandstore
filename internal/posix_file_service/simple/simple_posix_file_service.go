@@ -2,12 +2,10 @@ package simple
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/AnishMulay/sandstore/internal/log_service"
 	pcs "github.com/AnishMulay/sandstore/internal/posix_chunk_service"
-	pfs "github.com/AnishMulay/sandstore/internal/posix_file_service"
 	pfsinternal "github.com/AnishMulay/sandstore/internal/posix_file_service/internal"
 	pms "github.com/AnishMulay/sandstore/internal/posix_metadata_service"
 	"github.com/google/uuid"
@@ -15,14 +13,14 @@ import (
 
 type SimplePosixFileService struct {
 	ms        pms.PosixMetadataService
-	cs        pcs.ChunkService
+	cs        pcs.PosixChunkService
 	ls        log_service.LogService
 	chunkSize int64
 }
 
 func NewSimplePosixFileService(
 	ms pms.PosixMetadataService,
-	cs pcs.ChunkService,
+	cs pcs.PosixChunkService,
 	ls log_service.LogService,
 ) *SimplePosixFileService {
 	return &SimplePosixFileService{
@@ -95,7 +93,7 @@ func (s *SimplePosixFileService) Read(ctx context.Context, inodeID string, offse
 	// 3. Calculate Chunks
 	startChunkIdx := offset / s.chunkSize
 	endChunkIdx := (offset + length - 1) / s.chunkSize
-	
+
 	result := make([]byte, length)
 	resultOffset := 0
 
@@ -113,7 +111,7 @@ func (s *SimplePosixFileService) Read(ctx context.Context, inodeID string, offse
 		if i == startChunkIdx {
 			chunkReadStart = offset - chunkPos
 		}
-		
+
 		chunkReadEnd := s.chunkSize
 		if i == endChunkIdx {
 			chunkReadEnd = (offset + length) - chunkPos
@@ -123,7 +121,7 @@ func (s *SimplePosixFileService) Read(ctx context.Context, inodeID string, offse
 		data, err := s.cs.ReadChunk(chunkID)
 		if err != nil {
 			s.ls.Error(log_service.LogEvent{
-				Message: "Failed to read chunk", 
+				Message:  "Failed to read chunk",
 				Metadata: map[string]any{"chunkID": chunkID, "error": err.Error()},
 			})
 			return nil, pfsinternal.ErrChunkActionFailed
@@ -163,7 +161,7 @@ func (s *SimplePosixFileService) Write(ctx context.Context, inodeID string, offs
 	// Logic: If we write past the current last chunk, we need new chunk IDs.
 	endPos := offset + int64(len(data))
 	maxChunkIdx := (endPos - 1) / s.chunkSize
-	
+
 	// Clone the list to modify
 	newChunkList := make([]string, len(inode.ChunkList))
 	copy(newChunkList, inode.ChunkList)
@@ -180,20 +178,20 @@ func (s *SimplePosixFileService) Write(ctx context.Context, inodeID string, offs
 
 	for i := startChunkIdx; i <= endChunkIdx; i++ {
 		chunkID := newChunkList[i]
-		
+
 		// Calculate boundaries relative to this chunk
 		chunkStartPos := i * s.chunkSize
-		
+
 		writeStartInChunk := int64(0)
 		if i == startChunkIdx {
 			writeStartInChunk = offset - chunkStartPos
 		}
-		
+
 		writeEndInChunk := s.chunkSize
 		if i == endChunkIdx {
 			writeEndInChunk = endPos - chunkStartPos
 		}
-		
+
 		bytesToWrite := writeEndInChunk - writeStartInChunk
 		chunkDataToWrite := data[dataOffset : dataOffset+int(bytesToWrite)]
 
@@ -201,7 +199,7 @@ func (s *SimplePosixFileService) Write(ctx context.Context, inodeID string, offs
 		// We need to read the existing chunk if we are doing a partial overwrite
 		// or if the chunk already exists and we aren't overwriting the whole thing.
 		var finalChunkData []byte
-		
+
 		// Check if we are overwriting the entire 8MB chunk (Optimization: skip read)
 		isFullOverwrite := writeStartInChunk == 0 && writeEndInChunk == s.chunkSize
 		// Also check if this is a brand new chunk (nothing to read)
@@ -210,7 +208,7 @@ func (s *SimplePosixFileService) Write(ctx context.Context, inodeID string, offs
 		if isFullOverwrite || (isNewChunk && writeStartInChunk == 0) {
 			finalChunkData = chunkDataToWrite
 			// Pad with zeros if it's a new chunk but we aren't filling it to 8MB?
-			// Usually ChunkService just stores what we give. 
+			// Usually ChunkService just stores what we give.
 			// But for random access, we prefer fixed size blocks or handle partials.
 			// Let's assume we just write the bytes we have for the tail.
 		} else {
@@ -219,12 +217,12 @@ func (s *SimplePosixFileService) Write(ctx context.Context, inodeID string, offs
 			if !isNewChunk {
 				existingData, err = s.cs.ReadChunk(chunkID)
 				if err != nil {
-					// If read fails, we might assume it's empty/lost? 
+					// If read fails, we might assume it's empty/lost?
 					// Strict consistency says fail.
 					return 0, pfsinternal.ErrChunkActionFailed
 				}
 			}
-			
+
 			// Create a buffer of ChunkSize (or enough to hold existing + new)
 			// Standard logic: expand existing data to ChunkSize if needed
 			bufferSize := s.chunkSize
@@ -232,13 +230,13 @@ func (s *SimplePosixFileService) Write(ctx context.Context, inodeID string, offs
 				bufferSize = int64(len(existingData))
 			}
 			// If this is the last chunk, it might be smaller
-			
+
 			finalChunkData = make([]byte, bufferSize)
 			copy(finalChunkData, existingData) // Copy old
-			
+
 			// Overlay new
 			copy(finalChunkData[writeStartInChunk:], chunkDataToWrite)
-			
+
 			// Trim to actual size if it's the last chunk?
 			// Usually chunks 0..N-1 are full size. Chunk N is partial.
 			if i == endChunkIdx {
@@ -256,7 +254,7 @@ func (s *SimplePosixFileService) Write(ctx context.Context, inodeID string, offs
 		if err := s.cs.WriteChunk(chunkID, finalChunkData); err != nil {
 			return 0, pfsinternal.ErrChunkActionFailed
 		}
-		
+
 		dataOffset += int(bytesToWrite)
 	}
 
@@ -309,7 +307,7 @@ func (s *SimplePosixFileService) Remove(ctx context.Context, parentInodeID strin
 			// Best effort delete
 			if err := s.cs.DeleteChunk(chunkID); err != nil {
 				s.ls.Warn(log_service.LogEvent{
-					Message: "Failed to GC chunk after remove",
+					Message:  "Failed to GC chunk after remove",
 					Metadata: map[string]any{"chunkID": chunkID},
 				})
 			}

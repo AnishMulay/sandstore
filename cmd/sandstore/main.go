@@ -5,9 +5,9 @@ import (
 	"log"
 	"strings"
 
-	"[github.com/AnishMulay/sandstore/servers/posix](https://github.com/AnishMulay/sandstore/servers/posix)"
-	"[github.com/AnishMulay/sandstore/servers/raft](https://github.com/AnishMulay/sandstore/servers/raft)"
-	"[github.com/AnishMulay/sandstore/servers/simple](https://github.com/AnishMulay/sandstore/servers/simple)"
+	"github.com/AnishMulay/sandstore/servers/posix"
+	"github.com/AnishMulay/sandstore/servers/raft"
+	"github.com/AnishMulay/sandstore/servers/simple"
 )
 
 func main() {

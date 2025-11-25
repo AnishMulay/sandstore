@@ -57,6 +57,8 @@ type Attributes struct {
 	AccessTime time.Time
 	ModifyTime time.Time
 	ChangeTime time.Time
+	UID        uint32
+	GID        uint32
 }
 
 type FileSystemStats struct {
@@ -65,4 +67,24 @@ type FileSystemStats struct {
 	TotalInodes int64
 	UsedInodes  int64
 	BlockSize   int64
+}
+
+type DirEntry struct {
+	Name    string
+	InodeID string
+	Type    InodeType
+}
+
+type DirEntryPlus struct {
+	Name    string
+	InodeID string
+	Type    InodeType
+	Inode   *Attributes
+}
+
+type FileSystemInfo struct {
+	FsID            string
+	MaxFileSize     int64
+	MaxFilenameSize int
+	ChunkSize       int64
 }

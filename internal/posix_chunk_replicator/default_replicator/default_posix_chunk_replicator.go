@@ -8,7 +8,6 @@ import (
 	"github.com/AnishMulay/sandstore/internal/cluster_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/log_service"
-	"github.com/AnishMulay/sandstore/internal/posix_chunk_replicator"
 	printernal "github.com/AnishMulay/sandstore/internal/posix_chunk_replicator/internal"
 )
 
@@ -174,10 +173,10 @@ func (r *DefaultPosixChunkReplicator) DeleteReplicatedChunk(chunkID string) erro
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		_, err := r.comm.Send(ctx, node.Address, msg)
 		cancel()
-		
+
 		if err != nil {
 			r.ls.Debug(log_service.LogEvent{
-				Message: "Failed to send delete to node",
+				Message:  "Failed to send delete to node",
 				Metadata: map[string]any{"node": node.Address, "error": err.Error()},
 			})
 		}

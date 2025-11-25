@@ -2,7 +2,7 @@ package raft_replicator
 
 import (
 	"math/rand"
-	"sort"
+	"time"
 
 	"github.com/AnishMulay/sandstore/internal/log_service"
 )
@@ -13,9 +13,9 @@ func (r *RaftPosixMetadataReplicator) becomeFollower(term int64) {
 	r.currentTerm = term
 	r.votedFor = ""
 	r.electionResetEvent = time.Now()
-	
+
 	r.ls.Info(log_service.LogEvent{
-		Message: "Became Follower", 
+		Message:  "Became Follower",
 		Metadata: map[string]any{"term": term},
 	})
 }
@@ -29,7 +29,7 @@ func (r *RaftPosixMetadataReplicator) becomeCandidate() {
 	r.electionResetEvent = time.Now()
 
 	r.ls.Info(log_service.LogEvent{
-		Message: "Became Candidate", 
+		Message:  "Became Candidate",
 		Metadata: map[string]any{"term": r.currentTerm},
 	})
 }
@@ -38,7 +38,7 @@ func (r *RaftPosixMetadataReplicator) becomeCandidate() {
 func (r *RaftPosixMetadataReplicator) becomeLeader() {
 	r.state = Leader
 	r.leaderID = r.id
-	
+
 	// Reinitialize volatile leader state
 	// nextIndex: index of the next log entry to send to that server (initialized to leader last log index + 1)
 	// matchIndex: index of highest log entry known to be replicated on server (initialized to 0)
@@ -49,10 +49,10 @@ func (r *RaftPosixMetadataReplicator) becomeLeader() {
 	}
 
 	r.ls.Info(log_service.LogEvent{
-		Message: "Became Leader", 
+		Message:  "Became Leader",
 		Metadata: map[string]any{"term": r.currentTerm},
 	})
-	
+
 	// Send initial heartbeat immediately
 	r.broadcastAppendEntries()
 }
@@ -104,7 +104,7 @@ func (r *RaftPosixMetadataReplicator) isLogUpToDate(cLastIndex, cLastTerm int64)
 func (r *RaftPosixMetadataReplicator) advanceCommitIndex() {
 	// If there exists an N such that N > commitIndex, a majority of matchIndex[i] ≥ N,
 	// and log[N].term == currentTerm: set commitIndex = N
-	
+
 	if r.state != Leader {
 		return
 	}
@@ -135,7 +135,7 @@ func (r *RaftPosixMetadataReplicator) advanceCommitIndex() {
 		if matchCount >= quorum {
 			r.commitIndex = n
 			r.ls.Info(log_service.LogEvent{
-				Message: "Commit Index Advanced", 
+				Message:  "Commit Index Advanced",
 				Metadata: map[string]any{"newCommitIndex": n},
 			})
 			r.applyLogs()
@@ -149,9 +149,9 @@ func (r *RaftPosixMetadataReplicator) applyLogs() {
 	for r.lastApplied < r.commitIndex {
 		r.lastApplied++
 		entry := r.log[r.lastApplied-1] // Adjust for slice index
-		
+
 		r.ls.Debug(log_service.LogEvent{
-			Message: "Applying Entry", 
+			Message:  "Applying Entry",
 			Metadata: map[string]any{"index": entry.Index},
 		})
 
@@ -160,7 +160,7 @@ func (r *RaftPosixMetadataReplicator) applyLogs() {
 			err := r.applier(entry.Data)
 			if err != nil {
 				r.ls.Error(log_service.LogEvent{
-					Message: "Service failed to apply log entry", 
+					Message:  "Service failed to apply log entry",
 					Metadata: map[string]any{"index": entry.Index, "error": err.Error()},
 				})
 				// In a real system, we might panic here because state machine divergence is fatal
@@ -175,7 +175,7 @@ func (r *RaftPosixMetadataReplicator) applyLogs() {
 func (r *RaftPosixMetadataReplicator) notifyPendingRequest(index int64, err error) {
 	r.pendingMu.Lock()
 	defer r.pendingMu.Unlock()
-	
+
 	if ch, ok := r.pendingRequests[index]; ok {
 		select {
 		case ch <- err:
