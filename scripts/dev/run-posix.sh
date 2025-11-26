@@ -25,7 +25,7 @@ start_node() {
     "$BIN" \
         --server posix \
         --node-id "$id" \
-        --listen ":$port" \
+        --listen "127.0.0.1:$port" \
         --data-dir "$RUN/$id" \
         --seeds "$SEEDS" > "$RUN/$id/stdout.log" 2>&1 &
 }

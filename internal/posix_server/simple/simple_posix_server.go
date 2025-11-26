@@ -81,7 +81,7 @@ func (s *SimplePosixServer) registerPayloads() {
 
 	// Replicator Payloads
 	s.comm.RegisterPayloadType(ps.MsgPosixRaftRequestVote, reflect.TypeOf(raft.RequestVoteArgs{}))
-	s.comm.RegisterPayloadType(ps.MsgPosixRaftAppendEntries, reflect.TypeOf(raft.AppendEntriesArgs{}))
+	s.comm.RegisterPayloadType(ps.MsgPosixRaftAppendEntries, reflect.TypeOf(communication.AppendEntriesRequest{}))
 }
 
 func (s *SimplePosixServer) RegisterTypedHandler(messageType string, payloadType reflect.Type, handler func(msg communication.Message) (*communication.Response, error)) {
@@ -206,7 +206,7 @@ func (s *SimplePosixServer) handleMessage(msg communication.Message) (*communica
 		return s.respond(res, err)
 
 	case ps.MsgPosixRaftAppendEntries:
-		req := msg.Payload.(raft.AppendEntriesArgs)
+		req := msg.Payload.(communication.AppendEntriesRequest)
 		res, err := s.metaRepl.HandleAppendEntries(req)
 		return s.respond(res, err)
 

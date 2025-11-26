@@ -54,7 +54,7 @@ func (s *singleNodeServer) Run() error {
 func Build(opts Options) runnable {
 	// 1. Logging
 	logDir := opts.DataDir + "/logs"
-	ls := locallog.NewLocalDiscLogService(logDir, opts.NodeID, logservice.InfoLevel)
+	ls := locallog.NewLocalDiscLogService(logDir, opts.NodeID, logservice.DebugLevel)
 
 	// 2. Communication
 	// Note: We use the GRPC communicator which supports dynamic type registration

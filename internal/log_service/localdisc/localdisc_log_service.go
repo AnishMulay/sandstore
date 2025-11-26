@@ -36,7 +36,7 @@ func NewLocalDiscLogService(logDir string, nodeID string, minLogLevel ...string)
 		logDir:        logDir,
 		nodeID:        nodeID,
 		logger:        log.New(file, "", 0),
-		filterEnabled: false,
+		filterEnabled: true, // Always filter by default
 		minLevel:      log_service.DebugLevelValue,
 	}
 

@@ -186,6 +186,18 @@ func (r *RaftPosixMetadataReplicator) startElection() {
 	r.ls.Info(log_service.LogEvent{Message: "Starting Election", Metadata: map[string]any{"term": savedTerm}})
 
 	nodes, _ := r.clusterService.GetHealthyNodes()
+
+	// Quorum is based on total known nodes
+	// Ideally strictly based on config, but here based on discovery
+	totalNodes := len(nodes)
+	quorum := (totalNodes / 2) + 1
+
+	// If single node cluster, win immediately
+	if totalNodes == 1 {
+		r.becomeLeader()
+		return
+	}
+
 	var peers []cluster_service.Node
 	for _, n := range nodes {
 		if n.ID != r.id {
@@ -193,7 +205,9 @@ func (r *RaftPosixMetadataReplicator) startElection() {
 		}
 	}
 
-	votesReceived := 1 // Vote for self
+	// State for the election
+	var votesReceived int32 = 1 // Vote for self
+	var voteMu sync.Mutex
 
 	for _, peer := range peers {
 		go func(peer cluster_service.Node) {
@@ -204,21 +218,25 @@ func (r *RaftPosixMetadataReplicator) startElection() {
 				LastLogTerm:  savedLastLogTerm,
 			}
 
-			// Send RPC
 			msg := communication.Message{
 				From:    r.comm.Address(),
-				Type:    communication.MessageTypeRequestVote, // Ensure this is defined in communication package
+				Type:    "posix_raft_request_vote", // Use string literal to avoid circular dependency
 				Payload: args,
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 
 			resp, err := r.comm.Send(ctx, peer.Address, msg)
 			if err != nil {
-				return // Fail silently
+				r.ls.Debug(log_service.LogEvent{
+					Message:  "Vote Request Failed",
+					Metadata: map[string]any{"peer": peer.Address, "error": err.Error()},
+				})
+				return
 			}
 
+			// Verify response code
 			if resp.Code != communication.CodeOK {
 				return
 			}
@@ -228,10 +246,10 @@ func (r *RaftPosixMetadataReplicator) startElection() {
 				return
 			}
 
-			// Handle Reply
 			r.mu.Lock()
 			defer r.mu.Unlock()
 
+			// Guard: If state changed, ignore
 			if r.state != Candidate || r.currentTerm != savedTerm {
 				return
 			}
@@ -242,11 +260,32 @@ func (r *RaftPosixMetadataReplicator) startElection() {
 			}
 
 			if reply.VoteGranted {
+				voteMu.Lock()
 				votesReceived++
-				quorum := (len(nodes) / 2) + 1
-				if votesReceived >= quorum {
-					r.ls.Info(log_service.LogEvent{Message: "Election Won", Metadata: map[string]any{"term": r.currentTerm}})
-					r.becomeLeader()
+				currentVotes := votesReceived
+				voteMu.Unlock()
+
+				r.ls.Debug(log_service.LogEvent{
+					Message:  "Vote Granted",
+					Metadata: map[string]any{"from": peer.Address, "votes": currentVotes, "quorum": quorum},
+				})
+
+				// The provided snippet for "Checking Commit Index" and `matchCount` seems to belong to `advanceCommitIndex`.
+				// Assuming the user intended to add this log within `advanceCommitIndex` or a similar commit-related logic.
+				// Since `advanceCommitIndex` is called from `broadcastAppendEntries`, I'll place the log there.
+				// However, the snippet provided is directly in the `startElection` context.
+				// Given the instruction "Add debug logs in broadcastAppendEntries and advanceCommitIndex",
+				// and the content of the log, I will place it in `advanceCommitIndex` as that's where `matchCount` and `n` would be relevant.
+				// The snippet provided in the prompt is syntactically incorrect and contextually misplaced for `startElection`.
+				// I will apply the log to `advanceCommitIndex` as per the instruction's intent.
+
+				if int(currentVotes) >= quorum {
+					// Check again to be sure we didn't already become leader in another goroutine
+					if r.state == Candidate {
+						r.ls.Info(log_service.LogEvent{Message: "Election Won", Metadata: map[string]any{"term": r.currentTerm}})
+						r.becomeLeader()
+						// Force heartbeat immediately handled by becomeLeader
+					}
 				}
 			}
 		}(peer)
@@ -264,6 +303,11 @@ func (r *RaftPosixMetadataReplicator) broadcastAppendEntries() {
 	leaderID := r.id
 
 	nodes, _ := r.clusterService.GetHealthyNodes()
+
+	r.ls.Debug(log_service.LogEvent{
+		Message:  "Broadcasting AppendEntries",
+		Metadata: map[string]any{"peers": len(nodes), "term": r.currentTerm},
+	})
 
 	type peerState struct {
 		node         cluster_service.Node
@@ -313,29 +357,47 @@ func (r *RaftPosixMetadataReplicator) broadcastAppendEntries() {
 
 	for _, work := range workList {
 		go func(w peerState) {
-			args := AppendEntriesArgs{
+			// Serialize entries to match communication.AppendEntriesRequest
+			entriesBytes, err := json.Marshal(w.entries)
+			if err != nil {
+				r.ls.Error(log_service.LogEvent{
+					Message:  "Failed to marshal entries",
+					Metadata: map[string]any{"error": err.Error()},
+				})
+				return
+			}
+
+			args := communication.AppendEntriesRequest{
 				Term:         savedTerm,
 				LeaderID:     leaderID,
 				PrevLogIndex: w.prevLogIndex,
 				PrevLogTerm:  w.prevLogTerm,
-				Entries:      w.entries,
+				Entries:      entriesBytes,
 				LeaderCommit: savedCommitIndex,
 			}
 
 			msg := communication.Message{
 				From:    r.comm.Address(),
-				Type:    communication.MessageTypeAppendEntries,
+				Type:    "posix_raft_append_entries", // Use string literal to match server expectation
 				Payload: args,
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 
 			resp, err := r.comm.Send(ctx, w.node.Address, msg)
 			if err != nil {
+				r.ls.Error(log_service.LogEvent{
+					Message:  "AppendEntries Failed",
+					Metadata: map[string]any{"to": w.node.Address, "error": err.Error()},
+				})
 				return
 			}
 			if resp.Code != communication.CodeOK {
+				r.ls.Debug(log_service.LogEvent{
+					Message:  "AppendEntries Response Not OK",
+					Metadata: map[string]any{"to": w.node.Address, "code": resp.Code, "body": string(resp.Body)},
+				})
 				return
 			}
 
@@ -364,6 +426,10 @@ func (r *RaftPosixMetadataReplicator) broadcastAppendEntries() {
 					r.advanceCommitIndex()
 				}
 			} else {
+				r.ls.Debug(log_service.LogEvent{
+					Message:  "AppendEntries Rejected",
+					Metadata: map[string]any{"to": w.node.Address, "term": reply.Term, "conflict": reply.ConflictIndex},
+				})
 				newNext := r.nextIndex[w.node.ID] - 1
 				if newNext < 1 {
 					newNext = 1
@@ -417,7 +483,7 @@ func (r *RaftPosixMetadataReplicator) HandleRequestVote(args RequestVoteArgs) (*
 	return reply, nil
 }
 
-func (r *RaftPosixMetadataReplicator) HandleAppendEntries(args AppendEntriesArgs) (*AppendEntriesReply, error) {
+func (r *RaftPosixMetadataReplicator) HandleAppendEntries(req communication.AppendEntriesRequest) (*AppendEntriesReply, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -426,33 +492,45 @@ func (r *RaftPosixMetadataReplicator) HandleAppendEntries(args AppendEntriesArgs
 		Success: false,
 	}
 
-	// 1. Term Check
-	if args.Term > r.currentTerm {
-		r.becomeFollower(args.Term)
+	// Deserialize entries
+	var entries []LogEntry
+	if len(req.Entries) > 0 {
+		if err := json.Unmarshal(req.Entries, &entries); err != nil {
+			r.ls.Error(log_service.LogEvent{
+				Message:  "Failed to unmarshal entries",
+				Metadata: map[string]any{"error": err.Error()},
+			})
+			return nil, err
+		}
 	}
 
-	if args.Term < r.currentTerm {
+	// 1. Term Check
+	if req.Term > r.currentTerm {
+		r.becomeFollower(req.Term)
+	}
+
+	if req.Term < r.currentTerm {
 		return reply, nil
 	}
 
 	// We recognize the leader
 	r.electionResetEvent = time.Now()
-	r.leaderID = args.LeaderID
+	r.leaderID = req.LeaderID
 	if r.state != Follower {
-		r.becomeFollower(args.Term)
+		r.becomeFollower(req.Term)
 	}
 
 	// 2. Log Consistency Check
 	// Does our log contain an entry at PrevLogIndex with PrevLogTerm?
-	if args.PrevLogIndex > 0 {
+	if req.PrevLogIndex > 0 {
 		lastIndex := r.getLastLogIndex()
-		if args.PrevLogIndex > lastIndex {
+		if req.PrevLogIndex > lastIndex {
 			reply.ConflictIndex = lastIndex + 1
 			return reply, nil
 		}
 
-		term := r.getLogTerm(args.PrevLogIndex)
-		if term != args.PrevLogTerm {
+		term := r.getLogTerm(req.PrevLogIndex)
+		if term != req.PrevLogTerm {
 			reply.ConflictTerm = term
 			// Optimization: Find first index of ConflictTerm
 			// For now, just fail
@@ -461,10 +539,10 @@ func (r *RaftPosixMetadataReplicator) HandleAppendEntries(args AppendEntriesArgs
 	}
 
 	// 3. Append New Entries
-	for i, entry := range args.Entries {
+	for i, entry := range entries {
 		index := entry.Index
 		if index > r.getLastLogIndex() {
-			r.log = append(r.log, args.Entries[i:]...)
+			r.log = append(r.log, entries[i:]...)
 			break
 		}
 
@@ -475,16 +553,16 @@ func (r *RaftPosixMetadataReplicator) HandleAppendEntries(args AppendEntriesArgs
 			// Adjust slice index (1-based log index vs 0-based slice)
 			sliceIdx := index - 1
 			r.log = r.log[:sliceIdx]
-			r.log = append(r.log, args.Entries[i:]...)
+			r.log = append(r.log, entries[i:]...)
 			break
 		}
 	}
 
 	// 4. Update Commit Index
-	if args.LeaderCommit > r.commitIndex {
-		lastNewIndex := args.PrevLogIndex + int64(len(args.Entries))
-		if args.LeaderCommit < lastNewIndex {
-			r.commitIndex = args.LeaderCommit
+	if req.LeaderCommit > r.commitIndex {
+		lastNewIndex := req.PrevLogIndex + int64(len(entries))
+		if req.LeaderCommit < lastNewIndex {
+			r.commitIndex = req.LeaderCommit
 		} else {
 			r.commitIndex = lastNewIndex
 		}

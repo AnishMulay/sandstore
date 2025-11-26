@@ -61,9 +61,9 @@ func (s *InMemoryPosixMetadataService) Start() error {
 	s.mu.Lock()
 	if s.superblock == nil {
 		// Initialize default superblock
-		rootID := uuid.New().String()
+		rootID := "00000000-0000-0000-0000-000000000001"
 		s.superblock = &pms.Superblock{
-			FsID:            uuid.New().String(),
+			FsID:            "00000000-0000-0000-0000-000000000000",
 			RootInodeID:     rootID,
 			ChunkSize:       8 * 1024 * 1024, // 8MB default
 			MaxFilenameSize: 255,
@@ -121,7 +121,7 @@ func (s *InMemoryPosixMetadataService) ApplyTransaction(data []byte) error {
 	defer s.mu.Unlock()
 
 	s.ls.Debug(log_service.LogEvent{
-		Message: "Applying Operation",
+		Message:  "Applying Operation",
 		Metadata: map[string]any{"type": op.Type, "opID": op.OpID},
 	})
 
@@ -153,7 +153,7 @@ func (s *InMemoryPosixMetadataService) applyCreate(op pms.MetadataOperation) err
 	}
 	if _, exists := parent.Children[op.Name]; exists {
 		// Already exists (idempotency or race condition)
-		return nil 
+		return nil
 	}
 
 	// 2. Create Inode
@@ -206,11 +206,11 @@ func (s *InMemoryPosixMetadataService) applyRemove(op pms.MetadataOperation) err
 		// For MVP, we assume no hard links, so 0 means delete.
 		// Directories have LinkCount 2, so decrementing once is fine for logic,
 		// but usually Rmdir forces delete.
-		
+
 		if child.Type == pms.TypeDirectory {
 			parent.LinkCount--
 		}
-		
+
 		delete(s.inodes, childID)
 	}
 
@@ -236,16 +236,16 @@ func (s *InMemoryPosixMetadataService) applyRename(op pms.MetadataOperation) err
 
 	// Remove from source
 	delete(srcParent.Children, op.Name)
-	
+
 	// Handle overwrite at destination
 	if existingID, exists := dstParent.Children[op.DstName]; exists {
 		// "Unlink" the overwritten file
-		delete(s.inodes, existingID) 
+		delete(s.inodes, existingID)
 	}
 
 	// Add to destination
 	dstParent.Children[op.DstName] = childID
-	
+
 	now := time.Unix(0, op.Timestamp)
 	srcParent.ModifyTime = now
 	srcParent.ChangeTime = now
@@ -262,7 +262,7 @@ func (s *InMemoryPosixMetadataService) applySetAttr(op pms.MetadataOperation) er
 	}
 
 	now := time.Unix(0, op.Timestamp)
-	
+
 	if op.SetMode != nil {
 		inode.Mode = *op.SetMode
 	}
@@ -278,7 +278,7 @@ func (s *InMemoryPosixMetadataService) applySetAttr(op pms.MetadataOperation) er
 	if op.SetMTime != nil {
 		inode.ModifyTime = time.Unix(0, *op.SetMTime)
 	}
-	
+
 	inode.ChangeTime = now
 	return nil
 }
@@ -298,10 +298,10 @@ func (s *InMemoryPosixMetadataService) applyUpdateInode(op pms.MetadataOperation
 	if op.SetMTime != nil {
 		inode.ModifyTime = time.Unix(0, *op.SetMTime)
 	}
-	
+
 	inode.VersionNumber++
 	inode.ChangeTime = time.Unix(0, op.Timestamp)
-	
+
 	return nil
 }
 
@@ -359,27 +359,27 @@ func (s *InMemoryPosixMetadataService) LookupPath(ctx context.Context, path stri
 
 	// Start at root
 	currentID := s.superblock.RootInodeID
-	
+
 	// Clean path
 	parts := strings.Split(strings.Trim(path, "/"), "/")
-	
+
 	for _, part := range parts {
 		if part == "" || part == "." {
 			continue
 		}
-		
+
 		inode, exists := s.inodes[currentID]
 		if !exists {
 			return "", ErrNotFound
 		}
-		
+
 		if inode.Type != pms.TypeDirectory {
 			return "", ErrNotDir
 		}
-		
+
 		// ".." handling could be added here if we stored ParentID in Inode,
 		// but for simple LookupPath, strictly hierarchical descent is common.
-		
+
 		nextID, found := inode.Children[part]
 		if !found {
 			return "", ErrNotFound
@@ -419,7 +419,7 @@ func (s *InMemoryPosixMetadataService) Access(ctx context.Context, inodeID strin
 	if (granted & accessMask) == accessMask {
 		return nil
 	}
-	
+
 	// This returns a generic error, but in a real system would be EACCES
 	return fmt.Errorf("permission denied")
 }
@@ -432,7 +432,7 @@ func (s *InMemoryPosixMetadataService) GetInode(ctx context.Context, inodeID str
 	if !exists {
 		return nil, ErrNotFound
 	}
-	
+
 	// Return copy to prevent external mutation
 	clone := *inode
 	// Deep copy slices/maps if we were rigorous, but strictly speaking
@@ -456,8 +456,8 @@ func (s *InMemoryPosixMetadataService) ReadDir(ctx context.Context, inodeID stri
 	// Pagination logic for Go Maps is tricky because iteration order is random.
 	// A robust system would maintain a sorted list of children keys.
 	// FOR MVP: We will slurp all keys, sort them (for determinism), and slice.
-	// Performance warning: O(N) every call. 
-	
+	// Performance warning: O(N) every call.
+
 	// Note: Since we want "Simplicity" and "Correctness" over "High Perf" for MVP:
 	// We collect all entries.
 	var allEntries []pms.DirEntry
@@ -485,7 +485,7 @@ func (s *InMemoryPosixMetadataService) ReadDir(ctx context.Context, inodeID stri
 
 	result := allEntries[cookie:end]
 	eof := end == len(allEntries)
-	
+
 	return result, end, eof, nil
 }
 

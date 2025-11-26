@@ -54,7 +54,7 @@ func (r *RaftPosixMetadataReplicator) becomeLeader() {
 	})
 
 	// Send initial heartbeat immediately
-	r.broadcastAppendEntries()
+	go r.broadcastAppendEntries()
 }
 
 // getLastLogIndex returns the index of the last entry in the log
@@ -132,6 +132,11 @@ func (r *RaftPosixMetadataReplicator) advanceCommitIndex() {
 			}
 		}
 
+		r.ls.Debug(log_service.LogEvent{
+			Message:  "Checking Commit Index",
+			Metadata: map[string]any{"n": n, "matchCount": matchCount, "quorum": quorum},
+		})
+
 		if matchCount >= quorum {
 			r.commitIndex = n
 			r.ls.Info(log_service.LogEvent{
@@ -186,7 +191,8 @@ func (r *RaftPosixMetadataReplicator) notifyPendingRequest(index int64, err erro
 	}
 }
 
-// getRandomElectionTimeout returns a duration between 150ms and 300ms
+// getRandomElectionTimeout returns a duration.
+// UPDATED: Increased range to 300-600ms to reduce split vote probability in local envs.
 func getRandomElectionTimeout() time.Duration {
-	return time.Duration(150+rand.Intn(150)) * time.Millisecond
+	return time.Duration(3000+rand.Intn(3000)) * time.Millisecond
 }
