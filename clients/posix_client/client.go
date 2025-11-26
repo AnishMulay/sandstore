@@ -7,6 +7,7 @@ import (
 	"log"
 	"reflect"
 	"strings"
+	"time"
 
 	"github.com/AnishMulay/sandstore/internal/cluster_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
@@ -27,6 +28,7 @@ func main() {
 
 	ctx := context.Background()
 
+	time.Sleep(time.Second)
 	rootID := doLookupPath(ctx, comm, serverAddr, "/")
 	log.Printf("--- Starting Test Operations (Discovered Root Inode ID: %s) ---\n", rootID)
 
@@ -37,14 +39,17 @@ func main() {
 		Name:     filePath,
 		Mode:     0644, UID: 1000, GID: 1000,
 	}
+	time.Sleep(time.Second)
 	sendRequest(ctx, comm, serverAddr, ps.MsgPosixCreate, createReq)
 
 	// We need the new file's Inode ID for subsequent operations
+	time.Sleep(time.Second)
 	fileID := doLookup(ctx, comm, serverAddr, rootID, filePath)
 	log.Printf("   File created with InodeID: %s\n", fileID)
 
 	// 2. Read the empty file
 	log.Println("2. Reading the empty file...")
+	time.Sleep(time.Second)
 	readReqEmpty := ps.ReadRequest{InodeID: fileID, Offset: 0, Length: 1024}
 	sendRequest(ctx, comm, serverAddr, ps.MsgPosixRead, readReqEmpty)
 
@@ -55,10 +60,12 @@ func main() {
 		Offset:  0,
 		Data:    []byte(fileData),
 	}
+	time.Sleep(time.Second)
 	sendRequest(ctx, comm, serverAddr, ps.MsgPosixWrite, writeReq)
 
 	// 4. Read the file again to verify content
 	log.Println("4. Reading the file again to verify content...")
+	time.Sleep(time.Second)
 	readReqFull := ps.ReadRequest{InodeID: fileID, Offset: 0, Length: 1024}
 	sendRequest(ctx, comm, serverAddr, ps.MsgPosixRead, readReqFull)
 

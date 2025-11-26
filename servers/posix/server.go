@@ -54,7 +54,7 @@ func (s *singleNodeServer) Run() error {
 func Build(opts Options) runnable {
 	// 1. Logging
 	logDir := opts.DataDir + "/logs"
-	ls := locallog.NewLocalDiscLogService(logDir, opts.NodeID, logservice.DebugLevel)
+	ls := locallog.NewLocalDiscLogService(logDir, opts.NodeID, logservice.InfoLevel)
 
 	// 2. Communication
 	// Note: We use the GRPC communicator which supports dynamic type registration
@@ -80,7 +80,7 @@ func Build(opts Options) runnable {
 		Address: opts.ListenAddr,
 		Healthy: true,
 	})
-	
+
 	clusterService := clusterinmemory.NewInMemoryClusterService(nodes, ls)
 
 	// 4. Replicators (The Consensus/Network Layer)
@@ -90,16 +90,16 @@ func Build(opts Options) runnable {
 	// 5. Core Services (The Logic Layer)
 	// Metadata
 	ms := posixmetadataservice.NewInMemoryPosixMetadataService(metaRepl, ls)
-	
+
 	// Chunks
 	chunkDir := opts.DataDir + "/chunks/" + opts.NodeID
-	cs := chunkservice.NewPosixLocalDiscChunkService(chunkDir, ls, chunkRepl, 3) // Replication factor 3
+	cs := chunkservice.NewPosixLocalDiscChunkService(chunkDir, ls, chunkRepl, 2) // Replication factor 3
 
 	// File Service (Orchestrator)
 	fs := fileservice.NewSimplePosixFileService(ms, cs, ls)
 
 	// 6. Server (The Gateway)
-	srv := posixserver.NewSimplePosixServer(comm, fs, ls, metaRepl, chunkRepl)
+	srv := posixserver.NewSimplePosixServer(comm, fs, cs, ls, metaRepl, chunkRepl)
 
 	return &singleNodeServer{server: srv}
 }

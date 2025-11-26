@@ -9,6 +9,7 @@ import (
 	grpccomm "github.com/AnishMulay/sandstore/internal/communication/grpc"
 	"github.com/AnishMulay/sandstore/internal/log_service"
 	crep "github.com/AnishMulay/sandstore/internal/posix_chunk_replicator/default_replicator"
+	pcs "github.com/AnishMulay/sandstore/internal/posix_chunk_service"
 	pfs "github.com/AnishMulay/sandstore/internal/posix_file_service"
 	raft "github.com/AnishMulay/sandstore/internal/posix_metadata_replicator/raft_replicator"
 	ps "github.com/AnishMulay/sandstore/internal/posix_server"
@@ -17,6 +18,7 @@ import (
 type SimplePosixServer struct {
 	comm      *grpccomm.GRPCCommunicator
 	fs        pfs.PosixFileService
+	cs        pcs.PosixChunkService
 	ls        log_service.LogService
 	metaRepl  *raft.RaftPosixMetadataReplicator
 	chunkRepl *crep.DefaultPosixChunkReplicator
@@ -25,6 +27,7 @@ type SimplePosixServer struct {
 func NewSimplePosixServer(
 	comm *grpccomm.GRPCCommunicator,
 	fs pfs.PosixFileService,
+	cs pcs.PosixChunkService,
 	ls log_service.LogService,
 	metaRepl *raft.RaftPosixMetadataReplicator,
 	chunkRepl *crep.DefaultPosixChunkReplicator,
@@ -32,6 +35,7 @@ func NewSimplePosixServer(
 	return &SimplePosixServer{
 		comm:      comm,
 		fs:        fs,
+		cs:        cs,
 		ls:        ls,
 		metaRepl:  metaRepl,
 		chunkRepl: chunkRepl,
@@ -83,6 +87,15 @@ func (s *SimplePosixServer) registerPayloads() {
 	// Replicator Payloads
 	s.comm.RegisterPayloadType(ps.MsgPosixRaftRequestVote, reflect.TypeOf(raft.RequestVoteArgs{}))
 	s.comm.RegisterPayloadType(ps.MsgPosixRaftAppendEntries, reflect.TypeOf(communication.AppendEntriesRequest{}))
+
+	// Chunk Replication Payloads
+	s.comm.RegisterPayloadType(ps.MsgPosixChunkWrite, reflect.TypeOf(communication.PosixWriteChunkRequest{}))
+	s.comm.RegisterPayloadType(ps.MsgPosixChunkRead, reflect.TypeOf(communication.PosixReadChunkRequest{}))
+	s.comm.RegisterPayloadType(ps.MsgPosixChunkDelete, reflect.TypeOf(communication.PosixDeleteChunkRequest{}))
+	// Also register the communication constants used by the chunk replicator
+	s.comm.RegisterPayloadType(communication.MessageTypePosixWriteChunk, reflect.TypeOf(communication.PosixWriteChunkRequest{}))
+	s.comm.RegisterPayloadType(communication.MessageTypePosixReadChunk, reflect.TypeOf(communication.PosixReadChunkRequest{}))
+	s.comm.RegisterPayloadType(communication.MessageTypePosixDeleteChunk, reflect.TypeOf(communication.PosixDeleteChunkRequest{}))
 }
 
 func (s *SimplePosixServer) RegisterTypedHandler(messageType string, payloadType reflect.Type, handler func(msg communication.Message) (*communication.Response, error)) {
@@ -205,6 +218,28 @@ func (s *SimplePosixServer) handleMessage(msg communication.Message) (*communica
 	case ps.MsgPosixFsInfo:
 		info, err := s.fs.GetFsInfo(ctx)
 		return s.respond(info, err)
+
+	// --- CHUNK REPLICATION (LOCAL ONLY) ---
+	case ps.MsgPosixChunkWrite, communication.MessageTypePosixWriteChunk:
+		req := msg.Payload.(communication.PosixWriteChunkRequest)
+		err := s.cs.WriteChunkLocal(req.ChunkID, req.Data)
+		return s.respond(nil, err)
+
+	case ps.MsgPosixChunkRead, communication.MessageTypePosixReadChunk:
+		req := msg.Payload.(communication.PosixReadChunkRequest)
+		data, err := s.cs.ReadChunkLocal(req.ChunkID)
+		if err != nil {
+			return s.respond(nil, err)
+		}
+		return &communication.Response{Code: communication.CodeOK, Body: data}, nil
+
+	case ps.MsgPosixChunkDelete, communication.MessageTypePosixDeleteChunk:
+		req := msg.Payload.(communication.PosixDeleteChunkRequest)
+		err := s.cs.DeleteChunkLocal(req.ChunkID)
+		if err != nil {
+			return s.respond(nil, err)
+		}
+		return s.respond(nil, nil)
 
 	// --- REPLICATOR OPERATIONS (Raft) ---
 	case ps.MsgPosixRaftRequestVote:
