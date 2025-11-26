@@ -66,6 +66,7 @@ func (s *SimplePosixServer) registerPayloads() {
 	s.comm.RegisterPayloadType(ps.MsgPosixGetAttr, reflect.TypeOf(ps.GetAttrRequest{}))
 	s.comm.RegisterPayloadType(ps.MsgPosixSetAttr, reflect.TypeOf(ps.SetAttrRequest{}))
 	s.comm.RegisterPayloadType(ps.MsgPosixLookup, reflect.TypeOf(ps.LookupRequest{}))
+	s.comm.RegisterPayloadType(ps.MsgPosixLookupPath, reflect.TypeOf(ps.LookupPathRequest{}))
 	s.comm.RegisterPayloadType(ps.MsgPosixAccess, reflect.TypeOf(ps.AccessRequest{}))
 	s.comm.RegisterPayloadType(ps.MsgPosixRead, reflect.TypeOf(ps.ReadRequest{}))
 	s.comm.RegisterPayloadType(ps.MsgPosixWrite, reflect.TypeOf(ps.WriteRequest{}))
@@ -115,6 +116,12 @@ func (s *SimplePosixServer) handleMessage(msg communication.Message) (*communica
 	case ps.MsgPosixLookup:
 		req := msg.Payload.(ps.LookupRequest)
 		id, err := s.fs.Lookup(ctx, req.ParentID, req.Name)
+		return s.respond(id, err)
+
+	// --- 3a. LOOKUP PATH ---
+	case ps.MsgPosixLookupPath:
+		req := msg.Payload.(ps.LookupPathRequest)
+		id, err := s.fs.LookupPath(ctx, req.Path)
 		return s.respond(id, err)
 
 	// --- 4. ACCESS ---

@@ -6,6 +6,7 @@ const (
 	MsgPosixGetAttr     = "posix_getattr"
 	MsgPosixSetAttr     = "posix_setattr"
 	MsgPosixLookup      = "posix_lookup"
+	MsgPosixLookupPath  = "posix_lookuppath"
 	MsgPosixAccess      = "posix_access"
 	MsgPosixRead        = "posix_read"
 	MsgPosixWrite       = "posix_write"
@@ -22,7 +23,7 @@ const (
 	// Raft Operations (for the Replicator)
 	MsgPosixRaftRequestVote   = "posix_raft_request_vote"
 	MsgPosixRaftAppendEntries = "posix_raft_append_entries"
-	
+
 	// Chunk Operations (for the Replicator)
 	MsgPosixChunkWrite  = "posix_chunk_write"
 	MsgPosixChunkRead   = "posix_chunk_read"
@@ -47,6 +48,10 @@ type SetAttrRequest struct {
 type LookupRequest struct {
 	ParentID string `json:"parentId"`
 	Name     string `json:"name"`
+}
+
+type LookupPathRequest struct {
+	Path string `json:"path"`
 }
 
 type AccessRequest struct {

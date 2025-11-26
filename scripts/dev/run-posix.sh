@@ -8,7 +8,7 @@ RUN="$ROOT/run/posix"
 
 # Cleanup
 rm -rf "$RUN"
-mkdir -p "$RUN"/{node1,node2,node3}
+mkdir -p "$RUN"
 
 # Build
 echo "Building..."
@@ -19,37 +19,32 @@ go build -o "$CLIENT" ./clients/posix_client
 SEEDS="127.0.0.1:9001,127.0.0.1:9002,127.0.0.1:9003"
 
 start_node() {
-    local id=$1
-    local port=$2
-    echo "Starting $id on $port..."
+    local addr=$1  # e.g., 127.0.0.1:9001
+    local dir_name=$(echo "$addr" | tr ':' '_')
+    echo "Starting $addr..."
+    mkdir -p "$RUN/$dir_name"
     "$BIN" \
         --server posix \
-        --node-id "$id" \
-        --listen "127.0.0.1:$port" \
-        --data-dir "$RUN/$id" \
-        --seeds "$SEEDS" > "$RUN/$id/stdout.log" 2>&1 &
+        --node-id "$addr" \
+        --listen "$addr" \
+        --data-dir "$RUN/$dir_name" \
+        --seeds "$SEEDS" > "$RUN/$dir_name/stdout.log" 2>&1 &
 }
 
-start_node node1 9001
-start_node node2 9002
-start_node node3 9003
+start_node 127.0.0.1:9001
+start_node 127.0.0.1:9002
+start_node 127.0.0.1:9003
 
 echo "Cluster started."
 echo "Logs are in $RUN/nodeX/stdout.log"
-echo "Wait a few seconds for leader election..."
-sleep 5
+echo "Waiting for cluster to elect a leader..."
+sleep 8 # Wait a bit longer to be safe, client is now self-sufficient
 
-# Instructions
+# Run automated client test
 echo "---------------------------------------------------"
-echo "To test manually:"
-echo "1. Find Root Inode ID:"
-echo "   grep 'Bootstrapped Root Inode' $RUN/node*/logs/*.log"
-echo ""
-echo "2. Run Client Commands:"
-echo "   $CLIENT --op fsinfo"
-echo "   $CLIENT --op create --root <ROOT_ID> --path myfile"
-echo "   $CLIENT --op write --root <ROOT_ID> --path myfile --data 'Hello POSIX'"
-echo "   $CLIENT --op read --root <ROOT_ID> --path myfile"
+echo "Running automated client test..."
+# The client will now discover the root inode ID on its own.
+$CLIENT
 echo "---------------------------------------------------"
 echo "Press Ctrl+C to stop cluster."
 
