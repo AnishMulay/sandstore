@@ -3,19 +3,14 @@ package internal
 import "errors"
 
 var (
-	// Chunk operation errors
-	ErrChunkStoreFailed  = errors.New("failed to store chunk")
-	ErrChunkReadFailed   = errors.New("failed to read chunk")
-	ErrChunkDeleteFailed = errors.New("failed to delete chunk")
+	// Logic Errors
+	ErrInvalidOffset = errors.New("invalid offset")
+	ErrInvalidLength = errors.New("invalid length")
+	ErrIsDirectory   = errors.New("operation not permitted on a directory")
+	ErrNotDirectory  = errors.New("operation requires a directory")
+	ErrFileTooLarge  = errors.New("file too large")
 
-	// Metadata operation errors
-	ErrMetadataGetFailed    = errors.New("failed to get file metadata")
-	ErrMetadataCreateFailed = errors.New("failed to create file metadata")
-	ErrMetadataDeleteFailed = errors.New("failed to delete file metadata")
-
-	// Replication errors
-	ErrChunkReplicationFailed      = errors.New("failed to replicate chunk")
-	ErrMetadataReplicationFailed   = errors.New("failed to replicate metadata")
-	ErrReplicatedChunkFetchFailed  = errors.New("failed to fetch replicated chunk")
-	ErrReplicatedChunkDeleteFailed = errors.New("failed to delete replicated chunk")
+	// Dependency Errors (Wrapping lower-level services)
+	ErrMetadataActionFailed = errors.New("metadata service operation failed")
+	ErrChunkActionFailed    = errors.New("chunk service operation failed")
 )

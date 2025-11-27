@@ -18,31 +18,29 @@ const (
 	MessageTypeReadFile       = "read_file"
 	MessageTypeDeleteFile     = "delete_file"
 	MessageTypeStoreChunk     = "store_chunk"
-	MessageTypeReadChunk      = "read_chunk"
-	MessageTypeDeleteChunk    = "delete_chunk"
 	MessageTypeStoreMetadata  = "store_metadata"
 	MessageTypeDeleteMetadata = "delete_metadata"
 	MessageTypeStopServer     = "stop_server"
 	MessageTypeRequestVote    = "request_vote"
 	MessageTypeAppendEntries  = "append_entries"
-	// POSIX Specific Chunk Messages
-	MessageTypePosixWriteChunk  = "posix_write_chunk" // Replaces "store_chunk"
-	MessageTypePosixReadChunk   = "posix_read_chunk"
-	MessageTypePosixDeleteChunk = "posix_delete_chunk"
+	// Chunk Replication Messages
+	MessageTypeWriteChunk  = "chunk_write" // Replaces "store_chunk"
+	MessageTypeReadChunk   = "chunk_read"
+	MessageTypeDeleteChunk = "chunk_delete"
 )
 
-type PosixWriteChunkRequest struct {
+type WriteChunkRequest struct {
 	ChunkID string
 	Data    []byte
 	// Future-proofing: We could add 'Offset' here later for partial updates!
 	// Offset int64
 }
 
-type PosixReadChunkRequest struct {
+type ReadChunkRequest struct {
 	ChunkID string
 }
 
-type PosixDeleteChunkRequest struct {
+type DeleteChunkRequest struct {
 	ChunkID string
 }
 
@@ -64,16 +62,8 @@ type StoreChunkRequest struct {
 	Data    []byte
 }
 
-type ReadChunkRequest struct {
-	ChunkID string
-}
-
-type DeleteChunkRequest struct {
-	ChunkID string
-}
-
 type StoreMetadataRequest struct {
-	Metadata metadata_service.FileMetadata
+	Metadata metadata_service.MetadataOperation
 }
 
 type DeleteMetadataRequest struct {
