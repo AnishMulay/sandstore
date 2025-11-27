@@ -44,8 +44,16 @@ client:
 test:
 	go test -v ./...
 
+# Kill running sandstore processes
+.PHONY: kill
+kill:
+	-@pgrep -fal sandstore || true
+	-@pkill -f sandstore || true
+
 # Clean up
 .PHONY: clean
 clean:
+	-@pgrep -fal sandstore || true
+	-@pkill -f sandstore || true
 	rm -f $(SANDSTORE_BINARY) $(CLIENT_BINARY) $(MCP_BINARY)
 	rm -rf bin/ run/ chunks logs config.yaml

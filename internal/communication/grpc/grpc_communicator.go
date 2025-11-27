@@ -57,6 +57,10 @@ func (c *GRPCCommunicator) Address() string {
 	return c.listenAddress
 }
 
+func (c *GRPCCommunicator) RegisterPayloadType(messageType string, payloadType reflect.Type) {
+	c.payloadTypes[messageType] = payloadType
+}
+
 func (c *GRPCCommunicator) Start(handler communication.MessageHandler) error {
 	c.ls.Info(log_service.LogEvent{
 		Message:  "Starting GRPC communicator",
