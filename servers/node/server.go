@@ -37,7 +37,7 @@ type runnable interface {
 
 type singleNodeServer struct {
 	server         server.Server // Use generic interface or specific Server
-	clusterService cluster_service.NewClusterService
+	clusterService cluster_service.ClusterService
 }
 
 func (s *singleNodeServer) Run() error {

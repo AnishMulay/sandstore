@@ -247,18 +247,18 @@ func (s *EtcdClusterService) Watch(callback func()) {
 	s.watchCallbacks = append(s.watchCallbacks, callback)
 }
 
-func (s *EtcdClusterService) GetHealthyNodes() ([]cluster.SafeNode, error) {
+func (s *EtcdClusterService) GetHealthyNodes() ([]cluster.Node, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var nodes []cluster.SafeNode
+	var nodes []cluster.Node
 	for id, cfg := range s.configCache {
 		liveness, hasLease := s.livenessCache[id]
 
 		isHealthy := hasLease && liveness.Status == cluster.NodeStatusAlive
 
 		if isHealthy {
-			nodes = append(nodes, cluster.SafeNode{
+			nodes = append(nodes, cluster.Node{
 				ID:       cfg.ID,
 				Address:  cfg.Address,
 				Status:   cluster.NodeStatusAlive,
@@ -269,18 +269,18 @@ func (s *EtcdClusterService) GetHealthyNodes() ([]cluster.SafeNode, error) {
 	return nodes, nil
 }
 
-func (s *EtcdClusterService) GetAllNodes() ([]cluster.SafeNode, error) {
+func (s *EtcdClusterService) GetAllNodes() ([]cluster.Node, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var nodes []cluster.SafeNode
+	var nodes []cluster.Node
 	for id, cfg := range s.configCache {
 		status := cluster.NodeStatusDown
 		if l, ok := s.livenessCache[id]; ok {
 			status = l.Status
 		}
 
-		nodes = append(nodes, cluster.SafeNode{
+		nodes = append(nodes, cluster.Node{
 			ID:       cfg.ID,
 			Address:  cfg.Address,
 			Status:   status,

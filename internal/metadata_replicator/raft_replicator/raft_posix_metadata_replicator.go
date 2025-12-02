@@ -17,7 +17,7 @@ type RaftMetadataReplicator struct {
 
 	// Dependencies
 	id             string
-	clusterService cluster_service.NewClusterService
+	clusterService cluster_service.ClusterService
 	comm           communication.Communicator
 	ls             log_service.LogService
 	applier        pmr.ApplyFunc
@@ -49,7 +49,7 @@ type RaftMetadataReplicator struct {
 
 func NewRaftMetadataReplicator(
 	id string,
-	cs cluster_service.NewClusterService,
+	cs cluster_service.ClusterService,
 	comm communication.Communicator,
 	ls log_service.LogService,
 ) *RaftMetadataReplicator {
@@ -198,7 +198,7 @@ func (r *RaftMetadataReplicator) startElection() {
 		return
 	}
 
-	var peers []cluster_service.SafeNode
+	var peers []cluster_service.Node
 	for _, n := range nodes {
 		if n.ID != r.id {
 			peers = append(peers, n)
@@ -210,7 +210,7 @@ func (r *RaftMetadataReplicator) startElection() {
 	var voteMu sync.Mutex
 
 	for _, peer := range peers {
-		go func(peer cluster_service.SafeNode) {
+		go func(peer cluster_service.Node) {
 			args := RequestVoteArgs{
 				Term:         savedTerm,
 				CandidateID:  r.id,
@@ -310,7 +310,7 @@ func (r *RaftMetadataReplicator) broadcastAppendEntries() {
 	})
 
 	type peerState struct {
-		node         cluster_service.SafeNode
+		node         cluster_service.Node
 		nextIndex    int64
 		prevLogIndex int64
 		prevLogTerm  int64
