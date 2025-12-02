@@ -2,16 +2,29 @@ package raft
 
 import (
 	"context"
+	"errors"
 	"net"
 	"reflect"
 	"sync"
 	"time"
 
 	cluster "github.com/AnishMulay/sandstore/internal/cluster_service"
-	csinternal "github.com/AnishMulay/sandstore/internal/cluster_service/internal"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/log_service"
 	"golang.org/x/exp/rand"
+)
+
+var (
+	// Node registration errors
+	ErrNodeAlreadyExists = errors.New("node already exists")
+	ErrNodeNotFound      = errors.New("node not found")
+
+	// Node validation errors
+	ErrInvalidNodeID      = errors.New("invalid node ID")
+	ErrInvalidNodeAddress = errors.New("invalid node address")
+
+	// Registry operation errors
+	ErrNoHealthyNodes = errors.New("no healthy nodes available")
 )
 
 // MetadataLogInterface defines the interface for accessing metadata log
@@ -99,7 +112,7 @@ func (r *RaftClusterService) Start() {
 func (r *RaftClusterService) RegisterNode(node cluster.Node) error {
 	r.ls.Info(log_service.LogEvent{
 		Message:  "Registering node",
-		Metadata: map[string]any{"nodeID": node.ID, "address": node.Address, "healthy": node.Healthy},
+		Metadata: map[string]any{"nodeID": node.ID, "address": node.Address, "status": node.Status},
 	})
 
 	if node.ID == "" {
@@ -107,7 +120,7 @@ func (r *RaftClusterService) RegisterNode(node cluster.Node) error {
 			Message:  "Invalid node ID",
 			Metadata: map[string]any{"nodeID": node.ID},
 		})
-		return csinternal.ErrInvalidNodeID
+		return ErrInvalidNodeID
 	}
 
 	if node.Address == "" {
@@ -115,7 +128,7 @@ func (r *RaftClusterService) RegisterNode(node cluster.Node) error {
 			Message:  "Invalid node address",
 			Metadata: map[string]any{"nodeID": node.ID, "address": node.Address},
 		})
-		return csinternal.ErrInvalidNodeAddress
+		return ErrInvalidNodeAddress
 	}
 
 	for _, n := range r.nodes {
@@ -124,8 +137,12 @@ func (r *RaftClusterService) RegisterNode(node cluster.Node) error {
 				Message:  "Node already exists",
 				Metadata: map[string]any{"nodeID": node.ID},
 			})
-			return csinternal.ErrNodeAlreadyExists
+			return ErrNodeAlreadyExists
 		}
+	}
+
+	if node.Status == cluster.NodeStatusUnknown {
+		node.Status = cluster.NodeStatusAlive
 	}
 
 	r.nodes = append(r.nodes, node)
@@ -160,7 +177,7 @@ func (r *RaftClusterService) DeregisterNode(node cluster.Node) error {
 		Metadata: map[string]any{"nodeID": node.ID, "address": node.Address},
 	})
 
-	return csinternal.ErrNodeNotFound
+	return ErrNodeNotFound
 }
 
 func (r *RaftClusterService) GetHealthyNodes() ([]cluster.Node, error) {
@@ -171,7 +188,7 @@ func (r *RaftClusterService) GetHealthyNodes() ([]cluster.Node, error) {
 
 	var healthyNodes []cluster.Node
 	for _, node := range r.nodes {
-		if node.Healthy {
+		if node.Status == cluster.NodeStatusAlive {
 			healthyNodes = append(healthyNodes, node)
 		}
 	}
@@ -181,7 +198,7 @@ func (r *RaftClusterService) GetHealthyNodes() ([]cluster.Node, error) {
 			Message:  "No healthy nodes available",
 			Metadata: map[string]any{"totalNodes": len(r.nodes)},
 		})
-		return nil, csinternal.ErrNoHealthyNodes
+		return nil, ErrNoHealthyNodes
 	}
 
 	r.ls.Debug(log_service.LogEvent{

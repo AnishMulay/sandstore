@@ -185,7 +185,7 @@ func (r *RaftMetadataReplicator) startElection() {
 
 	r.ls.Info(log_service.LogEvent{Message: "Starting Election", Metadata: map[string]any{"term": savedTerm}})
 
-	nodes, _ := r.clusterService.GetHealthyNodes()
+	nodes, _ := r.clusterService.GetAllNodes()
 
 	// Quorum is based on total known nodes
 	// Ideally strictly based on config, but here based on discovery
@@ -302,7 +302,7 @@ func (r *RaftMetadataReplicator) broadcastAppendEntries() {
 	savedCommitIndex := r.commitIndex
 	leaderID := r.id
 
-	nodes, _ := r.clusterService.GetHealthyNodes()
+	nodes, _ := r.clusterService.GetAllNodes()
 
 	r.ls.Debug(log_service.LogEvent{
 		Message:  "Broadcasting AppendEntries",

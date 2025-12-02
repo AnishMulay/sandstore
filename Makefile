@@ -55,5 +55,6 @@ kill:
 clean:
 	-@pgrep -fal sandstore || true
 	-@pkill -f sandstore || true
+	-@docker compose -f deploy/docker/etcd/docker-compose.yaml down --remove-orphans -v >/dev/null 2>&1 || true
 	rm -f $(SANDSTORE_BINARY) $(CLIENT_BINARY) $(MCP_BINARY)
 	rm -rf bin/ run/ chunks logs config.yaml

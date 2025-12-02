@@ -1,13 +1,14 @@
 package node
 
 import (
+	"context"
 	"os"
 	"os/signal"
 	"syscall"
 
 	// Core Services
 	"github.com/AnishMulay/sandstore/internal/cluster_service"
-	clusterinmemory "github.com/AnishMulay/sandstore/internal/cluster_service/inmemory"
+	clustercetcd "github.com/AnishMulay/sandstore/internal/cluster_service/etcd"
 	grpccomm "github.com/AnishMulay/sandstore/internal/communication/grpc"
 	logservice "github.com/AnishMulay/sandstore/internal/log_service"
 	locallog "github.com/AnishMulay/sandstore/internal/log_service/localdisc"
@@ -35,11 +36,13 @@ type runnable interface {
 }
 
 type singleNodeServer struct {
-	server server.Server // Use generic interface or specific Server
+	server         server.Server // Use generic interface or specific Server
+	clusterService cluster_service.ClusterService
 }
 
 func (s *singleNodeServer) Run() error {
 	if err := s.server.Start(); err != nil {
+		_ = s.clusterService.Stop(context.Background())
 		return err
 	}
 
@@ -48,7 +51,13 @@ func (s *singleNodeServer) Run() error {
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	<-c
 
-	return s.server.Stop()
+	errServer := s.server.Stop()
+	errCluster := s.clusterService.Stop(context.Background())
+
+	if errServer != nil {
+		return errServer
+	}
+	return errCluster
 }
 
 func Build(opts Options) runnable {
@@ -61,27 +70,16 @@ func Build(opts Options) runnable {
 	comm := grpccomm.NewGRPCCommunicator(opts.ListenAddr, ls)
 
 	// 3. Cluster Service (The Phonebook)
-	// We pre-populate it with seed peers so Raft knows who to contact.
-	var nodes []cluster_service.Node
-	for _, peerAddr := range opts.SeedPeers {
-		// In this simple setup, we assume ID == Address for seeds if ID isn't explicitly mapped
-		// or we filter out self. Ideally, seeds format would be "id=addr", but here we just use addrs.
-		if peerAddr != opts.ListenAddr {
-			nodes = append(nodes, cluster_service.Node{
-				ID:      peerAddr, // Using address as ID for simplicity in this config
-				Address: peerAddr,
-				Healthy: true,
-			})
-		}
+	clusterService := clustercetcd.NewEtcdClusterService([]string{"localhost:2379"}, ls)
+	if err := clusterService.Start(context.Background()); err != nil {
+		panic(err)
 	}
-	// Add self so we are in the list?
-	nodes = append(nodes, cluster_service.Node{
+	if err := clusterService.RegisterNode(cluster_service.ClusterNode{
 		ID:      opts.NodeID,
 		Address: opts.ListenAddr,
-		Healthy: true,
-	})
-
-	clusterService := clusterinmemory.NewInMemoryClusterService(nodes, ls)
+	}); err != nil {
+		panic(err)
+	}
 
 	// 4. Replicators (The Consensus/Network Layer)
 	metaRepl := metadatarepl.NewRaftMetadataReplicator(opts.NodeID, clusterService, comm, ls)
@@ -101,5 +99,8 @@ func Build(opts Options) runnable {
 	// 6. Server (The Gateway)
 	srv := simpleserver.NewSimpleServer(comm, fs, cs, ls, metaRepl, chunkRepl)
 
-	return &singleNodeServer{server: srv}
+	return &singleNodeServer{
+		server:         srv,
+		clusterService: clusterService,
+	}
 }
