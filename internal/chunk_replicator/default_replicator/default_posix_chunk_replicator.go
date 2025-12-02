@@ -12,13 +12,13 @@ import (
 )
 
 type DefaultChunkReplicator struct {
-	clusterService cluster_service.ClusterService
+	clusterService cluster_service.NewClusterService
 	comm           communication.Communicator
 	ls             log_service.LogService
 }
 
 func NewDefaultChunkReplicator(
-	clusterService cluster_service.ClusterService,
+	clusterService cluster_service.NewClusterService,
 	comm communication.Communicator,
 	ls log_service.LogService,
 ) *DefaultChunkReplicator {
@@ -40,7 +40,7 @@ func (r *DefaultChunkReplicator) ReplicateChunk(chunkID string, data []byte, fac
 		return crepinternal.ErrInsufficientNodes
 	}
 
-	var candidateNodes []cluster_service.Node
+	var candidateNodes []cluster_service.SafeNode
 	selfAddr := r.comm.Address()
 	for _, n := range nodes {
 		if n.Address != selfAddr {

@@ -17,7 +17,7 @@ type RaftMetadataReplicator struct {
 
 	// Dependencies
 	id             string
-	clusterService cluster_service.ClusterService
+	clusterService cluster_service.NewClusterService
 	comm           communication.Communicator
 	ls             log_service.LogService
 	applier        pmr.ApplyFunc
@@ -49,7 +49,7 @@ type RaftMetadataReplicator struct {
 
 func NewRaftMetadataReplicator(
 	id string,
-	cs cluster_service.ClusterService,
+	cs cluster_service.NewClusterService,
 	comm communication.Communicator,
 	ls log_service.LogService,
 ) *RaftMetadataReplicator {
@@ -185,7 +185,7 @@ func (r *RaftMetadataReplicator) startElection() {
 
 	r.ls.Info(log_service.LogEvent{Message: "Starting Election", Metadata: map[string]any{"term": savedTerm}})
 
-	nodes, _ := r.clusterService.GetHealthyNodes()
+	nodes, _ := r.clusterService.GetAllNodes()
 
 	// Quorum is based on total known nodes
 	// Ideally strictly based on config, but here based on discovery
@@ -198,7 +198,7 @@ func (r *RaftMetadataReplicator) startElection() {
 		return
 	}
 
-	var peers []cluster_service.Node
+	var peers []cluster_service.SafeNode
 	for _, n := range nodes {
 		if n.ID != r.id {
 			peers = append(peers, n)
@@ -210,7 +210,7 @@ func (r *RaftMetadataReplicator) startElection() {
 	var voteMu sync.Mutex
 
 	for _, peer := range peers {
-		go func(peer cluster_service.Node) {
+		go func(peer cluster_service.SafeNode) {
 			args := RequestVoteArgs{
 				Term:         savedTerm,
 				CandidateID:  r.id,
@@ -302,7 +302,7 @@ func (r *RaftMetadataReplicator) broadcastAppendEntries() {
 	savedCommitIndex := r.commitIndex
 	leaderID := r.id
 
-	nodes, _ := r.clusterService.GetHealthyNodes()
+	nodes, _ := r.clusterService.GetAllNodes()
 
 	r.ls.Debug(log_service.LogEvent{
 		Message:  "Broadcasting AppendEntries",
@@ -310,7 +310,7 @@ func (r *RaftMetadataReplicator) broadcastAppendEntries() {
 	})
 
 	type peerState struct {
-		node         cluster_service.Node
+		node         cluster_service.SafeNode
 		nextIndex    int64
 		prevLogIndex int64
 		prevLogTerm  int64
