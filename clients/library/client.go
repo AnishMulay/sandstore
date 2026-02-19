@@ -376,6 +376,78 @@ func (c *SandstoreClient) Remove(filepath string) error {
 	return nil
 }
 
+func (c *SandstoreClient) Rename(src string, dst string) error {
+	if c == nil {
+		return fmt.Errorf("sandstore client is nil")
+	}
+	if c.Comm == nil {
+		return fmt.Errorf("sandstore communicator is nil")
+	}
+	if c.ServerAddr == "" {
+		return fmt.Errorf("sandstore server address is empty")
+	}
+
+	cleanSrc, err := normalizePath(src)
+	if err != nil {
+		return err
+	}
+	cleanDst, err := normalizePath(dst)
+	if err != nil {
+		return err
+	}
+
+	srcParentPath, srcName, err := splitParentAndName(cleanSrc)
+	if err != nil {
+		return err
+	}
+	dstParentPath, dstName, err := splitParentAndName(cleanDst)
+	if err != nil {
+		return err
+	}
+
+	c.TableMu.Lock()
+	defer c.TableMu.Unlock()
+
+	srcParentID, srcParentResp, err := c.lookupPath(srcParentPath)
+	if err != nil {
+		return err
+	}
+	if srcParentResp.Code != communication.CodeOK {
+		return responseError("rename", cleanSrc, srcParentResp)
+	}
+
+	dstParentID, dstParentResp, err := c.lookupPath(dstParentPath)
+	if err != nil {
+		return err
+	}
+	if dstParentResp.Code != communication.CodeOK {
+		return responseError("rename", cleanDst, dstParentResp)
+	}
+
+	resp, err := c.send(ps.MsgRename, ps.RenameRequest{
+		SrcParentID: srcParentID,
+		SrcName:     srcName,
+		DstParentID: dstParentID,
+		DstName:     dstName,
+	})
+	if err != nil {
+		return fmt.Errorf("rename %q -> %q failed: %w", cleanSrc, cleanDst, err)
+	}
+	if resp.Code != communication.CodeOK {
+		return responseError("rename", cleanSrc, resp)
+	}
+
+	for _, fileStruct := range c.OpenFiles {
+		if fileStruct.FilePath == cleanSrc {
+			fileStruct.Mu.Lock()
+			fileStruct.FilePath = cleanDst
+			fileStruct.Mu.Unlock()
+		}
+	}
+
+	return nil
+}
+
 func (c *SandstoreClient) addFD(inodeID string, filePath string, mode int) (int, error) {
 	c.TableMu.Lock()
 	defer c.TableMu.Unlock()

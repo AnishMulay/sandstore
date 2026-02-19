@@ -671,6 +671,22 @@ func (s *InMemoryMetadataService) Rmdir(ctx context.Context, parentInodeID strin
 }
 
 func (s *InMemoryMetadataService) Rename(ctx context.Context, srcParentID, srcName, dstParentID, dstName string) error {
+	s.mu.RLock()
+	srcParent, srcParentExists := s.inodes[srcParentID]
+	if !srcParentExists {
+		s.mu.RUnlock()
+		return ErrNotFound
+	}
+	if _, srcExists := srcParent.Children[srcName]; !srcExists {
+		s.mu.RUnlock()
+		return ErrNotFound
+	}
+	if _, dstParentExists := s.inodes[dstParentID]; !dstParentExists {
+		s.mu.RUnlock()
+		return ErrNotFound
+	}
+	s.mu.RUnlock()
+
 	op := pms.MetadataOperation{
 		Type:        pms.OpRename,
 		ParentID:    srcParentID,

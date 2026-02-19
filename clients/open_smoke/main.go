@@ -241,6 +241,81 @@ func main() {
 	}
 	log.Printf("PASS: Remove(missing file) returned expected error")
 
+	renameSrcPath := fmt.Sprintf("/sandlib-smoke-rename-src-%d.txt", time.Now().UnixNano())
+	renameDstPath := fmt.Sprintf("/sandlib-smoke-rename-dst-%d.txt", time.Now().UnixNano())
+	fdRenameClosed, err := client.Open(renameSrcPath, os.O_CREATE|os.O_RDWR)
+	if err != nil {
+		log.Fatalf("Open(rename closed src) failed on %s for %s: %v", serverAddr, renameSrcPath, err)
+	}
+	renameClosedData := []byte("rename-closed-file-data")
+	if _, err := client.Write(fdRenameClosed, renameClosedData); err != nil {
+		log.Fatalf("Write(rename closed src) failed on %s for %s fd=%d: %v", serverAddr, renameSrcPath, fdRenameClosed, err)
+	}
+	if err := client.Fsync(fdRenameClosed); err != nil {
+		log.Fatalf("Fsync(rename closed src) failed on %s for %s fd=%d: %v", serverAddr, renameSrcPath, fdRenameClosed, err)
+	}
+	if err := client.Close(fdRenameClosed); err != nil {
+		log.Fatalf("Close(rename closed src) failed on %s for %s fd=%d: %v", serverAddr, renameSrcPath, fdRenameClosed, err)
+	}
+	if err := client.Rename(renameSrcPath, renameDstPath); err != nil {
+		log.Fatalf("Rename(closed file) failed on %s for %s -> %s: %v", serverAddr, renameSrcPath, renameDstPath, err)
+	}
+	if _, err := client.Open(renameSrcPath, os.O_RDWR); err == nil {
+		log.Fatalf("Open(renamed old src) expected failure for %s", renameSrcPath)
+	}
+	renameClosedRead, err := readFromFreshFD(client, renameDstPath, len(renameClosedData)+64)
+	if err != nil {
+		log.Fatalf("Read(rename closed dst) failed on %s for %s: %v", serverAddr, renameDstPath, err)
+	}
+	if !bytes.Equal(renameClosedRead, renameClosedData) {
+		log.Fatalf("Read(rename closed dst) expected %d bytes, got %d bytes", len(renameClosedData), len(renameClosedRead))
+	}
+	log.Printf("PASS: Rename(closed file) moved path and preserved data")
+
+	renameOpenSrcPath := fmt.Sprintf("/sandlib-smoke-rename-open-src-%d.txt", time.Now().UnixNano())
+	renameOpenDstPath := fmt.Sprintf("/sandlib-smoke-rename-open-dst-%d.txt", time.Now().UnixNano())
+	fdRenameOpen, err := client.Open(renameOpenSrcPath, os.O_CREATE|os.O_RDWR)
+	if err != nil {
+		log.Fatalf("Open(rename open src) failed on %s for %s: %v", serverAddr, renameOpenSrcPath, err)
+	}
+	renameOpenData := []byte("rename-open-file-buffered-data")
+	if _, err := client.Write(fdRenameOpen, renameOpenData); err != nil {
+		log.Fatalf("Write(rename open src) failed on %s for %s fd=%d: %v", serverAddr, renameOpenSrcPath, fdRenameOpen, err)
+	}
+	if err := client.Rename(renameOpenSrcPath, renameOpenDstPath); err != nil {
+		log.Fatalf("Rename(open file) failed on %s for %s -> %s: %v", serverAddr, renameOpenSrcPath, renameOpenDstPath, err)
+	}
+	if err := client.Fsync(fdRenameOpen); err != nil {
+		log.Fatalf("Fsync(rename open fd after rename) failed on %s for %s fd=%d: %v", serverAddr, renameOpenDstPath, fdRenameOpen, err)
+	}
+	if _, err := client.Open(renameOpenSrcPath, os.O_RDWR); err == nil {
+		log.Fatalf("Open(renamed open old src) expected failure for %s", renameOpenSrcPath)
+	}
+	renameOpenRead, err := readFromFreshFD(client, renameOpenDstPath, len(renameOpenData)+64)
+	if err != nil {
+		log.Fatalf("Read(rename open dst) failed on %s for %s: %v", serverAddr, renameOpenDstPath, err)
+	}
+	if !bytes.Equal(renameOpenRead, renameOpenData) {
+		log.Fatalf("Read(rename open dst) expected %d bytes, got %d bytes", len(renameOpenData), len(renameOpenRead))
+	}
+	if err := client.Remove(renameOpenDstPath); err != nil {
+		log.Fatalf("Remove(rename open dst) failed on %s for %s: %v", serverAddr, renameOpenDstPath, err)
+	}
+	if _, err := client.Write(fdRenameOpen, []byte("x")); err == nil {
+		log.Fatalf("Write(renamed open removed fd) expected failure for fd=%d", fdRenameOpen)
+	}
+	if err := client.Close(fdRenameOpen); err == nil {
+		log.Fatalf("Close(renamed open removed fd) expected failure for fd=%d", fdRenameOpen)
+	}
+	log.Printf("PASS: Rename(open file) updated live FD path and eager close behaved correctly")
+
+	missingRenameSrcPath := fmt.Sprintf("/sandlib-smoke-rename-missing-src-%d.txt", time.Now().UnixNano())
+	missingRenameDstPath := fmt.Sprintf("/sandlib-smoke-rename-missing-dst-%d.txt", time.Now().UnixNano())
+	if err := client.Rename(missingRenameSrcPath, missingRenameDstPath); err == nil {
+		log.Fatalf("Rename(missing src) expected failure for %s -> %s", missingRenameSrcPath, missingRenameDstPath)
+	}
+	log.Printf("PASS: Rename(missing src) returned expected error")
+
 	if len(chunkA)+len(chunkB) <= maxBufferSize {
 		log.Fatalf("internal smoke test invariant failed: chunkA+chunkB must exceed maxBufferSize")
 	}
