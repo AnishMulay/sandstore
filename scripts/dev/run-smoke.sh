@@ -159,7 +159,7 @@ main() {
   leader="$(wait_for_leader)"
   echo "Leader elected: $leader"
 
-  echo "Running sandlib Open smoke test..."
+  echo "Running sandlib smoke test..."
   SANDSTORE_ADDR="$leader" "$SMOKE"
 
   TEST_STATUS="passed"

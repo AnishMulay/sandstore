@@ -20,12 +20,12 @@ func main() {
 		serverAddr = "127.0.0.1:9001"
 	}
 
-	logDir := filepath.Join("run", "open-smoke", "logs")
-	ls := locallog.NewLocalDiscLogService(logDir, "open-smoke", logservice.InfoLevel)
+	logDir := filepath.Join("run", "smoke", "logs")
+	ls := locallog.NewLocalDiscLogService(logDir, "smoke", logservice.InfoLevel)
 	comm := grpccomm.NewGRPCCommunicator(":0", ls)
 	client := sandlib.NewSandstoreClient(serverAddr, comm)
 
-	path := fmt.Sprintf("/sandlib-open-smoke-%d.txt", time.Now().UnixNano())
+	path := fmt.Sprintf("/sandlib-smoke-%d.txt", time.Now().UnixNano())
 
 	fdCreate, err := client.Open(path, os.O_CREATE|os.O_RDWR)
 	if err != nil {
@@ -33,13 +33,31 @@ func main() {
 	}
 	log.Printf("PASS: Open(create) returned fd=%d for %s", fdCreate, path)
 
+	dataCreate, err := client.Read(fdCreate, 64)
+	if err != nil {
+		log.Fatalf("Read(create-fd) failed on %s for %s fd=%d: %v", serverAddr, path, fdCreate, err)
+	}
+	if len(dataCreate) != 0 {
+		log.Fatalf("Read(create-fd) expected empty data, got %d bytes", len(dataCreate))
+	}
+	log.Printf("PASS: Read(create-fd) returned %d bytes for %s", len(dataCreate), path)
+
 	fdLookup, err := client.Open(path, os.O_RDONLY)
 	if err != nil {
 		log.Fatalf("Open(lookup) failed on %s for %s: %v", serverAddr, path, err)
 	}
 	log.Printf("PASS: Open(lookup) returned fd=%d for %s", fdLookup, path)
 
-	racePath := fmt.Sprintf("/sandlib-open-race-%d.txt", time.Now().UnixNano())
+	dataLookup, err := client.Read(fdLookup, 64)
+	if err != nil {
+		log.Fatalf("Read(lookup-fd) failed on %s for %s fd=%d: %v", serverAddr, path, fdLookup, err)
+	}
+	if len(dataLookup) != 0 {
+		log.Fatalf("Read(lookup-fd) expected empty data, got %d bytes", len(dataLookup))
+	}
+	log.Printf("PASS: Read(lookup-fd) returned %d bytes for %s", len(dataLookup), path)
+
+	racePath := fmt.Sprintf("/sandlib-smoke-race-%d.txt", time.Now().UnixNano())
 	const workers = 8
 
 	var wg sync.WaitGroup
@@ -54,7 +72,18 @@ func main() {
 				errCh <- fmt.Errorf("worker %d: %w", worker, openErr)
 				return
 			}
-			log.Printf("PASS: worker=%d Open(race) fd=%d path=%s", worker, fd, racePath)
+
+			data, readErr := client.Read(fd, 64)
+			if readErr != nil {
+				errCh <- fmt.Errorf("worker %d: read failed fd=%d: %w", worker, fd, readErr)
+				return
+			}
+			if len(data) != 0 {
+				errCh <- fmt.Errorf("worker %d: expected empty read, got %d bytes", worker, len(data))
+				return
+			}
+
+			log.Printf("PASS: worker=%d Open+Read(race) fd=%d path=%s bytes=%d", worker, fd, racePath, len(data))
 		}(i)
 	}
 
@@ -64,7 +93,7 @@ func main() {
 	for openErr := range errCh {
 		log.Fatalf("Open(race) failed: %v", openErr)
 	}
-	log.Printf("PASS: Open race handling validated on %s with %d workers", racePath, workers)
+	log.Printf("PASS: Open+Read race handling validated on %s with %d workers", racePath, workers)
 
 	log.Printf("Smoke test complete. target=%s", serverAddr)
 }
