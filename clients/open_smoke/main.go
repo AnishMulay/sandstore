@@ -200,6 +200,47 @@ func main() {
 	}
 	log.Printf("PASS: Close(empty buffer) returned success")
 
+	removePath := fmt.Sprintf("/sandlib-smoke-remove-%d.txt", time.Now().UnixNano())
+	fdRemove, err := client.Open(removePath, os.O_CREATE|os.O_RDWR)
+	if err != nil {
+		log.Fatalf("Open(remove target) failed on %s for %s: %v", serverAddr, removePath, err)
+	}
+	if err := client.Close(fdRemove); err != nil {
+		log.Fatalf("Close(remove target setup) failed on %s for %s fd=%d: %v", serverAddr, removePath, fdRemove, err)
+	}
+	if err := client.Remove(removePath); err != nil {
+		log.Fatalf("Remove(closed file) failed on %s for %s: %v", serverAddr, removePath, err)
+	}
+	if _, err := client.Open(removePath, os.O_RDWR); err == nil {
+		log.Fatalf("Open(removed file) expected failure for %s", removePath)
+	}
+	log.Printf("PASS: Remove(closed file) deleted file and made path unreachable")
+
+	removeOpenPath := fmt.Sprintf("/sandlib-smoke-remove-open-%d.txt", time.Now().UnixNano())
+	fdRemoveOpen, err := client.Open(removeOpenPath, os.O_CREATE|os.O_RDWR)
+	if err != nil {
+		log.Fatalf("Open(remove-open target) failed on %s for %s: %v", serverAddr, removeOpenPath, err)
+	}
+	if _, err := client.Write(fdRemoveOpen, []byte("remove-open-buffered")); err != nil {
+		log.Fatalf("Write(remove-open target) failed on %s for %s fd=%d: %v", serverAddr, removeOpenPath, fdRemoveOpen, err)
+	}
+	if err := client.Remove(removeOpenPath); err != nil {
+		log.Fatalf("Remove(open file) failed on %s for %s: %v", serverAddr, removeOpenPath, err)
+	}
+	if _, err := client.Write(fdRemoveOpen, []byte("x")); err == nil {
+		log.Fatalf("Write(removed open fd) expected failure for fd=%d", fdRemoveOpen)
+	}
+	if _, err := client.Open(removeOpenPath, os.O_RDWR); err == nil {
+		log.Fatalf("Open(removed open file) expected failure for %s", removeOpenPath)
+	}
+	log.Printf("PASS: Remove(open file) performed eager close and removed path")
+
+	missingRemovePath := fmt.Sprintf("/sandlib-smoke-remove-missing-%d.txt", time.Now().UnixNano())
+	if err := client.Remove(missingRemovePath); err == nil {
+		log.Fatalf("Remove(missing file) expected failure for %s", missingRemovePath)
+	}
+	log.Printf("PASS: Remove(missing file) returned expected error")
+
 	if len(chunkA)+len(chunkB) <= maxBufferSize {
 		log.Fatalf("internal smoke test invariant failed: chunkA+chunkB must exceed maxBufferSize")
 	}

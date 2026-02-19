@@ -281,6 +281,101 @@ func (c *SandstoreClient) Close(fd int) error {
 	return nil
 }
 
+func (c *SandstoreClient) Remove(filepath string) error {
+	if c == nil {
+		return fmt.Errorf("sandstore client is nil")
+	}
+	if c.Comm == nil {
+		return fmt.Errorf("sandstore communicator is nil")
+	}
+	if c.ServerAddr == "" {
+		return fmt.Errorf("sandstore server address is empty")
+	}
+
+	cleanPath, err := normalizePath(filepath)
+	if err != nil {
+		return err
+	}
+
+	parentPath, name, err := splitParentAndName(cleanPath)
+	if err != nil {
+		return err
+	}
+
+	c.TableMu.Lock()
+	defer c.TableMu.Unlock()
+
+	var targetFD uint64
+	var targetStruct *SandstoreFD
+	for fd, fileStruct := range c.OpenFiles {
+		if fileStruct.FilePath == cleanPath {
+			targetFD = fd
+			targetStruct = fileStruct
+			break
+		}
+	}
+
+	var inodeID string
+	if targetStruct != nil {
+		inodeID = targetStruct.InodeID
+		targetStruct.Mu.Lock()
+	} else {
+		var lookupResp *communication.Response
+		inodeID, lookupResp, err = c.lookupPath(cleanPath)
+		if err != nil {
+			return err
+		}
+		if lookupResp.Code != communication.CodeOK {
+			return responseError("remove", cleanPath, lookupResp)
+		}
+	}
+
+	if inodeID == "" {
+		if targetStruct != nil {
+			targetStruct.Mu.Unlock()
+		}
+		return fmt.Errorf("remove %q failed: missing inode id", cleanPath)
+	}
+
+	parentID, parentResp, err := c.lookupPath(parentPath)
+	if err != nil {
+		if targetStruct != nil {
+			targetStruct.Mu.Unlock()
+		}
+		return err
+	}
+	if parentResp.Code != communication.CodeOK {
+		if targetStruct != nil {
+			targetStruct.Mu.Unlock()
+		}
+		return responseError("remove", cleanPath, parentResp)
+	}
+
+	resp, err := c.send(ps.MsgRemove, ps.RemoveRequest{
+		ParentID: parentID,
+		Name:     name,
+	})
+	if err != nil {
+		if targetStruct != nil {
+			targetStruct.Mu.Unlock()
+		}
+		return fmt.Errorf("remove %q failed: %w", cleanPath, err)
+	}
+	if resp.Code != communication.CodeOK {
+		if targetStruct != nil {
+			targetStruct.Mu.Unlock()
+		}
+		return responseError("remove", cleanPath, resp)
+	}
+
+	if targetStruct != nil {
+		delete(c.OpenFiles, targetFD)
+		targetStruct.Mu.Unlock()
+	}
+
+	return nil
+}
+
 func (c *SandstoreClient) addFD(inodeID string, filePath string, mode int) (int, error) {
 	c.TableMu.Lock()
 	defer c.TableMu.Unlock()
