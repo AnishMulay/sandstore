@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/AnishMulay/sandstore/client/library"
+	"github.com/AnishMulay/sandstore/clients/library"
 	grpccomm "github.com/AnishMulay/sandstore/internal/communication/grpc"
 	logservice "github.com/AnishMulay/sandstore/internal/log_service"
 	locallog "github.com/AnishMulay/sandstore/internal/log_service/localdisc"
