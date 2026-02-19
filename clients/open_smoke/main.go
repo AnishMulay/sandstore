@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"os"
@@ -14,6 +15,8 @@ import (
 	locallog "github.com/AnishMulay/sandstore/internal/log_service/localdisc"
 )
 
+const maxBufferSize = 2 * 1024 * 1024
+
 func main() {
 	serverAddr := os.Getenv("SANDSTORE_ADDR")
 	if serverAddr == "" {
@@ -25,7 +28,7 @@ func main() {
 	comm := grpccomm.NewGRPCCommunicator(":0", ls)
 	client := sandlib.NewSandstoreClient(serverAddr, comm)
 
-	path := fmt.Sprintf("/sandlib-smoke-%d.txt", time.Now().UnixNano())
+	path := fmt.Sprintf("/sandlib-smoke-open-read-write-%d.txt", time.Now().UnixNano())
 
 	fdCreate, err := client.Open(path, os.O_CREATE|os.O_RDWR)
 	if err != nil {
@@ -33,16 +36,16 @@ func main() {
 	}
 	log.Printf("PASS: Open(create) returned fd=%d for %s", fdCreate, path)
 
-	dataCreate, err := client.Read(fdCreate, 64)
+	dataCreate, err := readFromFreshFD(client, path, 64)
 	if err != nil {
-		log.Fatalf("Read(create-fd) failed on %s for %s fd=%d: %v", serverAddr, path, fdCreate, err)
+		log.Fatalf("Read(initial) failed on %s for %s: %v", serverAddr, path, err)
 	}
 	if len(dataCreate) != 0 {
-		log.Fatalf("Read(create-fd) expected empty data, got %d bytes", len(dataCreate))
+		log.Fatalf("Read(initial) expected empty data, got %d bytes", len(dataCreate))
 	}
-	log.Printf("PASS: Read(create-fd) returned %d bytes for %s", len(dataCreate), path)
+	log.Printf("PASS: Read(initial) returned %d bytes for %s", len(dataCreate), path)
 
-	fdLookup, err := client.Open(path, os.O_RDONLY)
+	fdLookup, err := client.Open(path, os.O_RDWR)
 	if err != nil {
 		log.Fatalf("Open(lookup) failed on %s for %s: %v", serverAddr, path, err)
 	}
@@ -56,6 +59,72 @@ func main() {
 		log.Fatalf("Read(lookup-fd) expected empty data, got %d bytes", len(dataLookup))
 	}
 	log.Printf("PASS: Read(lookup-fd) returned %d bytes for %s", len(dataLookup), path)
+
+	chunkA := makePatternChunk(1*1024*1024, "chunk-a")
+	chunkB := makePatternChunk(1536*1024, "chunk-b")
+	chunkC := makePatternChunk(1536*1024, "chunk-c")
+
+	writtenA, err := client.Write(fdCreate, chunkA)
+	if err != nil {
+		log.Fatalf("Write(chunkA) failed on %s for %s fd=%d: %v", serverAddr, path, fdCreate, err)
+	}
+	if writtenA != len(chunkA) {
+		log.Fatalf("Write(chunkA) expected %d bytes, got %d", len(chunkA), writtenA)
+	}
+	log.Printf("PASS: Write(chunkA) wrote %d bytes", writtenA)
+
+	dataAfterA, err := readFromFreshFD(client, path, len(chunkA)+128)
+	if err != nil {
+		log.Fatalf("Read(after chunkA) failed on %s for %s: %v", serverAddr, path, err)
+	}
+	if len(dataAfterA) != 0 {
+		log.Fatalf("Read(after chunkA) expected 0 persisted bytes, got %d", len(dataAfterA))
+	}
+	log.Printf("PASS: Buffered Write(chunkA) not visible before flush")
+
+	writtenB, err := client.Write(fdCreate, chunkB)
+	if err != nil {
+		log.Fatalf("Write(chunkB) failed on %s for %s fd=%d: %v", serverAddr, path, fdCreate, err)
+	}
+	if writtenB != len(chunkB) {
+		log.Fatalf("Write(chunkB) expected %d bytes, got %d", len(chunkB), writtenB)
+	}
+	log.Printf("PASS: Write(chunkB) wrote %d bytes (triggered flush of chunkA)", writtenB)
+
+	dataAfterB, err := readFromFreshFD(client, path, len(chunkA)+len(chunkB)+128)
+	if err != nil {
+		log.Fatalf("Read(after chunkB) failed on %s for %s: %v", serverAddr, path, err)
+	}
+	if !bytes.Equal(dataAfterB, chunkA) {
+		log.Fatalf("Read(after chunkB) expected exactly chunkA (%d bytes), got %d bytes", len(chunkA), len(dataAfterB))
+	}
+	log.Printf("PASS: Flush-on-overflow persisted chunkA with correct ordering/offset")
+
+	writtenC, err := client.Write(fdCreate, chunkC)
+	if err != nil {
+		log.Fatalf("Write(chunkC) failed on %s for %s fd=%d: %v", serverAddr, path, fdCreate, err)
+	}
+	if writtenC != len(chunkC) {
+		log.Fatalf("Write(chunkC) expected %d bytes, got %d", len(chunkC), writtenC)
+	}
+	log.Printf("PASS: Write(chunkC) wrote %d bytes (triggered flush of chunkB)", writtenC)
+
+	expectedAfterC := append(append(make([]byte, 0, len(chunkA)+len(chunkB)), chunkA...), chunkB...)
+	dataAfterC, err := readFromFreshFD(client, path, len(expectedAfterC)+len(chunkC)+128)
+	if err != nil {
+		log.Fatalf("Read(after chunkC) failed on %s for %s: %v", serverAddr, path, err)
+	}
+	if !bytes.Equal(dataAfterC, expectedAfterC) {
+		log.Fatalf("Read(after chunkC) expected chunkA+chunkB (%d bytes), got %d bytes", len(expectedAfterC), len(dataAfterC))
+	}
+	log.Printf("PASS: Sequential flushes persisted chunkA+chunkB in exact order")
+
+	if len(chunkA)+len(chunkB) <= maxBufferSize {
+		log.Fatalf("internal smoke test invariant failed: chunkA+chunkB must exceed maxBufferSize")
+	}
+	if len(chunkB)+len(chunkC) <= maxBufferSize {
+		log.Fatalf("internal smoke test invariant failed: chunkB+chunkC must exceed maxBufferSize")
+	}
 
 	racePath := fmt.Sprintf("/sandlib-smoke-race-%d.txt", time.Now().UnixNano())
 	const workers = 8
@@ -96,4 +165,26 @@ func main() {
 	log.Printf("PASS: Open+Read race handling validated on %s with %d workers", racePath, workers)
 
 	log.Printf("Smoke test complete. target=%s", serverAddr)
+}
+
+func readFromFreshFD(client *sandlib.SandstoreClient, path string, n int) ([]byte, error) {
+	fd, err := client.Open(path, os.O_RDWR)
+	if err != nil {
+		return nil, fmt.Errorf("open for read failed: %w", err)
+	}
+
+	data, err := client.Read(fd, n)
+	if err != nil {
+		return nil, fmt.Errorf("read failed for fd=%d: %w", fd, err)
+	}
+	return data, nil
+}
+
+func makePatternChunk(size int, token string) []byte {
+	chunk := make([]byte, size)
+	pattern := []byte(token)
+	for i := 0; i < size; i++ {
+		chunk[i] = pattern[i%len(pattern)]
+	}
+	return chunk
 }

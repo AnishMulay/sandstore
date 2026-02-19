@@ -16,6 +16,7 @@ import (
 )
 
 const firstUserFD uint64 = 3
+const maxBufferSize = 2 * 1024 * 1024
 
 func NewSandstoreClient(serverAddr string, comm *grpccomm.GRPCCommunicator) *SandstoreClient {
 	return &SandstoreClient{
@@ -137,6 +138,56 @@ func (c *SandstoreClient) Read(fd int, n int) ([]byte, error) {
 
 	fileStruct.Offset += int64(len(data))
 	return data, nil
+}
+
+func (c *SandstoreClient) Write(fd int, data []byte) (int, error) {
+	if c == nil {
+		return 0, fmt.Errorf("sandstore client is nil")
+	}
+	if c.Comm == nil {
+		return 0, fmt.Errorf("sandstore communicator is nil")
+	}
+	if c.ServerAddr == "" {
+		return 0, fmt.Errorf("sandstore server address is empty")
+	}
+	if fd < 0 {
+		return 0, fmt.Errorf("bad file descriptor")
+	}
+
+	c.TableMu.RLock()
+	fileStruct := c.OpenFiles[uint64(fd)]
+	c.TableMu.RUnlock()
+
+	if fileStruct == nil {
+		return 0, fmt.Errorf("bad file descriptor")
+	}
+
+	fileStruct.Mu.Lock()
+	defer fileStruct.Mu.Unlock()
+
+	if fileStruct.Mode&os.O_WRONLY == 0 && fileStruct.Mode&os.O_RDWR == 0 {
+		return 0, fmt.Errorf("file not open for writing")
+	}
+
+	if len(fileStruct.Buffer)+len(data) > maxBufferSize {
+		flushOffset := fileStruct.Offset - int64(len(fileStruct.Buffer))
+		resp, err := c.send(ps.MsgWrite, ps.WriteRequest{
+			InodeID: fileStruct.InodeID,
+			Offset:  flushOffset,
+			Data:    fileStruct.Buffer,
+		})
+		if err != nil {
+			return 0, fmt.Errorf("write %q failed: %w", fileStruct.FilePath, err)
+		}
+		if resp.Code != communication.CodeOK {
+			return 0, responseError("write", fileStruct.FilePath, resp)
+		}
+		fileStruct.Buffer = fileStruct.Buffer[:0]
+	}
+
+	fileStruct.Buffer = append(fileStruct.Buffer, data...)
+	fileStruct.Offset += int64(len(data))
+	return len(data), nil
 }
 
 func (c *SandstoreClient) addFD(inodeID string, filePath string, mode int) (int, error) {
