@@ -346,6 +346,47 @@ func main() {
 	}
 	log.Printf("PASS: Mkdir(missing parent) returned expected error")
 
+	rmdirEmptyPath := fmt.Sprintf("/sandlib-smoke-rmdir-empty-%d", time.Now().UnixNano())
+	if err := client.Mkdir(rmdirEmptyPath, 0o755); err != nil {
+		log.Fatalf("Mkdir(rmdir empty target) failed on %s for %s: %v", serverAddr, rmdirEmptyPath, err)
+	}
+	if err := client.Rmdir(rmdirEmptyPath); err != nil {
+		log.Fatalf("Rmdir(empty dir) failed on %s for %s: %v", serverAddr, rmdirEmptyPath, err)
+	}
+	if err := client.Mkdir(fmt.Sprintf("%s/%s", rmdirEmptyPath, "child"), 0o755); err == nil {
+		log.Fatalf("Mkdir(under removed dir) expected failure for %s", rmdirEmptyPath)
+	}
+	log.Printf("PASS: Rmdir(empty dir) removed directory and path became unreachable")
+
+	rmdirNonEmptyPath := fmt.Sprintf("/sandlib-smoke-rmdir-nonempty-%d", time.Now().UnixNano())
+	if err := client.Mkdir(rmdirNonEmptyPath, 0o755); err != nil {
+		log.Fatalf("Mkdir(rmdir non-empty target) failed on %s for %s: %v", serverAddr, rmdirNonEmptyPath, err)
+	}
+	rmdirProbeFilePath := fmt.Sprintf("%s/%s", rmdirNonEmptyPath, "probe.txt")
+	fdRmdirProbe, err := client.Open(rmdirProbeFilePath, os.O_CREATE|os.O_RDWR)
+	if err != nil {
+		log.Fatalf("Open(rmdir non-empty probe) failed on %s for %s: %v", serverAddr, rmdirProbeFilePath, err)
+	}
+	if err := client.Close(fdRmdirProbe); err != nil {
+		log.Fatalf("Close(rmdir non-empty probe) failed on %s for %s fd=%d: %v", serverAddr, rmdirProbeFilePath, fdRmdirProbe, err)
+	}
+	if err := client.Rmdir(rmdirNonEmptyPath); err == nil {
+		log.Fatalf("Rmdir(non-empty dir) expected failure for %s", rmdirNonEmptyPath)
+	}
+	if err := client.Remove(rmdirProbeFilePath); err != nil {
+		log.Fatalf("Remove(rmdir non-empty probe) failed on %s for %s: %v", serverAddr, rmdirProbeFilePath, err)
+	}
+	if err := client.Rmdir(rmdirNonEmptyPath); err != nil {
+		log.Fatalf("Rmdir(after cleanup) failed on %s for %s: %v", serverAddr, rmdirNonEmptyPath, err)
+	}
+	log.Printf("PASS: Rmdir(non-empty dir) rejected until empty, then succeeded")
+
+	missingRmdirPath := fmt.Sprintf("/sandlib-smoke-rmdir-missing-%d", time.Now().UnixNano())
+	if err := client.Rmdir(missingRmdirPath); err == nil {
+		log.Fatalf("Rmdir(missing dir) expected failure for %s", missingRmdirPath)
+	}
+	log.Printf("PASS: Rmdir(missing dir) returned expected error")
+
 	if len(chunkA)+len(chunkB) <= maxBufferSize {
 		log.Fatalf("internal smoke test invariant failed: chunkA+chunkB must exceed maxBufferSize")
 	}

@@ -496,6 +496,50 @@ func (c *SandstoreClient) Mkdir(path string, mode int) error {
 	return nil
 }
 
+func (c *SandstoreClient) Rmdir(path string) error {
+	if c == nil {
+		return fmt.Errorf("sandstore client is nil")
+	}
+	if c.Comm == nil {
+		return fmt.Errorf("sandstore communicator is nil")
+	}
+	if c.ServerAddr == "" {
+		return fmt.Errorf("sandstore server address is empty")
+	}
+
+	cleanPath, err := normalizePath(path)
+	if err != nil {
+		return err
+	}
+
+	parentPath := filepathpkg.Dir(cleanPath)
+	name := filepathpkg.Base(cleanPath)
+	if name == "" || name == "." || name == "/" {
+		return fmt.Errorf("invalid path %q", cleanPath)
+	}
+
+	parentID, parentResp, err := c.lookupPath(parentPath)
+	if err != nil {
+		return err
+	}
+	if parentResp.Code != communication.CodeOK {
+		return responseError("rmdir", cleanPath, parentResp)
+	}
+
+	resp, err := c.send(ps.MsgRmdir, ps.RmdirRequest{
+		ParentID: parentID,
+		Name:     name,
+	})
+	if err != nil {
+		return fmt.Errorf("rmdir %q failed: %w", cleanPath, err)
+	}
+	if resp.Code != communication.CodeOK {
+		return responseError("rmdir", cleanPath, resp)
+	}
+
+	return nil
+}
+
 func (c *SandstoreClient) addFD(inodeID string, filePath string, mode int) (int, error) {
 	c.TableMu.Lock()
 	defer c.TableMu.Unlock()
