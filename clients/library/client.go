@@ -84,6 +84,61 @@ func (c *SandstoreClient) Open(path string, mode int) (int, error) {
 	}
 }
 
+func (c *SandstoreClient) Read(fd int, n int) ([]byte, error) {
+	if c == nil {
+		return nil, fmt.Errorf("sandstore client is nil")
+	}
+	if c.Comm == nil {
+		return nil, fmt.Errorf("sandstore communicator is nil")
+	}
+	if c.ServerAddr == "" {
+		return nil, fmt.Errorf("sandstore server address is empty")
+	}
+	if fd < 0 {
+		return nil, fmt.Errorf("bad file descriptor")
+	}
+	if n < 0 {
+		return nil, fmt.Errorf("invalid read length %d", n)
+	}
+
+	c.TableMu.RLock()
+	fileStruct := c.OpenFiles[uint64(fd)]
+	c.TableMu.RUnlock()
+
+	if fileStruct == nil {
+		return nil, fmt.Errorf("bad file descriptor")
+	}
+
+	fileStruct.Mu.Lock()
+	defer fileStruct.Mu.Unlock()
+
+	if fileStruct.Mode&os.O_WRONLY != 0 && fileStruct.Mode&os.O_RDWR == 0 {
+		return nil, fmt.Errorf("file not open for reading")
+	}
+
+	resp, err := c.send(ps.MsgRead, ps.ReadRequest{
+		InodeID: fileStruct.InodeID,
+		Offset:  fileStruct.Offset,
+		Length:  int64(n),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read %q failed: %w", fileStruct.FilePath, err)
+	}
+	if resp.Code != communication.CodeOK {
+		return nil, responseError("read", fileStruct.FilePath, resp)
+	}
+
+	var data []byte
+	if len(resp.Body) > 0 {
+		if err := json.Unmarshal(resp.Body, &data); err != nil {
+			return nil, fmt.Errorf("failed to decode read response for %q: %w", fileStruct.FilePath, err)
+		}
+	}
+
+	fileStruct.Offset += int64(len(data))
+	return data, nil
+}
+
 func (c *SandstoreClient) addFD(inodeID string, filePath string, mode int) (int, error) {
 	c.TableMu.Lock()
 	defer c.TableMu.Unlock()
