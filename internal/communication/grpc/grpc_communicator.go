@@ -16,6 +16,8 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
+const maxGRPCMessageSize = 32 * 1024 * 1024
+
 type GRPCCommunicator struct {
 	listenAddress string
 	handler       communication.MessageHandler
@@ -68,7 +70,10 @@ func (c *GRPCCommunicator) Start(handler communication.MessageHandler) error {
 	})
 
 	c.handler = handler
-	c.grpcServer = grpc.NewServer()
+	c.grpcServer = grpc.NewServer(
+		grpc.MaxRecvMsgSize(maxGRPCMessageSize),
+		grpc.MaxSendMsgSize(maxGRPCMessageSize),
+	)
 	communicationpb.RegisterMessageServiceServer(c.grpcServer, &grpcServer{comm: c})
 
 	lis, err := net.Listen("tcp", c.listenAddress)
@@ -142,7 +147,14 @@ func (c *GRPCCommunicator) Send(ctx context.Context, to string, msg communicatio
 			Metadata: map[string]any{"to": to},
 		})
 
-		conn, err := grpc.NewClient(to, grpc.WithTransportCredentials(insecure.NewCredentials()))
+		conn, err := grpc.NewClient(
+			to,
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithDefaultCallOptions(
+				grpc.MaxCallRecvMsgSize(maxGRPCMessageSize),
+				grpc.MaxCallSendMsgSize(maxGRPCMessageSize),
+			),
+		)
 		if err != nil {
 			c.ls.Error(log_service.LogEvent{
 				Message:  "Failed to create GRPC client",

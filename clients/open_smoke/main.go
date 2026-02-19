@@ -119,6 +119,26 @@ func main() {
 	}
 	log.Printf("PASS: Sequential flushes persisted chunkA+chunkB in exact order")
 
+	if err := client.Fsync(fdCreate); err != nil {
+		log.Fatalf("Fsync(chunkC flush) failed on %s for %s fd=%d: %v", serverAddr, path, fdCreate, err)
+	}
+	log.Printf("PASS: Fsync(chunkC flush) returned success")
+
+	expectedAfterFsync := append(append(make([]byte, 0, len(expectedAfterC)+len(chunkC)), expectedAfterC...), chunkC...)
+	dataAfterFsync, err := readFromFreshFD(client, path, len(expectedAfterFsync)+128)
+	if err != nil {
+		log.Fatalf("Read(after fsync) failed on %s for %s: %v", serverAddr, path, err)
+	}
+	if !bytes.Equal(dataAfterFsync, expectedAfterFsync) {
+		log.Fatalf("Read(after fsync) expected chunkA+chunkB+chunkC (%d bytes), got %d bytes", len(expectedAfterFsync), len(dataAfterFsync))
+	}
+	log.Printf("PASS: Fsync persisted buffered chunkC at correct offset")
+
+	if err := client.Fsync(fdCreate); err != nil {
+		log.Fatalf("Fsync(empty buffer) failed on %s for %s fd=%d: %v", serverAddr, path, fdCreate, err)
+	}
+	log.Printf("PASS: Fsync(empty buffer) returned success")
+
 	if len(chunkA)+len(chunkB) <= maxBufferSize {
 		log.Fatalf("internal smoke test invariant failed: chunkA+chunkB must exceed maxBufferSize")
 	}
