@@ -540,6 +540,65 @@ func (c *SandstoreClient) Rmdir(path string) error {
 	return nil
 }
 
+func (c *SandstoreClient) ListDir(path string) ([]pms.DirEntry, error) {
+	if c == nil {
+		return nil, fmt.Errorf("sandstore client is nil")
+	}
+	if c.Comm == nil {
+		return nil, fmt.Errorf("sandstore communicator is nil")
+	}
+	if c.ServerAddr == "" {
+		return nil, fmt.Errorf("sandstore server address is empty")
+	}
+
+	cleanPath, err := normalizePath(path)
+	if err != nil {
+		return nil, err
+	}
+
+	inodeID, lookupResp, err := c.lookupPath(cleanPath)
+	if err != nil {
+		return nil, err
+	}
+	if lookupResp.Code != communication.CodeOK {
+		return nil, responseError("listdir", cleanPath, lookupResp)
+	}
+
+	const batchSize = 100
+	allEntries := make([]pms.DirEntry, 0)
+	cookie := 0
+	eof := false
+
+	for !eof {
+		resp, err := c.send(ps.MsgReadDir, ps.ReadDirRequest{
+			InodeID:    inodeID,
+			Cookie:     cookie,
+			MaxEntries: batchSize,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("listdir %q failed: %w", cleanPath, err)
+		}
+		if resp.Code != communication.CodeOK {
+			return nil, responseError("listdir", cleanPath, resp)
+		}
+
+		var page struct {
+			Entries []pms.DirEntry `json:"entries"`
+			Cookie  int            `json:"cookie"`
+			EOF     bool           `json:"eof"`
+		}
+		if err := json.Unmarshal(resp.Body, &page); err != nil {
+			return nil, fmt.Errorf("failed to decode listdir response for %q: %w", cleanPath, err)
+		}
+
+		allEntries = append(allEntries, page.Entries...)
+		cookie = page.Cookie
+		eof = page.EOF
+	}
+
+	return allEntries, nil
+}
+
 func (c *SandstoreClient) addFD(inodeID string, filePath string, mode int) (int, error) {
 	c.TableMu.Lock()
 	defer c.TableMu.Unlock()

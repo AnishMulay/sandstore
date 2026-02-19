@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -386,6 +387,74 @@ func main() {
 		log.Fatalf("Rmdir(missing dir) expected failure for %s", missingRmdirPath)
 	}
 	log.Printf("PASS: Rmdir(missing dir) returned expected error")
+
+	listDirPath := fmt.Sprintf("/sandlib-smoke-listdir-%d", time.Now().UnixNano())
+	if err := client.Mkdir(listDirPath, 0o755); err != nil {
+		log.Fatalf("Mkdir(listdir root) failed on %s for %s: %v", serverAddr, listDirPath, err)
+	}
+	listDirChildDir := fmt.Sprintf("%s/%s", listDirPath, "child-dir")
+	if err := client.Mkdir(listDirChildDir, 0o755); err != nil {
+		log.Fatalf("Mkdir(listdir child dir) failed on %s for %s: %v", serverAddr, listDirChildDir, err)
+	}
+	listDirFileA := fmt.Sprintf("%s/%s", listDirPath, "alpha.txt")
+	listDirFileB := fmt.Sprintf("%s/%s", listDirPath, "beta.txt")
+	fdListDirA, err := client.Open(listDirFileA, os.O_CREATE|os.O_RDWR)
+	if err != nil {
+		log.Fatalf("Open(listdir alpha) failed on %s for %s: %v", serverAddr, listDirFileA, err)
+	}
+	if err := client.Close(fdListDirA); err != nil {
+		log.Fatalf("Close(listdir alpha) failed on %s for %s fd=%d: %v", serverAddr, listDirFileA, fdListDirA, err)
+	}
+	fdListDirB, err := client.Open(listDirFileB, os.O_CREATE|os.O_RDWR)
+	if err != nil {
+		log.Fatalf("Open(listdir beta) failed on %s for %s: %v", serverAddr, listDirFileB, err)
+	}
+	if err := client.Close(fdListDirB); err != nil {
+		log.Fatalf("Close(listdir beta) failed on %s for %s fd=%d: %v", serverAddr, listDirFileB, fdListDirB, err)
+	}
+
+	entries, err := client.ListDir(listDirPath)
+	if err != nil {
+		log.Fatalf("ListDir(valid path) failed on %s for %s: %v", serverAddr, listDirPath, err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name)
+	}
+	sort.Strings(names)
+	expectedNames := []string{"alpha.txt", "beta.txt", "child-dir"}
+	for _, expected := range expectedNames {
+		found := false
+		for _, name := range names {
+			if name == expected {
+				found = true
+				break
+			}
+		}
+		if !found {
+			log.Fatalf("ListDir(valid path) missing entry %q in %v", expected, names)
+		}
+	}
+	log.Printf("PASS: ListDir(valid path) returned expected entries: %v", names)
+
+	if _, err := client.ListDir(fmt.Sprintf("%s/%s", listDirPath, "missing-dir")); err == nil {
+		log.Fatalf("ListDir(missing path) expected failure under %s", listDirPath)
+	}
+	log.Printf("PASS: ListDir(missing path) returned expected error")
+
+	if err := client.Remove(listDirFileA); err != nil {
+		log.Fatalf("Remove(listdir alpha) failed on %s for %s: %v", serverAddr, listDirFileA, err)
+	}
+	if err := client.Remove(listDirFileB); err != nil {
+		log.Fatalf("Remove(listdir beta) failed on %s for %s: %v", serverAddr, listDirFileB, err)
+	}
+	if err := client.Rmdir(listDirChildDir); err != nil {
+		log.Fatalf("Rmdir(listdir child dir) failed on %s for %s: %v", serverAddr, listDirChildDir, err)
+	}
+	if err := client.Rmdir(listDirPath); err != nil {
+		log.Fatalf("Rmdir(listdir root) failed on %s for %s: %v", serverAddr, listDirPath, err)
+	}
+	log.Printf("PASS: ListDir test artifacts cleaned up")
 
 	if len(chunkA)+len(chunkB) <= maxBufferSize {
 		log.Fatalf("internal smoke test invariant failed: chunkA+chunkB must exceed maxBufferSize")
