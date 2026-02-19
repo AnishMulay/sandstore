@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	pathpkg "path"
+	filepathpkg "path/filepath"
 	"strings"
 
 	"github.com/AnishMulay/sandstore/internal/communication"
@@ -443,6 +444,53 @@ func (c *SandstoreClient) Rename(src string, dst string) error {
 			fileStruct.FilePath = cleanDst
 			fileStruct.Mu.Unlock()
 		}
+	}
+
+	return nil
+}
+
+func (c *SandstoreClient) Mkdir(path string, mode int) error {
+	if c == nil {
+		return fmt.Errorf("sandstore client is nil")
+	}
+	if c.Comm == nil {
+		return fmt.Errorf("sandstore communicator is nil")
+	}
+	if c.ServerAddr == "" {
+		return fmt.Errorf("sandstore server address is empty")
+	}
+
+	cleanPath, err := normalizePath(path)
+	if err != nil {
+		return err
+	}
+
+	parentPath := filepathpkg.Dir(cleanPath)
+	name := filepathpkg.Base(cleanPath)
+	if name == "" || name == "." || name == "/" {
+		return fmt.Errorf("invalid path %q", cleanPath)
+	}
+
+	parentID, parentResp, err := c.lookupPath(parentPath)
+	if err != nil {
+		return err
+	}
+	if parentResp.Code != communication.CodeOK {
+		return responseError("mkdir", cleanPath, parentResp)
+	}
+
+	resp, err := c.send(ps.MsgMkdir, ps.MkdirRequest{
+		ParentID: parentID,
+		Name:     name,
+		Mode:     uint32(mode & 0o777),
+		UID:      0,
+		GID:      0,
+	})
+	if err != nil {
+		return fmt.Errorf("mkdir %q failed: %w", cleanPath, err)
+	}
+	if resp.Code != communication.CodeOK {
+		return responseError("mkdir", cleanPath, resp)
 	}
 
 	return nil

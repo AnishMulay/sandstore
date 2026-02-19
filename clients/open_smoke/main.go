@@ -316,6 +316,36 @@ func main() {
 	}
 	log.Printf("PASS: Rename(missing src) returned expected error")
 
+	mkdirPath := fmt.Sprintf("/sandlib-smoke-mkdir-%d", time.Now().UnixNano())
+	if err := client.Mkdir(mkdirPath, 0o755); err != nil {
+		log.Fatalf("Mkdir(valid path) failed on %s for %s: %v", serverAddr, mkdirPath, err)
+	}
+	log.Printf("PASS: Mkdir(valid path) created directory %s", mkdirPath)
+
+	mkdirFilePath := fmt.Sprintf("%s/%s", mkdirPath, "mkdir-probe.txt")
+	fdMkdirProbe, err := client.Open(mkdirFilePath, os.O_CREATE|os.O_RDWR)
+	if err != nil {
+		log.Fatalf("Open(file in mkdir path) failed on %s for %s: %v", serverAddr, mkdirFilePath, err)
+	}
+	if err := client.Close(fdMkdirProbe); err != nil {
+		log.Fatalf("Close(file in mkdir path) failed on %s for %s fd=%d: %v", serverAddr, mkdirFilePath, fdMkdirProbe, err)
+	}
+	if err := client.Remove(mkdirFilePath); err != nil {
+		log.Fatalf("Remove(file in mkdir path) failed on %s for %s: %v", serverAddr, mkdirFilePath, err)
+	}
+	log.Printf("PASS: Mkdir(valid path) is usable for file create/open/remove")
+
+	if err := client.Mkdir(mkdirPath, 0o755); err == nil {
+		log.Fatalf("Mkdir(existing path) expected failure for %s", mkdirPath)
+	}
+	log.Printf("PASS: Mkdir(existing path) returned expected error")
+
+	missingParentMkdirPath := fmt.Sprintf("/sandlib-smoke-mkdir-missing-parent-%d/child", time.Now().UnixNano())
+	if err := client.Mkdir(missingParentMkdirPath, 0o755); err == nil {
+		log.Fatalf("Mkdir(missing parent) expected failure for %s", missingParentMkdirPath)
+	}
+	log.Printf("PASS: Mkdir(missing parent) returned expected error")
+
 	if len(chunkA)+len(chunkB) <= maxBufferSize {
 		log.Fatalf("internal smoke test invariant failed: chunkA+chunkB must exceed maxBufferSize")
 	}
