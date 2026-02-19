@@ -3,15 +3,17 @@ package simple
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 
-	"github.com/AnishMulay/sandstore/internal/communication"
-	grpccomm "github.com/AnishMulay/sandstore/internal/communication/grpc"
-	"github.com/AnishMulay/sandstore/internal/log_service"
 	crep "github.com/AnishMulay/sandstore/internal/chunk_replicator/default_replicator"
 	pcs "github.com/AnishMulay/sandstore/internal/chunk_service"
+	"github.com/AnishMulay/sandstore/internal/communication"
+	grpccomm "github.com/AnishMulay/sandstore/internal/communication/grpc"
 	pfs "github.com/AnishMulay/sandstore/internal/file_service"
+	"github.com/AnishMulay/sandstore/internal/log_service"
 	raft "github.com/AnishMulay/sandstore/internal/metadata_replicator/raft_replicator"
+	inmemoryms "github.com/AnishMulay/sandstore/internal/metadata_service/inmemory"
 	ps "github.com/AnishMulay/sandstore/internal/server"
 )
 
@@ -263,11 +265,16 @@ func (s *SimpleServer) handleMessage(msg communication.Message) (*communication.
 // respond is a helper to standardize JSON responses and error codes
 func (s *SimpleServer) respond(data any, err error) (*communication.Response, error) {
 	if err != nil {
-		// In a real implementation, we would switch on err types (ErrNotFound, etc.)
-		// to return CodeNotFound vs CodeInternal.
-		// For simple MVP, we default to Internal for generic errors.
+		code := communication.CodeInternal
+		switch {
+		case errors.Is(err, inmemoryms.ErrAlreadyExists):
+			code = communication.CodeAlreadyExists
+		case errors.Is(err, inmemoryms.ErrNotFound):
+			code = communication.CodeNotFound
+		}
+
 		return &communication.Response{
-			Code: communication.CodeInternal,
+			Code: code,
 			Body: []byte(err.Error()),
 		}, nil
 	}

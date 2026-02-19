@@ -34,3 +34,7 @@ go.work.sum
 # Go cache
 .gocache
 **/.gocache
+
+# macOS Finder metadata
+.DS_Store
+**/.DS_Store

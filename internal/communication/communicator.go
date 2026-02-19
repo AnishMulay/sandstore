@@ -92,11 +92,12 @@ type AppendEntriesRequest struct {
 type SandCode string
 
 const (
-	CodeOK          SandCode = "OK"
-	CodeBadRequest  SandCode = "BAD_REQUEST"
-	CodeNotFound    SandCode = "NOT_FOUND"
-	CodeInternal    SandCode = "INTERNAL"
-	CodeUnavailable SandCode = "UNAVAILABLE"
+	CodeOK            SandCode = "OK"
+	CodeBadRequest    SandCode = "BAD_REQUEST"
+	CodeNotFound      SandCode = "NOT_FOUND"
+	CodeAlreadyExists SandCode = "ALREADY_EXISTS"
+	CodeInternal      SandCode = "INTERNAL"
+	CodeUnavailable   SandCode = "UNAVAILABLE"
 )
 
 type Response struct {
