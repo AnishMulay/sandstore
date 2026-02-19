@@ -14,6 +14,7 @@ import (
 	grpccomm "github.com/AnishMulay/sandstore/internal/communication/grpc"
 	logservice "github.com/AnishMulay/sandstore/internal/log_service"
 	locallog "github.com/AnishMulay/sandstore/internal/log_service/localdisc"
+	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
 )
 
 const maxBufferSize = 2 * 1024 * 1024
@@ -442,6 +443,38 @@ func main() {
 	}
 	log.Printf("PASS: ListDir(missing path) returned expected error")
 
+	fileAttrs, err := client.Stat(listDirFileA)
+	if err != nil {
+		log.Fatalf("Stat(file) failed on %s for %s: %v", serverAddr, listDirFileA, err)
+	}
+	if fileAttrs.InodeID == "" {
+		log.Fatalf("Stat(file) expected inode id for %s", listDirFileA)
+	}
+	if fileAttrs.Type != pms.TypeFile {
+		log.Fatalf("Stat(file) expected file type for %s, got %d", listDirFileA, fileAttrs.Type)
+	}
+	if fileAttrs.Size != 0 {
+		log.Fatalf("Stat(file) expected size 0 for %s, got %d", listDirFileA, fileAttrs.Size)
+	}
+	log.Printf("PASS: Stat(file) returned expected attributes for %s", listDirFileA)
+
+	dirAttrs, err := client.Stat(listDirPath)
+	if err != nil {
+		log.Fatalf("Stat(dir) failed on %s for %s: %v", serverAddr, listDirPath, err)
+	}
+	if dirAttrs.InodeID == "" {
+		log.Fatalf("Stat(dir) expected inode id for %s", listDirPath)
+	}
+	if dirAttrs.Type != pms.TypeDirectory {
+		log.Fatalf("Stat(dir) expected directory type for %s, got %d", listDirPath, dirAttrs.Type)
+	}
+	log.Printf("PASS: Stat(dir) returned expected attributes for %s", listDirPath)
+
+	if _, err := client.Stat(fmt.Sprintf("%s/%s", listDirPath, "missing-stat.txt")); err == nil {
+		log.Fatalf("Stat(missing path) expected failure under %s", listDirPath)
+	}
+	log.Printf("PASS: Stat(missing path) returned expected error")
+
 	if err := client.Remove(listDirFileA); err != nil {
 		log.Fatalf("Remove(listdir alpha) failed on %s for %s: %v", serverAddr, listDirFileA, err)
 	}
@@ -453,6 +486,9 @@ func main() {
 	}
 	if err := client.Rmdir(listDirPath); err != nil {
 		log.Fatalf("Rmdir(listdir root) failed on %s for %s: %v", serverAddr, listDirPath, err)
+	}
+	if _, err := client.Stat(listDirFileA); err == nil {
+		log.Fatalf("Stat(removed file) expected failure for %s", listDirFileA)
 	}
 	log.Printf("PASS: ListDir test artifacts cleaned up")
 

@@ -599,6 +599,48 @@ func (c *SandstoreClient) ListDir(path string) ([]pms.DirEntry, error) {
 	return allEntries, nil
 }
 
+func (c *SandstoreClient) Stat(path string) (*pms.Attributes, error) {
+	if c == nil {
+		return nil, fmt.Errorf("sandstore client is nil")
+	}
+	if c.Comm == nil {
+		return nil, fmt.Errorf("sandstore communicator is nil")
+	}
+	if c.ServerAddr == "" {
+		return nil, fmt.Errorf("sandstore server address is empty")
+	}
+
+	cleanPath, err := normalizePath(path)
+	if err != nil {
+		return nil, err
+	}
+
+	inodeID, lookupResp, err := c.lookupPath(cleanPath)
+	if err != nil {
+		return nil, err
+	}
+	if lookupResp.Code != communication.CodeOK {
+		return nil, responseError("stat", cleanPath, lookupResp)
+	}
+
+	resp, err := c.send(ps.MsgGetAttr, ps.GetAttrRequest{InodeID: inodeID})
+	if err != nil {
+		return nil, fmt.Errorf("stat %q failed: %w", cleanPath, err)
+	}
+	if resp.Code != communication.CodeOK {
+		return nil, responseError("stat", cleanPath, resp)
+	}
+
+	attrs := &pms.Attributes{}
+	if len(resp.Body) > 0 {
+		if err := json.Unmarshal(resp.Body, attrs); err != nil {
+			return nil, fmt.Errorf("failed to decode stat response for %q: %w", cleanPath, err)
+		}
+	}
+
+	return attrs, nil
+}
+
 func (c *SandstoreClient) addFD(inodeID string, filePath string, mode int) (int, error) {
 	c.TableMu.Lock()
 	defer c.TableMu.Unlock()
