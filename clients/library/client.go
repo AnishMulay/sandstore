@@ -236,6 +236,51 @@ func (c *SandstoreClient) Fsync(fd int) error {
 	return nil
 }
 
+func (c *SandstoreClient) Close(fd int) error {
+	if c == nil {
+		return fmt.Errorf("sandstore client is nil")
+	}
+	if c.Comm == nil {
+		return fmt.Errorf("sandstore communicator is nil")
+	}
+	if c.ServerAddr == "" {
+		return fmt.Errorf("sandstore server address is empty")
+	}
+	if fd < 0 {
+		return fmt.Errorf("bad file descriptor")
+	}
+
+	c.TableMu.Lock()
+	fileStruct := c.OpenFiles[uint64(fd)]
+	if fileStruct == nil {
+		c.TableMu.Unlock()
+		return fmt.Errorf("bad file descriptor")
+	}
+	delete(c.OpenFiles, uint64(fd))
+	c.TableMu.Unlock()
+
+	fileStruct.Mu.Lock()
+	defer fileStruct.Mu.Unlock()
+
+	if len(fileStruct.Buffer) > 0 {
+		flushOffset := fileStruct.Offset - int64(len(fileStruct.Buffer))
+		resp, err := c.send(ps.MsgWrite, ps.WriteRequest{
+			InodeID: fileStruct.InodeID,
+			Offset:  flushOffset,
+			Data:    fileStruct.Buffer,
+		})
+		if err != nil {
+			return fmt.Errorf("close %q failed: %w", fileStruct.FilePath, err)
+		}
+		if resp.Code != communication.CodeOK {
+			return responseError("close", fileStruct.FilePath, resp)
+		}
+		fileStruct.Buffer = fileStruct.Buffer[:0]
+	}
+
+	return nil
+}
+
 func (c *SandstoreClient) addFD(inodeID string, filePath string, mode int) (int, error) {
 	c.TableMu.Lock()
 	defer c.TableMu.Unlock()

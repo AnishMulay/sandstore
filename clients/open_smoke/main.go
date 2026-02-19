@@ -139,6 +139,67 @@ func main() {
 	}
 	log.Printf("PASS: Fsync(empty buffer) returned success")
 
+	closePath := fmt.Sprintf("/sandlib-smoke-close-%d.txt", time.Now().UnixNano())
+	fdClose, err := client.Open(closePath, os.O_CREATE|os.O_RDWR)
+	if err != nil {
+		log.Fatalf("Open(close target) failed on %s for %s: %v", serverAddr, closePath, err)
+	}
+	log.Printf("PASS: Open(close target) returned fd=%d for %s", fdClose, closePath)
+
+	closeChunk := makePatternChunk(768*1024, "close-chunk")
+	writtenClose, err := client.Write(fdClose, closeChunk)
+	if err != nil {
+		log.Fatalf("Write(close chunk) failed on %s for %s fd=%d: %v", serverAddr, closePath, fdClose, err)
+	}
+	if writtenClose != len(closeChunk) {
+		log.Fatalf("Write(close chunk) expected %d bytes, got %d", len(closeChunk), writtenClose)
+	}
+	log.Printf("PASS: Write(close chunk) wrote %d buffered bytes", writtenClose)
+
+	dataBeforeClose, err := readFromFreshFD(client, closePath, len(closeChunk)+128)
+	if err != nil {
+		log.Fatalf("Read(before close flush) failed on %s for %s: %v", serverAddr, closePath, err)
+	}
+	if len(dataBeforeClose) != 0 {
+		log.Fatalf("Read(before close flush) expected 0 persisted bytes, got %d", len(dataBeforeClose))
+	}
+	log.Printf("PASS: Buffered Write(close chunk) not visible before Close flush")
+
+	if err := client.Close(fdClose); err != nil {
+		log.Fatalf("Close(flush buffered data) failed on %s for %s fd=%d: %v", serverAddr, closePath, fdClose, err)
+	}
+	log.Printf("PASS: Close(flush buffered data) returned success")
+
+	dataAfterClose, err := readFromFreshFD(client, closePath, len(closeChunk)+128)
+	if err != nil {
+		log.Fatalf("Read(after close flush) failed on %s for %s: %v", serverAddr, closePath, err)
+	}
+	if !bytes.Equal(dataAfterClose, closeChunk) {
+		log.Fatalf("Read(after close flush) expected close chunk (%d bytes), got %d bytes", len(closeChunk), len(dataAfterClose))
+	}
+	log.Printf("PASS: Close persisted buffered data at correct offset")
+
+	if _, err := client.Write(fdClose, []byte("x")); err == nil {
+		log.Fatalf("Write(closed fd) expected failure for fd=%d", fdClose)
+	}
+	if err := client.Fsync(fdClose); err == nil {
+		log.Fatalf("Fsync(closed fd) expected failure for fd=%d", fdClose)
+	}
+	if err := client.Close(fdClose); err == nil {
+		log.Fatalf("Close(closed fd) expected failure for fd=%d", fdClose)
+	}
+	log.Printf("PASS: Closed FD rejects Write/Fsync/Close as expected")
+
+	emptyClosePath := fmt.Sprintf("/sandlib-smoke-close-empty-%d.txt", time.Now().UnixNano())
+	fdCloseEmpty, err := client.Open(emptyClosePath, os.O_CREATE|os.O_RDWR)
+	if err != nil {
+		log.Fatalf("Open(close empty target) failed on %s for %s: %v", serverAddr, emptyClosePath, err)
+	}
+	if err := client.Close(fdCloseEmpty); err != nil {
+		log.Fatalf("Close(empty buffer) failed on %s for %s fd=%d: %v", serverAddr, emptyClosePath, fdCloseEmpty, err)
+	}
+	log.Printf("PASS: Close(empty buffer) returned success")
+
 	if len(chunkA)+len(chunkB) <= maxBufferSize {
 		log.Fatalf("internal smoke test invariant failed: chunkA+chunkB must exceed maxBufferSize")
 	}
@@ -196,6 +257,10 @@ func readFromFreshFD(client *sandlib.SandstoreClient, path string, n int) ([]byt
 	data, err := client.Read(fd, n)
 	if err != nil {
 		return nil, fmt.Errorf("read failed for fd=%d: %w", fd, err)
+	}
+
+	if err := client.Close(fd); err != nil {
+		return nil, fmt.Errorf("close failed for fd=%d: %w", fd, err)
 	}
 	return data, nil
 }
