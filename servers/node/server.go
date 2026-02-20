@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	// Core Services
@@ -61,6 +62,15 @@ func (s *singleNodeServer) Run() error {
 }
 
 func Build(opts Options) runnable {
+	etcdEndpointsEnv := os.Getenv("ETCD_ENDPOINTS")
+	if etcdEndpointsEnv == "" {
+		etcdEndpointsEnv = "127.0.0.1:2379"
+	}
+	etcdEndpoints := strings.Split(etcdEndpointsEnv, ",")
+	for i, endpoint := range etcdEndpoints {
+		etcdEndpoints[i] = strings.TrimSpace(endpoint)
+	}
+
 	// 1. Logging
 	logDir := opts.DataDir + "/logs"
 	ls := locallog.NewLocalDiscLogService(logDir, opts.NodeID, logservice.InfoLevel)
@@ -70,7 +80,7 @@ func Build(opts Options) runnable {
 	comm := grpccomm.NewGRPCCommunicator(opts.ListenAddr, ls)
 
 	// 3. Cluster Service (The Phonebook)
-	clusterService := clustercetcd.NewEtcdClusterService([]string{"localhost:2379"}, ls)
+	clusterService := clustercetcd.NewEtcdClusterService(etcdEndpoints, ls)
 	if err := clusterService.Start(context.Background()); err != nil {
 		panic(err)
 	}
