@@ -72,4 +72,7 @@ kill:
 # Clean up
 .PHONY: clean
 clean:
-	rm -rf ./bin && docker compose -f deploy/docker/etcd/docker-compose.yaml down -v
+	-@docker compose -f deploy/docker/docker-compose.yaml down -v --remove-orphans >/dev/null 2>&1 || true
+	-@docker compose -f deploy/docker/etcd/docker-compose.yaml down -v --remove-orphans >/dev/null 2>&1 || true
+	rm -rf ./bin ./run ./logs ./chunks
+	rm -f $(SANDSTORE_BINARY) $(CLIENT_BINARY) $(MCP_BINARY) $(OPEN_SMOKE_BINARY) $(LEGACY_CLIENT_BINARY) $(LEGACY_MCP_BINARY) $(LEGACY_OPEN_SMOKE_BINARY) config.yaml
