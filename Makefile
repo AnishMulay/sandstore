@@ -2,6 +2,7 @@
 SANDSTORE_BINARY=sandstore
 CLIENT_BINARY=bin/client
 MCP_BINARY=sandstore-mcp
+OPEN_SMOKE_BINARY=bin/open-smoke
 
 # Generate protobuf files
 .PHONY: proto
@@ -56,5 +57,5 @@ clean:
 	-@pgrep -fal sandstore || true
 	-@pkill -f sandstore || true
 	-@docker compose -f deploy/docker/etcd/docker-compose.yaml down --remove-orphans -v >/dev/null 2>&1 || true
-	rm -f $(SANDSTORE_BINARY) $(CLIENT_BINARY) $(MCP_BINARY)
+	rm -f $(SANDSTORE_BINARY) $(CLIENT_BINARY) $(MCP_BINARY) $(OPEN_SMOKE_BINARY)
 	rm -rf bin/ run/ chunks logs config.yaml

@@ -3,6 +3,7 @@ package inmemory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -599,8 +600,16 @@ func (s *InMemoryMetadataService) Create(ctx context.Context, parentInodeID stri
 	}
 
 	// 4. Return result
-	// We need to read it back to ensure we return the state as applied
-	return s.GetInode(ctx, newID)
+	// Read back the specific inode we created. If it is missing, another
+	// committed create for the same name won the race.
+	inode, err := s.GetInode(ctx, newID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return nil, ErrAlreadyExists
+		}
+		return nil, err
+	}
+	return inode, nil
 }
 
 func (s *InMemoryMetadataService) Mkdir(ctx context.Context, parentInodeID string, name string, mode uint32, uid, gid uint32) (*pms.Inode, error) {
@@ -662,6 +671,22 @@ func (s *InMemoryMetadataService) Rmdir(ctx context.Context, parentInodeID strin
 }
 
 func (s *InMemoryMetadataService) Rename(ctx context.Context, srcParentID, srcName, dstParentID, dstName string) error {
+	s.mu.RLock()
+	srcParent, srcParentExists := s.inodes[srcParentID]
+	if !srcParentExists {
+		s.mu.RUnlock()
+		return ErrNotFound
+	}
+	if _, srcExists := srcParent.Children[srcName]; !srcExists {
+		s.mu.RUnlock()
+		return ErrNotFound
+	}
+	if _, dstParentExists := s.inodes[dstParentID]; !dstParentExists {
+		s.mu.RUnlock()
+		return ErrNotFound
+	}
+	s.mu.RUnlock()
+
 	op := pms.MetadataOperation{
 		Type:        pms.OpRename,
 		ParentID:    srcParentID,
