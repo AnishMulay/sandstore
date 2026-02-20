@@ -19,6 +19,10 @@ import (
 const firstUserFD uint64 = 3
 const maxBufferSize = 2 * 1024 * 1024
 
+// NewSandstoreClient constructs a client bound to one server address and
+// initializes an empty descriptor table.
+//
+// It performs no network calls and acquires no locks.
 func NewSandstoreClient(serverAddr string, comm *grpccomm.GRPCCommunicator) *SandstoreClient {
 	return &SandstoreClient{
 		ServerAddr: serverAddr,
@@ -27,7 +31,23 @@ func NewSandstoreClient(serverAddr string, comm *grpccomm.GRPCCommunicator) *San
 	}
 }
 
-// Open implements a Lookup -> Create -> Lookup retry flow to safely handle create races.
+// Open resolves path to an inode and returns a process-local file descriptor.
+//
+// Behavior:
+// - Uses LookupPath first.
+// - If not found and O_CREATE is set, issues Create then retries lookup on
+//   already-exists races.
+// - Inserts a new SandstoreFD with Offset 0 and an empty write buffer.
+// - O_EXCL is not currently enforced client-side; an existing path is opened
+//   successfully when lookup returns OK.
+//
+// Thread-safety:
+// - Performs network RPCs without holding TableMu.
+// - Acquires TableMu write lock only inside addFD when mutating OpenFiles.
+//
+// Consistency:
+// - LookupPath is a metadata read from the contacted server.
+// - Create is an atomic, Raft-replicated metadata mutation before success.
 func (c *SandstoreClient) Open(path string, mode int) (int, error) {
 	if c == nil {
 		return 0, fmt.Errorf("sandstore client is nil")
@@ -86,6 +106,16 @@ func (c *SandstoreClient) Open(path string, mode int) (int, error) {
 	}
 }
 
+// Read returns up to n bytes from the file's current offset and advances the
+// local offset by the bytes actually returned.
+//
+// Thread-safety:
+// - Acquires TableMu read lock to resolve fd -> SandstoreFD.
+// - Acquires the file-level mutex (SandstoreFD.Mu) for the full operation.
+//
+// Consistency:
+// - Uses MsgRead, which is a local server read path and therefore eventually
+//   consistent with the latest committed cluster state.
 func (c *SandstoreClient) Read(fd int, n int) ([]byte, error) {
 	if c == nil {
 		return nil, fmt.Errorf("sandstore client is nil")
@@ -141,6 +171,22 @@ func (c *SandstoreClient) Read(fd int, n int) ([]byte, error) {
 	return data, nil
 }
 
+// Write appends data to the per-fd client buffer and advances the logical
+// offset.
+//
+// Behavior:
+// - If appending would exceed maxBufferSize, flushes the existing buffer first
+//   with MsgWrite at (Offset - len(Buffer)).
+// - Newly provided data is buffered after any overflow flush.
+// - Returns len(data) on success.
+//
+// Thread-safety:
+// - Acquires TableMu read lock to resolve fd.
+// - Acquires SandstoreFD.Mu for buffer and offset mutation.
+//
+// Consistency:
+// - Buffered bytes are not persisted until overflow flush, Fsync, or Close.
+// - Each MsgWrite flush is a synchronous, Raft-replicated write before return.
 func (c *SandstoreClient) Write(fd int, data []byte) (int, error) {
 	if c == nil {
 		return 0, fmt.Errorf("sandstore client is nil")
@@ -191,6 +237,19 @@ func (c *SandstoreClient) Write(fd int, data []byte) (int, error) {
 	return len(data), nil
 }
 
+// Fsync flushes all buffered write data for fd to the server.
+//
+// Behavior:
+// - If the buffer is empty, returns nil.
+// - Flushes at (Offset - len(Buffer)) and clears the buffer on success.
+//
+// Thread-safety:
+// - Acquires TableMu read lock to resolve fd.
+// - Acquires SandstoreFD.Mu exclusively while checking/flushing the buffer.
+//
+// Consistency:
+// - Uses synchronous MsgWrite; success means the write reached the server's
+//   replicated write path.
 func (c *SandstoreClient) Fsync(fd int) error {
 	if c == nil {
 		return fmt.Errorf("sandstore client is nil")
@@ -237,6 +296,20 @@ func (c *SandstoreClient) Fsync(fd int) error {
 	return nil
 }
 
+// Close detaches fd from the client table and flushes any remaining buffered
+// data for that descriptor.
+//
+// Behavior:
+// - Removes fd from OpenFiles first.
+// - Then waits on the file mutex and performs a final buffer flush if needed.
+// - If final flush fails, returns an error even though fd is already removed.
+//
+// Thread-safety:
+// - Acquires TableMu write lock to remove fd from OpenFiles.
+// - Acquires SandstoreFD.Mu afterward to serialize against in-flight file ops.
+//
+// Consistency:
+// - Final flush uses synchronous MsgWrite through the replicated write path.
 func (c *SandstoreClient) Close(fd int) error {
 	if c == nil {
 		return fmt.Errorf("sandstore client is nil")
@@ -282,6 +355,22 @@ func (c *SandstoreClient) Close(fd int) error {
 	return nil
 }
 
+// Remove unlinks filepath on the server and eagerly removes any matching open
+// descriptor entry from the local table.
+//
+// Behavior:
+// - Holds the global table lock for the full operation.
+// - If filepath is currently open, locks that file entry before RPC.
+// - Resolves parent inode, sends MsgRemove, and deletes the matching local fd
+//   on success.
+//
+// Thread-safety:
+// - Acquires TableMu write lock for the full method ("big lock").
+// - Optionally acquires SandstoreFD.Mu for the matched open file.
+//
+// Consistency:
+// - Parent/target lookups are server metadata reads.
+// - MsgRemove is a synchronous, Raft-replicated metadata mutation.
 func (c *SandstoreClient) Remove(filepath string) error {
 	if c == nil {
 		return fmt.Errorf("sandstore client is nil")
@@ -377,6 +466,22 @@ func (c *SandstoreClient) Remove(filepath string) error {
 	return nil
 }
 
+// Rename atomically moves src to dst on the server and updates matching local
+// open-file path cache entries.
+//
+// Behavior:
+// - Resolves source and destination parent inode IDs.
+// - Sends MsgRename with {SrcParentID, SrcName, DstParentID, DstName}.
+// - Updates FilePath from src -> dst for local entries that currently point to
+//   src only; descriptors already pointing to dst are intentionally unchanged.
+//
+// Thread-safety:
+// - Acquires TableMu write lock for the full RPC + local update sequence
+//   ("world freeze").
+// - Acquires SandstoreFD.Mu while mutating each matching FilePath.
+//
+// Consistency:
+// - MsgRename is a synchronous, Raft-replicated atomic metadata operation.
 func (c *SandstoreClient) Rename(src string, dst string) error {
 	if c == nil {
 		return fmt.Errorf("sandstore client is nil")
@@ -449,6 +554,20 @@ func (c *SandstoreClient) Rename(src string, dst string) error {
 	return nil
 }
 
+// Mkdir creates a directory at path with the provided mode bits.
+//
+// Behavior:
+// - Parses path into parent path and directory name.
+// - Resolves parent inode with LookupPath.
+// - Sends MsgMkdir with parent inode, name, mode, uid=0, gid=0.
+//
+// Thread-safety:
+// - Acquires no TableMu or per-file locks; this method does not read or mutate
+//   OpenFiles.
+//
+// Consistency:
+// - Parent lookup is a server metadata read.
+// - MsgMkdir is a synchronous, Raft-replicated metadata mutation.
 func (c *SandstoreClient) Mkdir(path string, mode int) error {
 	if c == nil {
 		return fmt.Errorf("sandstore client is nil")
@@ -496,6 +615,19 @@ func (c *SandstoreClient) Mkdir(path string, mode int) error {
 	return nil
 }
 
+// Rmdir removes an empty directory at path.
+//
+// Behavior:
+// - Parses path into parent path and directory name.
+// - Resolves parent inode with LookupPath.
+// - Sends MsgRmdir; server validates emptiness and existence.
+//
+// Thread-safety:
+// - Acquires no TableMu or per-file locks.
+//
+// Consistency:
+// - Parent lookup is a server metadata read.
+// - MsgRmdir is a synchronous, Raft-replicated metadata mutation.
 func (c *SandstoreClient) Rmdir(path string) error {
 	if c == nil {
 		return fmt.Errorf("sandstore client is nil")
@@ -540,6 +672,19 @@ func (c *SandstoreClient) Rmdir(path string) error {
 	return nil
 }
 
+// ListDir returns all directory entries under path by paging through MsgReadDir.
+//
+// Behavior:
+// - Resolves target inode with LookupPath.
+// - Repeatedly issues ReadDir requests with cookie pagination until EOF.
+// - Aggregates and returns all entries in response order.
+//
+// Thread-safety:
+// - Acquires no TableMu or per-file locks.
+//
+// Consistency:
+// - LookupPath is a metadata read.
+// - MsgReadDir is a local server read path and therefore eventually consistent.
 func (c *SandstoreClient) ListDir(path string) ([]pms.DirEntry, error) {
 	if c == nil {
 		return nil, fmt.Errorf("sandstore client is nil")
@@ -599,6 +744,18 @@ func (c *SandstoreClient) ListDir(path string) ([]pms.DirEntry, error) {
 	return allEntries, nil
 }
 
+// Stat returns inode attributes for path.
+//
+// Behavior:
+// - Resolves inode ID with LookupPath.
+// - Calls MsgGetAttr and decodes pms.Attributes from the response body.
+//
+// Thread-safety:
+// - Acquires no TableMu or per-file locks.
+//
+// Consistency:
+// - LookupPath and MsgGetAttr are server read paths and are eventually
+//   consistent with committed cluster state.
 func (c *SandstoreClient) Stat(path string) (*pms.Attributes, error) {
 	if c == nil {
 		return nil, fmt.Errorf("sandstore client is nil")
