@@ -1,0 +1,16 @@
+.git
+.gitignore
+.gocache
+.gomodcache
+bin/
+data/
+logs/
+run/
+chunks/
+client
+mcp
+open_smoke
+sandstore
+sandstore-mcp
+*.out
+.DS_Store
