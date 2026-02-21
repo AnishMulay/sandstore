@@ -1,5 +1,8 @@
 //go:build grpc && etcd
 
+// This file is only compiled when both 'grpc' and 'etcd' build tags are set.
+// It keeps transport/cluster wiring modular at compile time.
+
 package node
 
 import (
@@ -21,15 +24,28 @@ import (
 	simpleserver "github.com/AnishMulay/sandstore/internal/server/simple"
 )
 
+func parseEtcdEndpoints(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return []string{"127.0.0.1:2379"}
+	}
+
+	parts := strings.Split(raw, ",")
+	endpoints := make([]string, 0, len(parts))
+	for _, part := range parts {
+		ep := strings.TrimSpace(part)
+		if ep != "" {
+			endpoints = append(endpoints, ep)
+		}
+	}
+	if len(endpoints) == 0 {
+		return []string{"127.0.0.1:2379"}
+	}
+	return endpoints
+}
+
 func Build(opts Options) runnable {
-	etcdEndpointsEnv := os.Getenv("ETCD_ENDPOINTS")
-	if etcdEndpointsEnv == "" {
-		etcdEndpointsEnv = "127.0.0.1:2379"
-	}
-	etcdEndpoints := strings.Split(etcdEndpointsEnv, ",")
-	for i, endpoint := range etcdEndpoints {
-		etcdEndpoints[i] = strings.TrimSpace(endpoint)
-	}
+	etcdEndpoints := parseEtcdEndpoints(os.Getenv("ETCD_ENDPOINTS"))
 
 	// 1. Logging
 	logDir := opts.DataDir + "/logs"

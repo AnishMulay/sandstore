@@ -69,7 +69,7 @@ kill:
 	-@pgrep -fal sandstore || true
 	-@pkill -f sandstore || true
 
-# Clean up
+# clean: full local reset (containers + generated artifacts + runtime data)
 .PHONY: clean
 clean:
 	-@docker compose -f deploy/docker/docker-compose.yaml down -v --remove-orphans >/dev/null 2>&1 || true

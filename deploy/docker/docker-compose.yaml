@@ -64,7 +64,6 @@ services:
       - /var/lib/sandstore/data
     volumes:
       - ../../run/node-1/data:/var/lib/sandstore/data
-      - ../../run/node-1/logs:/var/lib/sandstore/data/logs
     networks:
       - sandstore-net
 
@@ -86,7 +85,6 @@ services:
       - /var/lib/sandstore/data
     volumes:
       - ../../run/node-2/data:/var/lib/sandstore/data
-      - ../../run/node-2/logs:/var/lib/sandstore/data/logs
     networks:
       - sandstore-net
 
@@ -108,7 +106,6 @@ services:
       - /var/lib/sandstore/data
     volumes:
       - ../../run/node-3/data:/var/lib/sandstore/data
-      - ../../run/node-3/logs:/var/lib/sandstore/data/logs
     networks:
       - sandstore-net
 
@@ -122,14 +119,14 @@ services:
       node-3:
         condition: service_started
     volumes:
-      - ../../run/node-1/logs:/cluster-logs/node-1:ro
-      - ../../run/node-2/logs:/cluster-logs/node-2:ro
-      - ../../run/node-3/logs:/cluster-logs/node-3:ro
+      - ../../run/node-1/data/logs:/cluster-logs/node-1:ro
+      - ../../run/node-2/data/logs:/cluster-logs/node-2:ro
+      - ../../run/node-3/data/logs:/cluster-logs/node-3:ro
     entrypoint:
       - /bin/sh
       - -c
       - |
-        apk add --no-cache netcat-openbsd socat
+        apk add --no-cache netcat-openbsd
 
         until nc -z node-1 8080 && nc -z node-2 8080 && nc -z node-3 8080; do
           echo "Waiting for Sand Store nodes..."
@@ -162,14 +159,7 @@ services:
         export SANDSTORE_ADDR="$$LEADER_ADDR"
         echo "Discovered leader: $$SANDSTORE_ADDR"
 
-        # Compatibility bridge for smoke binaries hardcoded to 127.0.0.1:9001.
-        socat TCP-LISTEN:9001,fork,reuseaddr TCP:$$SANDSTORE_ADDR &
-        SOCAT_PID=$$!
-
-        /usr/local/bin/smoke
-        STATUS=$$?
-        kill "$$SOCAT_PID" >/dev/null 2>&1 || true
-        exit "$$STATUS"
+        exec /usr/local/bin/smoke
     networks:
       - sandstore-net
 
