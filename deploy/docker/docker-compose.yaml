@@ -1,0 +1,168 @@
+services:
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.0
+    container_name: sandstore-etcd
+    command:
+      - /usr/local/bin/etcd
+      - --name=etcd
+      - --data-dir=/etcd-data
+      - --advertise-client-urls=http://etcd:2379
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --initial-advertise-peer-urls=http://etcd:2380
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-cluster=etcd=http://etcd:2380
+      - --initial-cluster-state=new
+    ports:
+      - "2379:2379"
+      - "2380:2380"
+    healthcheck:
+      test: ["CMD-SHELL", "ETCDCTL_API=3 etcdctl --endpoints=http://127.0.0.1:2379 endpoint health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    networks:
+      - sandstore-net
+
+  etcd-init:
+    image: alpine:latest
+    depends_on:
+      etcd:
+        condition: service_healthy
+    environment:
+      ETCD_CONTAINER: sandstore-etcd
+      CLUSTER_NODES: node-1@node-1:8080,node-2@node-2:8080,node-3@node-3:8080
+    volumes:
+      - ../../scripts/dev/init-etcd.sh:/init-etcd.sh:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    command:
+      - /bin/sh
+      - -c
+      - |
+        apk add --no-cache bash curl
+        apk add --no-cache docker-cli
+        chmod +x /init-etcd.sh
+        /init-etcd.sh
+    networks:
+      - sandstore-net
+
+  node-1:
+    image: sandstore-node:latest
+    depends_on:
+      etcd-init:
+        condition: service_completed_successfully
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+    command:
+      - --server
+      - node
+      - --node-id
+      - node-1
+      - --listen
+      - node-1:8080
+      - --data-dir
+      - /var/lib/sandstore/data
+    volumes:
+      - ../../run/node-1/data:/var/lib/sandstore/data
+    networks:
+      - sandstore-net
+
+  node-2:
+    image: sandstore-node:latest
+    depends_on:
+      etcd-init:
+        condition: service_completed_successfully
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+    command:
+      - --server
+      - node
+      - --node-id
+      - node-2
+      - --listen
+      - node-2:8080
+      - --data-dir
+      - /var/lib/sandstore/data
+    volumes:
+      - ../../run/node-2/data:/var/lib/sandstore/data
+    networks:
+      - sandstore-net
+
+  node-3:
+    image: sandstore-node:latest
+    depends_on:
+      etcd-init:
+        condition: service_completed_successfully
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+    command:
+      - --server
+      - node
+      - --node-id
+      - node-3
+      - --listen
+      - node-3:8080
+      - --data-dir
+      - /var/lib/sandstore/data
+    volumes:
+      - ../../run/node-3/data:/var/lib/sandstore/data
+    networks:
+      - sandstore-net
+
+  smoke-test:
+    image: sandstore-node:latest
+    depends_on:
+      node-1:
+        condition: service_started
+      node-2:
+        condition: service_started
+      node-3:
+        condition: service_started
+    volumes:
+      - ../../run/node-1/data/logs:/cluster-logs/node-1:ro
+      - ../../run/node-2/data/logs:/cluster-logs/node-2:ro
+      - ../../run/node-3/data/logs:/cluster-logs/node-3:ro
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        apk add --no-cache netcat-openbsd
+
+        until nc -z node-1 8080 && nc -z node-2 8080 && nc -z node-3 8080; do
+          echo "Waiting for Sand Store nodes..."
+          sleep 2
+        done
+
+        echo "Detecting current leader from node logs..."
+        LEADER_ADDR=""
+        for _ in $$(seq 1 60); do
+          for NODE in node-1 node-2 node-3; do
+            LOG_FILE="/cluster-logs/$${NODE}/$${NODE}.log"
+            if [ -f "$$LOG_FILE" ] && grep -q "Became Leader" "$$LOG_FILE"; then
+              LEADER_ADDR="$${NODE}:8080"
+              break
+            fi
+          done
+
+          if [ -n "$$LEADER_ADDR" ]; then
+            break
+          fi
+
+          sleep 1
+        done
+
+        if [ -z "$$LEADER_ADDR" ]; then
+          echo "Failed to discover leader from logs; defaulting to node-1:8080"
+          LEADER_ADDR="node-1:8080"
+        fi
+
+        export SANDSTORE_ADDR="$$LEADER_ADDR"
+        echo "Discovered leader: $$SANDSTORE_ADDR"
+
+        exec /usr/local/bin/smoke
+    networks:
+      - sandstore-net
+
+networks:
+  sandstore-net:
+    driver: bridge

@@ -3,17 +3,30 @@ package main
 import (
 	"flag"
 	"log"
+	"os"
 	"strings"
 
 	"github.com/AnishMulay/sandstore/servers/node"
 )
 
 func main() {
+	nodeIDDefault := os.Getenv("NODE_ID")
+
+	listenDefault := os.Getenv("LISTEN_ADDR")
+	if listenDefault == "" {
+		listenDefault = ":8080"
+	}
+
+	dataDirDefault := os.Getenv("DATA_DIR")
+	if dataDirDefault == "" {
+		dataDirDefault = "./data"
+	}
+
 	var (
 		serverType = flag.String("server", "node", "Server type (node)")
-		nodeID     = flag.String("node-id", "", "Node ID")
-		listen     = flag.String("listen", ":8080", "Listen address")
-		dataDir    = flag.String("data-dir", "./data", "Data directory")
+		nodeID     = flag.String("node-id", nodeIDDefault, "Node ID")
+		listen     = flag.String("listen", listenDefault, "Listen address")
+		dataDir    = flag.String("data-dir", dataDirDefault, "Data directory")
 		seeds      = flag.String("seeds", "", "Comma-separated seed peers")
 	)
 	flag.Parse()

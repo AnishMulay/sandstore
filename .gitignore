@@ -34,6 +34,15 @@ go.work.sum
 # Go cache
 .gocache
 **/.gocache
+.gomodcache
+**/.gomodcache
+
+# Local build binaries (repo root)
+/sandstore
+/sandstore-mcp
+/client
+/mcp
+/open_smoke
 
 # macOS Finder metadata
 .DS_Store
