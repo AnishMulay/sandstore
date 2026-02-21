@@ -121,18 +121,55 @@ services:
         condition: service_started
       node-3:
         condition: service_started
-    environment:
-      SANDSTORE_ADDR: node-1:8080
+    volumes:
+      - ../../run/node-1/logs:/cluster-logs/node-1:ro
+      - ../../run/node-2/logs:/cluster-logs/node-2:ro
+      - ../../run/node-3/logs:/cluster-logs/node-3:ro
     entrypoint:
       - /bin/sh
       - -c
       - |
-        apk add --no-cache netcat-openbsd
+        apk add --no-cache netcat-openbsd socat
+
         until nc -z node-1 8080 && nc -z node-2 8080 && nc -z node-3 8080; do
           echo "Waiting for Sand Store nodes..."
           sleep 2
         done
+
+        echo "Detecting current leader from node logs..."
+        LEADER_ADDR=""
+        for _ in $$(seq 1 60); do
+          for NODE in node-1 node-2 node-3; do
+            LOG_FILE="/cluster-logs/$${NODE}/$${NODE}.log"
+            if [ -f "$$LOG_FILE" ] && grep -q "Became Leader" "$$LOG_FILE"; then
+              LEADER_ADDR="$${NODE}:8080"
+              break
+            fi
+          done
+
+          if [ -n "$$LEADER_ADDR" ]; then
+            break
+          fi
+
+          sleep 1
+        done
+
+        if [ -z "$$LEADER_ADDR" ]; then
+          echo "Failed to discover leader from logs; defaulting to node-1:8080"
+          LEADER_ADDR="node-1:8080"
+        fi
+
+        export SANDSTORE_ADDR="$$LEADER_ADDR"
+        echo "Discovered leader: $$SANDSTORE_ADDR"
+
+        # Compatibility bridge for smoke binaries hardcoded to 127.0.0.1:9001.
+        socat TCP-LISTEN:9001,fork,reuseaddr TCP:$$SANDSTORE_ADDR &
+        SOCAT_PID=$$!
+
         /usr/local/bin/smoke
+        STATUS=$$?
+        kill "$$SOCAT_PID" >/dev/null 2>&1 || true
+        exit "$$STATUS"
     networks:
       - sandstore-net
 
