@@ -19,8 +19,8 @@ spec:
     spec:
       containers:
         - name: sandstore
-          image: sandstore-node:latest
-          imagePullPolicy: Always
+          image: anishm7030/sandstore-node:default-etcd-latest
+          imagePullPolicy: IfNotPresent
           ports:
             - name: raft
               containerPort: 8080

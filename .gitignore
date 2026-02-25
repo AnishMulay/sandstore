@@ -34,8 +34,12 @@ go.work.sum
 # Go cache
 .gocache
 **/.gocache
+.gocache-local
+**/.gocache-local
 .gomodcache
 **/.gomodcache
+.gomodcache-local
+**/.gomodcache-local
 
 # Local build binaries (repo root)
 /sandstore
@@ -47,3 +51,6 @@ go.work.sum
 # macOS Finder metadata
 .DS_Store
 **/.DS_Store
+
+# Local runtime/test artifacts
+/run/
