@@ -1,7 +1,12 @@
+KUBE_CONTEXT ?= minikube-laptop
+
 # Variables
 PROFILE ?= default-etcd
 GOOS ?= linux
 GOARCH ?= amd64
+REGISTRY_URL ?=
+K8S_IMAGE ?= $(REGISTRY_URL)/sandstore-node:$(PROFILE)-latest
+K8S_MANIFEST_DIR ?= deploy/k8s
 
 SUPPORTED_PROFILES := default-etcd
 
@@ -62,6 +67,84 @@ test:
 .PHONY: docker-build
 docker-build:
 	docker build --build-arg TAGS="$(TAGS)" --build-arg GOOS=$(GOOS) --build-arg GOARCH=$(GOARCH) -t sandstore-node:latest -f deploy/docker/Dockerfile .
+
+# Kubernetes Flow 1: Image Build & Registry Push
+.PHONY: k8s-build
+k8s-build:
+	@set -eu; \
+	if [ -z "$(REGISTRY_URL)" ]; then \
+		echo "REGISTRY_URL is required (example: docker.io/<namespace>)"; \
+		exit 1; \
+	fi; \
+	docker info >/dev/null 2>&1 || { \
+		echo "Docker daemon is not running"; \
+		exit 1; \
+	}; \
+	if [ ! -f "$$HOME/.docker/config.json" ] || ! grep -q '"auths"' "$$HOME/.docker/config.json"; then \
+		echo "Docker registry authentication not detected. Run 'docker login' first."; \
+		exit 1; \
+	fi; \
+	docker build --platform linux/amd64 \
+		--build-arg TAGS="$(TAGS)" \
+		--build-arg GO_FLAGS="-tags $(PROFILE)" \
+		--build-arg GOOS=linux \
+		--build-arg GOARCH=amd64 \
+		-t "$(K8S_IMAGE)" \
+		-f deploy/docker/Dockerfile .; \
+	docker push "$(K8S_IMAGE)"
+
+# Kubernetes Flow 2: Absolute Teardown (Clean Slate Guarantee)
+.PHONY: k8s-destroy
+k8s-destroy:
+	@set -eu; \
+	if [ "$(KUBE_CONTEXT)" = "docker-desktop" ]; then \
+		echo "Refusing to run k8s-destroy against docker-desktop. Set KUBE_CONTEXT to the remote gaming laptop context."; \
+		exit 1; \
+	fi; \
+	kubectl --context=$(KUBE_CONTEXT) delete -f $(K8S_MANIFEST_DIR)/ --ignore-not-found=true; \
+	kubectl --context=$(KUBE_CONTEXT) delete pvc -l app=sandstore --ignore-not-found=true; \
+	if kubectl --context=$(KUBE_CONTEXT) get pod -l app=sandstore --no-headers 2>/dev/null | grep -q .; then \
+		kubectl --context=$(KUBE_CONTEXT) wait --for=delete pod -l app=sandstore --timeout=60s || { \
+			echo "Teardown wait timed out. Inspect terminating resources and force-delete stuck pods/namespaces if needed."; \
+			exit 1; \
+		}; \
+	fi
+
+# Kubernetes Flow 3: Cluster Bootstrapping & Hardware Targeting
+.PHONY: k8s-deploy
+k8s-deploy: k8s-destroy
+	@set -eu; \
+	kubectl --context=$(KUBE_CONTEXT) apply -f $(K8S_MANIFEST_DIR)/configmap.yaml -f $(K8S_MANIFEST_DIR)/storageclass.yaml -f $(K8S_MANIFEST_DIR)/service-headless.yaml; \
+	kubectl --context=$(KUBE_CONTEXT) apply -f $(K8S_MANIFEST_DIR)/statefulset-etcd.yaml; \
+	kubectl --context=$(KUBE_CONTEXT) rollout status statefulset/etcd-cluster --timeout=60s; \
+	kubectl --context=$(KUBE_CONTEXT) apply -f $(K8S_MANIFEST_DIR)/statefulset-sandstore.yaml; \
+	kubectl --context=$(KUBE_CONTEXT) apply -f $(K8S_MANIFEST_DIR)/service-nodeport.yaml
+
+# Kubernetes Flow 4: The Iteration Loop (Stateful Rolling Update)
+.PHONY: k8s-update
+k8s-update:
+	@set -eu; \
+	kubectl --context=$(KUBE_CONTEXT) get statefulset sandstore >/dev/null; \
+	$(MAKE) --no-print-directory k8s-build PROFILE="$(PROFILE)" REGISTRY_URL="$(REGISTRY_URL)"; \
+	kubectl --context=$(KUBE_CONTEXT) rollout restart statefulset/sandstore; \
+	kubectl --context=$(KUBE_CONTEXT) rollout status statefulset/sandstore --timeout=120s || { \
+		echo "Rollout failed or timed out. Inspect crash logs with: make k8s-logs-crash POD=<pod_name> KUBE_CONTEXT=$(KUBE_CONTEXT)"; \
+		exit 1; \
+	}
+
+# Kubernetes Flow 5: Observability & Post-Mortem Debugging
+.PHONY: k8s-logs
+k8s-logs:
+	kubectl --context=$(KUBE_CONTEXT) logs -l app=sandstore -f --max-log-requests=10
+
+.PHONY: k8s-logs-crash
+k8s-logs-crash:
+	@set -eu; \
+	if [ -z "$(POD)" ]; then \
+		echo "POD=<pod_name> is required"; \
+		exit 1; \
+	fi; \
+	kubectl --context=$(KUBE_CONTEXT) logs "$(POD)" --previous
 
 # Kill running sandstore processes
 .PHONY: kill
