@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -20,9 +21,15 @@ import (
 const maxBufferSize = 2 * 1024 * 1024
 
 func main() {
-	serverAddr := os.Getenv("SANDSTORE_ADDR")
+	targetFlag := flag.String("target", "", "Sand Store target address (host:port). Overrides SANDSTORE_ADDR.")
+	flag.Parse()
+
+	serverAddr := *targetFlag
 	if serverAddr == "" {
-		serverAddr = "127.0.0.1:9001"
+		serverAddr = os.Getenv("SANDSTORE_ADDR")
+	}
+	if serverAddr == "" {
+		serverAddr = "localhost:8080"
 	}
 
 	logDir := filepath.Join("run", "smoke", "logs")

@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sandstore-config
+  labels:
+    app: sandstore
+    app.kubernetes.io/name: sandstore
+data:
+  # Future Makefile PROFILE flows can override these values before apply.
+  ETCD_ENDPOINTS: "etcd-cluster-0.etcd-cluster:2379"
+  RAFT_ELECTION_TIMEOUT_MS: "300"
+  RAFT_HEARTBEAT_TIMEOUT_MS: "100"

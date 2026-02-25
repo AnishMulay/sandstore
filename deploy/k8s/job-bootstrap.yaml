@@ -1,0 +1,38 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: sandstore-bootstrap-config
+  labels:
+    app: sandstore
+    app.kubernetes.io/name: sandstore
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels:
+        app: sandstore
+        app.kubernetes.io/name: sandstore
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: bootstrap
+          image: quay.io/coreos/etcd:v3.5.0
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: sandstore-config
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              export ETCDCTL_API=3
+              ENDPOINTS="http://${ETCD_ENDPOINTS}"
+
+              etcdctl --endpoints="${ENDPOINTS}" del --prefix /sandstore/config/nodes/
+
+              etcdctl --endpoints="${ENDPOINTS}" put /sandstore/config/nodes/sandstore-0 \
+                '{"id":"sandstore-0","address":"sandstore-0.sandstore-headless.default.svc.cluster.local:8080","role":"voter"}'
+              etcdctl --endpoints="${ENDPOINTS}" put /sandstore/config/nodes/sandstore-1 \
+                '{"id":"sandstore-1","address":"sandstore-1.sandstore-headless.default.svc.cluster.local:8080","role":"voter"}'
+              etcdctl --endpoints="${ENDPOINTS}" put /sandstore/config/nodes/sandstore-2 \
+                '{"id":"sandstore-2","address":"sandstore-2.sandstore-headless.default.svc.cluster.local:8080","role":"voter"}'

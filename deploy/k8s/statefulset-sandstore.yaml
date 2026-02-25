@@ -1,0 +1,71 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: sandstore
+  labels:
+    app: sandstore
+    app.kubernetes.io/name: sandstore
+spec:
+  serviceName: sandstore-headless
+  replicas: 3
+  selector:
+    matchLabels:
+      app: sandstore
+  template:
+    metadata:
+      labels:
+        app: sandstore
+        app.kubernetes.io/name: sandstore
+    spec:
+      containers:
+        - name: sandstore
+          image: anishm7030/sandstore-node:default-etcd-latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: raft
+              containerPort: 8080
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: sandstore-config
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: NODE_ID
+              value: "$(POD_NAME)"
+            - name: LISTEN_ADDR
+              value: "$(POD_NAME).sandstore-headless.$(POD_NAMESPACE).svc.cluster.local:8080"
+            - name: DATA_DIR
+              value: /var/lib/sandstore/data
+          readinessProbe:
+            tcpSocket:
+              port: raft
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: raft
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          volumeMounts:
+            - name: sandstore-data
+              mountPath: /var/lib/sandstore/data
+  volumeClaimTemplates:
+    - metadata:
+        name: sandstore-data
+        labels:
+          app: sandstore
+          app.kubernetes.io/name: sandstore
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: sandstore-local-ssd
+        resources:
+          requests:
+            storage: 20Gi

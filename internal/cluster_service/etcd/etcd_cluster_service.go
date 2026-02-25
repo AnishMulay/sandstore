@@ -14,6 +14,7 @@ import (
 
 const (
 	EtcdDialTimeout = 5 * time.Second
+	EtcdSyncTimeout = 10 * time.Second
 	LeaseTTL        = 5 // seconds
 	PrefixConfig    = "/sandstore/config/nodes/"
 	PrefixLease     = "/sandstore/leases/"
@@ -63,7 +64,10 @@ func (s *EtcdClusterService) Start(ctx context.Context) error {
 	}
 	s.client = cli
 
-	if err := s.syncState(ctx); err != nil {
+	syncCtx, cancel := context.WithTimeout(ctx, EtcdSyncTimeout)
+	defer cancel()
+
+	if err := s.syncState(syncCtx); err != nil {
 		return err
 	}
 
