@@ -24,6 +24,7 @@ var (
 	chunkMapBucket      = []byte("chunk_map")
 
 	consistentIndexKey = []byte("consistent_index")
+	superblockKey      = []byte("sb")
 )
 
 var requiredBuckets = [][]byte{
@@ -430,6 +431,95 @@ func (s *BoltMetadataService) ReadDir(ctx context.Context, inodeID string, cooki
 	}
 
 	return entries[cookie:end], end, end == len(entries), nil
+}
+
+func (s *BoltMetadataService) Recover() (uint64, error) {
+	if s == nil || s.db == nil {
+		return 0, fmt.Errorf("bolt metadata service is not initialized")
+	}
+
+	var consistentIndex []byte
+	if err := s.db.View(func(tx *bbolt.Tx) error {
+		metadataState := tx.Bucket(metadataStateBucket)
+		if metadataState == nil {
+			return fmt.Errorf("bolt metadata schema is not initialized")
+		}
+
+		indexBytes := metadataState.Get(consistentIndexKey)
+		if indexBytes != nil {
+			consistentIndex = append([]byte(nil), indexBytes...)
+		}
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+
+	if consistentIndex != nil {
+		if len(consistentIndex) != 8 {
+			return 0, fmt.Errorf("invalid consistent index length: got %d", len(consistentIndex))
+		}
+		return binary.LittleEndian.Uint64(consistentIndex), nil
+	}
+
+	now := time.Now()
+	rootInodeID := "0"
+	superblock := pms.Superblock{
+		FsID:            "00000000-0000-0000-0000-000000000000",
+		RootInodeID:     rootInodeID,
+		ChunkSize:       8 * 1024 * 1024,
+		MaxFilenameSize: 255,
+		MaxFileSize:     1 << 40,
+		CreatedAt:       now,
+	}
+	rootInode := pms.Inode{
+		InodeID:    rootInodeID,
+		Type:       pms.TypeDirectory,
+		LinkCount:  2,
+		Mode:       0o755,
+		AccessTime: now,
+		ModifyTime: now,
+		ChangeTime: now,
+	}
+
+	rootKey, err := encodeInodeKey(rootInodeID)
+	if err != nil {
+		return 0, fmt.Errorf("encode root inode id %q: %w", rootInodeID, err)
+	}
+
+	if err := s.db.Update(func(tx *bbolt.Tx) error {
+		metadataState := tx.Bucket(metadataStateBucket)
+		superblockBucket := tx.Bucket(superblockBucket)
+		inodes := tx.Bucket(inodesBucket)
+		if metadataState == nil || superblockBucket == nil || inodes == nil {
+			return fmt.Errorf("bolt metadata schema is not initialized")
+		}
+
+		superblockBytes, err := encodeGob(superblock)
+		if err != nil {
+			return fmt.Errorf("encode superblock: %w", err)
+		}
+		if err := superblockBucket.Put(superblockKey, superblockBytes); err != nil {
+			return fmt.Errorf("store superblock: %w", err)
+		}
+
+		rootInodeBytes, err := encodeGob(storableInode(rootInode))
+		if err != nil {
+			return fmt.Errorf("encode root inode: %w", err)
+		}
+		if err := inodes.Put(rootKey, rootInodeBytes); err != nil {
+			return fmt.Errorf("store root inode: %w", err)
+		}
+
+		if err := metadataState.Put(consistentIndexKey, encodeUint64LE(0)); err != nil {
+			return fmt.Errorf("initialize consistent index: %w", err)
+		}
+
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+
+	return 0, nil
 }
 
 func encodeInodeKey(inodeID string) ([]byte, error) {
