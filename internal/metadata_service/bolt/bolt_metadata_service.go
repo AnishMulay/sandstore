@@ -433,6 +433,162 @@ func (s *BoltMetadataService) ReadDir(ctx context.Context, inodeID string, cooki
 	return entries[cookie:end], end, end == len(entries), nil
 }
 
+func (s *BoltMetadataService) Lookup(ctx context.Context, parentInodeID string, name string) (string, error) {
+	if s == nil || s.db == nil {
+		return "", fmt.Errorf("bolt metadata service is not initialized")
+	}
+
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
+	parentKey, err := encodeInodeKey(parentInodeID)
+	if err != nil {
+		return "", fmt.Errorf("encode parent inode id %q: %w", parentInodeID, err)
+	}
+
+	dentryKey := encodeDentryKey(parentKey, name)
+	var childID string
+
+	err = s.db.View(func(tx *bbolt.Tx) error {
+		inodes := tx.Bucket(inodesBucket)
+		dentries := tx.Bucket(dentriesBucket)
+		if inodes == nil || dentries == nil {
+			return fmt.Errorf("bolt metadata schema is not initialized")
+		}
+
+		parentBytes := inodes.Get(parentKey)
+		if parentBytes == nil {
+			return inmemoryms.ErrNotFound
+		}
+
+		var parent pms.Inode
+		if err := decodeGob(parentBytes, &parent); err != nil {
+			return fmt.Errorf("decode parent inode %q: %w", parentInodeID, err)
+		}
+		if parent.Type != pms.TypeDirectory {
+			return inmemoryms.ErrNotDir
+		}
+
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		childKey := dentries.Get(dentryKey)
+		if childKey == nil {
+			return inmemoryms.ErrNotFound
+		}
+
+		childID, err = decodeInodeID(childKey)
+		if err != nil {
+			return fmt.Errorf("decode child inode id for parent %q name %q: %w", parentInodeID, name, err)
+		}
+
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+
+	return childID, nil
+}
+
+func (s *BoltMetadataService) GetAttributes(ctx context.Context, inodeID string) (*pms.Attributes, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("bolt metadata service is not initialized")
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	inodeKey, err := encodeInodeKey(inodeID)
+	if err != nil {
+		return nil, fmt.Errorf("encode inode id %q: %w", inodeID, err)
+	}
+
+	var attrs *pms.Attributes
+	err = s.db.View(func(tx *bbolt.Tx) error {
+		inodes := tx.Bucket(inodesBucket)
+		if inodes == nil {
+			return fmt.Errorf("bolt metadata schema is not initialized")
+		}
+
+		inodeBytes := inodes.Get(inodeKey)
+		if inodeBytes == nil {
+			return inmemoryms.ErrNotFound
+		}
+
+		var inode pms.Inode
+		if err := decodeGob(inodeBytes, &inode); err != nil {
+			return fmt.Errorf("decode inode %q: %w", inodeID, err)
+		}
+
+		attrs = &pms.Attributes{
+			InodeID:    inode.InodeID,
+			Type:       inode.Type,
+			Mode:       inode.Mode,
+			Size:       inode.FileSize,
+			AccessTime: inode.AccessTime,
+			ModifyTime: inode.ModifyTime,
+			ChangeTime: inode.ChangeTime,
+			UID:        inode.OwnerUID,
+			GID:        inode.OwnerGID,
+		}
+
+		return ctx.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return attrs, nil
+}
+
+func (s *BoltMetadataService) GetFsStat(ctx context.Context) (*pms.FileSystemStats, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("bolt metadata service is not initialized")
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	var stats *pms.FileSystemStats
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		superblockBkt := tx.Bucket(superblockBucket)
+		inodes := tx.Bucket(inodesBucket)
+		if superblockBkt == nil || inodes == nil {
+			return fmt.Errorf("bolt metadata schema is not initialized")
+		}
+
+		superblockBytes := superblockBkt.Get(superblockKey)
+		if superblockBytes == nil {
+			return inmemoryms.ErrNotFound
+		}
+
+		var superblock pms.Superblock
+		if err := decodeGob(superblockBytes, &superblock); err != nil {
+			return fmt.Errorf("decode superblock: %w", err)
+		}
+
+		stats = &pms.FileSystemStats{
+			TotalSpace:  superblock.MaxFileSize,
+			UsedSpace:   0,
+			TotalInodes: superblock.MaxFileSize,
+			UsedInodes:  int64(inodes.Stats().KeyN),
+			BlockSize:   superblock.ChunkSize,
+		}
+
+		return ctx.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return stats, nil
+}
+
 func (s *BoltMetadataService) Recover() (uint64, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("bolt metadata service is not initialized")
@@ -520,6 +676,13 @@ func (s *BoltMetadataService) Recover() (uint64, error) {
 	}
 
 	return 0, nil
+}
+
+func decodeInodeID(key []byte) (string, error) {
+	if len(key) != 8 {
+		return "", fmt.Errorf("invalid inode key length: got %d", len(key))
+	}
+	return strconv.FormatUint(binary.BigEndian.Uint64(key), 10), nil
 }
 
 func encodeInodeKey(inodeID string) ([]byte, error) {
