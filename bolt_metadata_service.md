@@ -224,4 +224,13 @@ The following flows define exactly how the `BoltMetadataService` will service th
     - If it exists, read the `uint64` value.
 4. **Return State:** The node is successfully recovered up to `consistent_index`. (In Phase 2, the Raft WAL will use this index to replay missed entries).
 
+## Flow 7.6: Lock-Free Snapshot Reads (Lookup, GetAttributes, GetFsStat)
+*These operations provide strongly consistent, non-blocking reads against a point-in-time snapshot of the database.*
+1. *Begin Transaction:* Open `db.View(func(tx *bbolt.Tx) error)` (Read-Only).
+2. *Execute Query:*
+   * *For `Lookup`:* Fetch `inodes` to verify the parent is a directory, then fetch `dentries` using `[Parent ID bytes] + [Name bytes]` to return the child Inode ID.
+   * *For `GetAttributes`:* Fetch `inodes` using `[Inode ID bytes]`, deserialize with `gob`, and return the required fields (Mode, Size, timestamps).
+   * *For `GetFsStat`:* Fetch `superblock` to return global limits, and use `tx.Bucket([]byte("inodes")).Stats().KeyN` to instantly return the total file count.
+3. *End Transaction:* Return the requested data. (No locks block concurrent `db.Update` transactions).
+
 ---
