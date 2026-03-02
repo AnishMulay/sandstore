@@ -2,6 +2,7 @@ package bolt
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/gob"
 	"fmt"
@@ -343,6 +344,92 @@ func (s *BoltMetadataService) ApplyRemove(op pms.MetadataOperation, consistentIn
 
 		return nil
 	})
+}
+
+func (s *BoltMetadataService) ReadDir(ctx context.Context, inodeID string, cookie int, maxEntries int) ([]pms.DirEntry, int, bool, error) {
+	if s == nil || s.db == nil {
+		return nil, 0, false, fmt.Errorf("bolt metadata service is not initialized")
+	}
+
+	if err := ctx.Err(); err != nil {
+		return nil, 0, false, err
+	}
+
+	parentKey, err := encodeInodeKey(inodeID)
+	if err != nil {
+		return nil, 0, false, fmt.Errorf("encode parent inode id %q: %w", inodeID, err)
+	}
+
+	prefix := append([]byte(nil), parentKey...)
+	entries := make([]pms.DirEntry, 0)
+
+	err = s.db.View(func(tx *bbolt.Tx) error {
+		inodes := tx.Bucket(inodesBucket)
+		dentries := tx.Bucket(dentriesBucket)
+		if inodes == nil || dentries == nil {
+			return fmt.Errorf("bolt metadata schema is not initialized")
+		}
+
+		parentBytes := inodes.Get(parentKey)
+		if parentBytes == nil {
+			return inmemoryms.ErrNotFound
+		}
+
+		var parent pms.Inode
+		if err := decodeGob(parentBytes, &parent); err != nil {
+			return fmt.Errorf("decode parent inode %q: %w", inodeID, err)
+		}
+		if parent.Type != pms.TypeDirectory {
+			return inmemoryms.ErrNotDir
+		}
+
+		cursor := dentries.Cursor()
+		for key, value := cursor.Seek(prefix); key != nil && bytes.HasPrefix(key, prefix); key, value = cursor.Next() {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+
+			childBytes := inodes.Get(value)
+			if childBytes == nil {
+				return fmt.Errorf("missing child inode for dentry parent=%q name=%q", inodeID, string(key[len(prefix):]))
+			}
+
+			var child pms.Inode
+			if err := decodeGob(childBytes, &child); err != nil {
+				return fmt.Errorf("decode child inode for dentry parent=%q name=%q: %w", inodeID, string(key[len(prefix):]), err)
+			}
+
+			entries = append(entries, pms.DirEntry{
+				Name:    string(key[len(prefix):]),
+				InodeID: child.InodeID,
+				Type:    child.Type,
+			})
+		}
+
+		return nil
+	})
+	if err != nil {
+		return nil, 0, false, err
+	}
+
+	if cookie < 0 {
+		cookie = 0
+	}
+
+	if cookie >= len(entries) {
+		return []pms.DirEntry{}, cookie, true, nil
+	}
+
+	if maxEntries <= 0 {
+		maxEntries = len(entries) - cookie
+	}
+
+	end := cookie + maxEntries
+	if end > len(entries) {
+		end = len(entries)
+	}
+
+	return entries[cookie:end], end, end == len(entries), nil
 }
 
 func encodeInodeKey(inodeID string) ([]byte, error) {
