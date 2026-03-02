@@ -20,7 +20,7 @@ import (
 	chunkservice "github.com/AnishMulay/sandstore/internal/chunk_service/local_disc"
 	fileservice "github.com/AnishMulay/sandstore/internal/file_service/simple"
 	metadatarepl "github.com/AnishMulay/sandstore/internal/metadata_replicator/raft_replicator"
-	metadataservice "github.com/AnishMulay/sandstore/internal/metadata_service/inmemory"
+	metadataservice "github.com/AnishMulay/sandstore/internal/metadata_service/bolt"
 	simpleserver "github.com/AnishMulay/sandstore/internal/server/simple"
 )
 
@@ -71,7 +71,11 @@ func Build(opts Options) runnable {
 	chunkRepl := chunkrepl.NewDefaultChunkReplicator(clusterService, comm, ls)
 
 	// 5. Core Services (The Logic Layer)
-	ms := metadataservice.NewInMemoryMetadataService(metaRepl, ls)
+	ms, err := metadataservice.NewBoltMetadataService(opts.DataDir + "/state.db")
+	if err != nil {
+		panic(err)
+	}
+	ms.SetReplicator(metaRepl)
 	chunkDir := opts.DataDir + "/chunks/" + opts.NodeID
 	cs := chunkservice.NewLocalDiscChunkService(chunkDir, ls, chunkRepl, 2)
 	fs := fileservice.NewSimpleFileService(ms, cs, ls)

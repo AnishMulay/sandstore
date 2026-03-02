@@ -12,9 +12,6 @@ services:
       - --listen-peer-urls=http://0.0.0.0:2380
       - --initial-cluster=etcd=http://etcd:2380
       - --initial-cluster-state=new
-    ports:
-      - "2379:2379"
-      - "2380:2380"
     healthcheck:
       test: ["CMD-SHELL", "ETCDCTL_API=3 etcdctl --endpoints=http://127.0.0.1:2379 endpoint health"]
       interval: 5s
