@@ -269,6 +269,82 @@ func (s *BoltMetadataService) ApplyRename(op pms.MetadataOperation, consistentIn
 	})
 }
 
+func (s *BoltMetadataService) ApplyRemove(op pms.MetadataOperation, consistentIndex uint64) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("bolt metadata service is not initialized")
+	}
+
+	parentKey, err := encodeInodeKey(op.ParentID)
+	if err != nil {
+		return fmt.Errorf("encode parent inode id %q: %w", op.ParentID, err)
+	}
+
+	dentryKey := encodeDentryKey(parentKey, op.Name)
+
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		inodes := tx.Bucket(inodesBucket)
+		dentries := tx.Bucket(dentriesBucket)
+		metadataState := tx.Bucket(metadataStateBucket)
+		if inodes == nil || dentries == nil || metadataState == nil {
+			return fmt.Errorf("bolt metadata schema is not initialized")
+		}
+
+		childKey := dentries.Get(dentryKey)
+		if childKey == nil {
+			return inmemoryms.ErrNotFound
+		}
+		childKey = append([]byte(nil), childKey...)
+
+		parentBytes := inodes.Get(parentKey)
+		if parentBytes == nil {
+			return inmemoryms.ErrNotFound
+		}
+
+		var parent pms.Inode
+		if err := decodeGob(parentBytes, &parent); err != nil {
+			return fmt.Errorf("decode parent inode %q: %w", op.ParentID, err)
+		}
+
+		childBytes := inodes.Get(childKey)
+		if childBytes == nil {
+			return inmemoryms.ErrNotFound
+		}
+
+		var child pms.Inode
+		if err := decodeGob(childBytes, &child); err != nil {
+			return fmt.Errorf("decode child inode for parent %q name %q: %w", op.ParentID, op.Name, err)
+		}
+
+		if err := dentries.Delete(dentryKey); err != nil {
+			return fmt.Errorf("delete dentry %q under parent %q: %w", op.Name, op.ParentID, err)
+		}
+		if err := inodes.Delete(childKey); err != nil {
+			return fmt.Errorf("delete child inode for parent %q name %q: %w", op.ParentID, op.Name, err)
+		}
+
+		now := time.Unix(0, op.Timestamp)
+		if child.Type == pms.TypeDirectory {
+			parent.LinkCount--
+		}
+		parent.ModifyTime = now
+		parent.ChangeTime = now
+
+		parentBytes, err = encodeGob(storableInode(parent))
+		if err != nil {
+			return fmt.Errorf("encode parent inode %q: %w", op.ParentID, err)
+		}
+		if err := inodes.Put(parentKey, parentBytes); err != nil {
+			return fmt.Errorf("update parent inode %q: %w", op.ParentID, err)
+		}
+
+		if err := metadataState.Put(consistentIndexKey, encodeUint64LE(consistentIndex)); err != nil {
+			return fmt.Errorf("update consistent index %d: %w", consistentIndex, err)
+		}
+
+		return nil
+	})
+}
+
 func encodeInodeKey(inodeID string) ([]byte, error) {
 	parsed, err := strconv.ParseUint(inodeID, 10, 64)
 	if err != nil {
