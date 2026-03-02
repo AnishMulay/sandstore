@@ -5,14 +5,19 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/gob"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"sync/atomic"
 	"time"
 
+	pmr "github.com/AnishMulay/sandstore/internal/metadata_replicator"
 	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
 	inmemoryms "github.com/AnishMulay/sandstore/internal/metadata_service/inmemory"
+	"github.com/google/uuid"
 	"go.etcd.io/bbolt"
 )
 
@@ -35,9 +40,12 @@ var requiredBuckets = [][]byte{
 	chunkMapBucket,
 }
 
+var inodeIDCounter atomic.Uint64
+
 type BoltMetadataService struct {
-	db       *bbolt.DB
-	filePath string
+	db         *bbolt.DB
+	filePath   string
+	replicator pmr.MetadataReplicator
 }
 
 func NewBoltMetadataService(filePath string) (*BoltMetadataService, error) {
@@ -82,6 +90,115 @@ func (s *BoltMetadataService) Close() error {
 		return nil
 	}
 	return s.db.Close()
+}
+
+func (s *BoltMetadataService) SetReplicator(replicator pmr.MetadataReplicator) {
+	if s == nil {
+		return
+	}
+	s.replicator = replicator
+}
+
+func (s *BoltMetadataService) Start() error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("bolt metadata service is not initialized")
+	}
+	if _, err := s.Recover(); err != nil {
+		return err
+	}
+	if s.replicator == nil {
+		return fmt.Errorf("bolt metadata replicator is not configured")
+	}
+	return s.replicator.Start(s.ApplyTransaction)
+}
+
+func (s *BoltMetadataService) Stop() error {
+	if s == nil {
+		return nil
+	}
+
+	var repErr error
+	if s.replicator != nil {
+		repErr = s.replicator.Stop()
+	}
+
+	dbErr := s.Close()
+	if repErr != nil {
+		return repErr
+	}
+	return dbErr
+}
+
+func (s *BoltMetadataService) ApplyTransaction(data []byte) error {
+	var op pms.MetadataOperation
+	if err := json.Unmarshal(data, &op); err != nil {
+		return err
+	}
+
+	consistentIndex, err := s.nextConsistentIndex()
+	if err != nil {
+		return err
+	}
+
+	switch op.Type {
+	case pms.OpCreate:
+		return s.ApplyCreate(op, consistentIndex)
+	case pms.OpRemove:
+		return s.ApplyRemove(op, consistentIndex)
+	case pms.OpRename:
+		return s.ApplyRename(op, consistentIndex)
+	case pms.OpSetAttr:
+		return s.ApplySetAttr(op, consistentIndex)
+	case pms.OpUpdateInode:
+		return s.ApplyUpdateInode(op, consistentIndex)
+	default:
+		return fmt.Errorf("unknown operation type: %v", op.Type)
+	}
+}
+
+func (s *BoltMetadataService) replicateOp(ctx context.Context, op pms.MetadataOperation) error {
+	if s == nil || s.replicator == nil {
+		return fmt.Errorf("bolt metadata replicator is not configured")
+	}
+
+	op.OpID = uuid.New().String()
+	op.Timestamp = time.Now().UnixNano()
+
+	data, err := json.Marshal(op)
+	if err != nil {
+		return fmt.Errorf("failed to marshal op: %w", err)
+	}
+
+	return s.replicator.Replicate(ctx, data)
+}
+
+func (s *BoltMetadataService) nextConsistentIndex() (uint64, error) {
+	if s == nil || s.db == nil {
+		return 0, fmt.Errorf("bolt metadata service is not initialized")
+	}
+
+	var current uint64
+	if err := s.db.View(func(tx *bbolt.Tx) error {
+		metadataState := tx.Bucket(metadataStateBucket)
+		if metadataState == nil {
+			return fmt.Errorf("bolt metadata schema is not initialized")
+		}
+
+		indexBytes := metadataState.Get(consistentIndexKey)
+		if indexBytes == nil {
+			current = 0
+			return nil
+		}
+		if len(indexBytes) != 8 {
+			return fmt.Errorf("invalid consistent index length: got %d", len(indexBytes))
+		}
+		current = binary.LittleEndian.Uint64(indexBytes)
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+
+	return current + 1, nil
 }
 
 func (s *BoltMetadataService) ApplyCreate(op pms.MetadataOperation, consistentIndex uint64) error {
@@ -347,6 +464,116 @@ func (s *BoltMetadataService) ApplyRemove(op pms.MetadataOperation, consistentIn
 	})
 }
 
+func (s *BoltMetadataService) ApplySetAttr(op pms.MetadataOperation, consistentIndex uint64) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("bolt metadata service is not initialized")
+	}
+
+	inodeKey, err := encodeInodeKey(op.InodeID)
+	if err != nil {
+		return fmt.Errorf("encode inode id %q: %w", op.InodeID, err)
+	}
+
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		inodes := tx.Bucket(inodesBucket)
+		metadataState := tx.Bucket(metadataStateBucket)
+		if inodes == nil || metadataState == nil {
+			return fmt.Errorf("bolt metadata schema is not initialized")
+		}
+
+		inode, err := loadStoredInode(inodes, inodeKey, op.InodeID)
+		if err != nil {
+			return err
+		}
+
+		now := time.Unix(0, op.Timestamp)
+		if op.SetMode != nil {
+			inode.Mode = *op.SetMode
+		}
+		if op.SetUID != nil {
+			inode.OwnerUID = *op.SetUID
+		}
+		if op.SetGID != nil {
+			inode.OwnerGID = *op.SetGID
+		}
+		if op.SetATime != nil {
+			inode.AccessTime = time.Unix(0, *op.SetATime)
+		}
+		if op.SetMTime != nil {
+			inode.ModifyTime = time.Unix(0, *op.SetMTime)
+		}
+		inode.ChangeTime = now
+
+		inodeBytes, err := encodeGob(storableInode(*inode))
+		if err != nil {
+			return fmt.Errorf("encode inode %q: %w", op.InodeID, err)
+		}
+		if err := inodes.Put(inodeKey, inodeBytes); err != nil {
+			return fmt.Errorf("update inode %q: %w", op.InodeID, err)
+		}
+
+		if err := metadataState.Put(consistentIndexKey, encodeUint64LE(consistentIndex)); err != nil {
+			return fmt.Errorf("update consistent index %d: %w", consistentIndex, err)
+		}
+
+		return nil
+	})
+}
+
+func (s *BoltMetadataService) ApplyUpdateInode(op pms.MetadataOperation, consistentIndex uint64) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("bolt metadata service is not initialized")
+	}
+
+	inodeKey, err := encodeInodeKey(op.InodeID)
+	if err != nil {
+		return fmt.Errorf("encode inode id %q: %w", op.InodeID, err)
+	}
+
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		inodes := tx.Bucket(inodesBucket)
+		chunkMap := tx.Bucket(chunkMapBucket)
+		metadataState := tx.Bucket(metadataStateBucket)
+		if inodes == nil || chunkMap == nil || metadataState == nil {
+			return fmt.Errorf("bolt metadata schema is not initialized")
+		}
+
+		inode, err := loadStoredInode(inodes, inodeKey, op.InodeID)
+		if err != nil {
+			return err
+		}
+
+		if op.NewSize != nil {
+			inode.FileSize = *op.NewSize
+		}
+		if op.SetMTime != nil {
+			inode.ModifyTime = time.Unix(0, *op.SetMTime)
+		}
+		inode.VersionNumber++
+		inode.ChangeTime = time.Unix(0, op.Timestamp)
+
+		inodeBytes, err := encodeGob(storableInode(*inode))
+		if err != nil {
+			return fmt.Errorf("encode inode %q: %w", op.InodeID, err)
+		}
+		if err := inodes.Put(inodeKey, inodeBytes); err != nil {
+			return fmt.Errorf("update inode %q: %w", op.InodeID, err)
+		}
+
+		if op.NewChunkList != nil {
+			if err := replaceChunkList(chunkMap, inodeKey, op.NewChunkList); err != nil {
+				return fmt.Errorf("update chunk list for inode %q: %w", op.InodeID, err)
+			}
+		}
+
+		if err := metadataState.Put(consistentIndexKey, encodeUint64LE(consistentIndex)); err != nil {
+			return fmt.Errorf("update consistent index %d: %w", consistentIndex, err)
+		}
+
+		return nil
+	})
+}
+
 func (s *BoltMetadataService) ReadDir(ctx context.Context, inodeID string, cookie int, maxEntries int) ([]pms.DirEntry, int, bool, error) {
 	if s == nil || s.db == nil {
 		return nil, 0, false, fmt.Errorf("bolt metadata service is not initialized")
@@ -589,6 +816,360 @@ func (s *BoltMetadataService) GetFsStat(ctx context.Context) (*pms.FileSystemSta
 	return stats, nil
 }
 
+func (s *BoltMetadataService) GetFsInfo(ctx context.Context) (*pms.FileSystemInfo, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("bolt metadata service is not initialized")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	var info *pms.FileSystemInfo
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		superblock, err := loadSuperblock(tx)
+		if err != nil {
+			return err
+		}
+
+		info = &pms.FileSystemInfo{
+			FsID:            superblock.FsID,
+			MaxFileSize:     superblock.MaxFileSize,
+			MaxFilenameSize: superblock.MaxFilenameSize,
+			ChunkSize:       superblock.ChunkSize,
+		}
+		return ctx.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return info, nil
+}
+
+func (s *BoltMetadataService) GetInode(ctx context.Context, inodeID string) (*pms.Inode, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("bolt metadata service is not initialized")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	inodeKey, err := encodeInodeKey(inodeID)
+	if err != nil {
+		return nil, fmt.Errorf("encode inode id %q: %w", inodeID, err)
+	}
+
+	var inode *pms.Inode
+	err = s.db.View(func(tx *bbolt.Tx) error {
+		inodes := tx.Bucket(inodesBucket)
+		chunkMap := tx.Bucket(chunkMapBucket)
+		if inodes == nil || chunkMap == nil {
+			return fmt.Errorf("bolt metadata schema is not initialized")
+		}
+
+		storedInode, err := loadStoredInode(inodes, inodeKey, inodeID)
+		if err != nil {
+			return err
+		}
+
+		chunkList, err := loadChunkList(chunkMap, inodeKey)
+		if err != nil {
+			return fmt.Errorf("load chunk list for inode %q: %w", inodeID, err)
+		}
+		storedInode.ChunkList = chunkList
+		inode = storedInode
+		return ctx.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return inode, nil
+}
+
+func (s *BoltMetadataService) LookupPath(ctx context.Context, path string) (string, error) {
+	if s == nil || s.db == nil {
+		return "", fmt.Errorf("bolt metadata service is not initialized")
+	}
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
+	cleanParts := strings.Split(strings.Trim(path, "/"), "/")
+	var currentID string
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		superblock, err := loadSuperblock(tx)
+		if err != nil {
+			return err
+		}
+
+		inodes := tx.Bucket(inodesBucket)
+		dentries := tx.Bucket(dentriesBucket)
+		if inodes == nil || dentries == nil {
+			return fmt.Errorf("bolt metadata schema is not initialized")
+		}
+
+		currentID = superblock.RootInodeID
+		if path == "/" {
+			return nil
+		}
+		for _, part := range cleanParts {
+			if part == "" || part == "." {
+				continue
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+
+			currentKey, err := encodeInodeKey(currentID)
+			if err != nil {
+				return fmt.Errorf("encode inode id %q: %w", currentID, err)
+			}
+			inode, err := loadStoredInode(inodes, currentKey, currentID)
+			if err != nil {
+				return err
+			}
+			if inode.Type != pms.TypeDirectory {
+				return inmemoryms.ErrNotDir
+			}
+
+			childKey := dentries.Get(encodeDentryKey(currentKey, part))
+			if childKey == nil {
+				return inmemoryms.ErrNotFound
+			}
+			currentID, err = decodeInodeID(childKey)
+			if err != nil {
+				return fmt.Errorf("decode child inode id for path %q part %q: %w", path, part, err)
+			}
+		}
+
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+
+	return currentID, nil
+}
+
+func (s *BoltMetadataService) Access(ctx context.Context, inodeID string, uid, gid uint32, accessMask uint32) error {
+	inode, err := s.GetInode(ctx, inodeID)
+	if err != nil {
+		return err
+	}
+
+	if uid == 0 {
+		return nil
+	}
+
+	var granted uint32
+	switch {
+	case uid == inode.OwnerUID:
+		granted = (inode.Mode >> 6) & 7
+	case gid == inode.OwnerGID:
+		granted = (inode.Mode >> 3) & 7
+	default:
+		granted = inode.Mode & 7
+	}
+
+	if granted&accessMask == accessMask {
+		return nil
+	}
+
+	return fmt.Errorf("permission denied")
+}
+
+func (s *BoltMetadataService) ReadDirPlus(ctx context.Context, inodeID string, cookie int, maxEntries int) ([]pms.DirEntryPlus, int, bool, error) {
+	entries, nextCookie, eof, err := s.ReadDir(ctx, inodeID, cookie, maxEntries)
+	if err != nil {
+		return nil, 0, false, err
+	}
+
+	plusEntries := make([]pms.DirEntryPlus, 0, len(entries))
+	for _, entry := range entries {
+		attrs, err := s.GetAttributes(ctx, entry.InodeID)
+		if err != nil {
+			return nil, 0, false, err
+		}
+		plusEntries = append(plusEntries, pms.DirEntryPlus{
+			Name:    entry.Name,
+			InodeID: entry.InodeID,
+			Type:    entry.Type,
+			Inode:   attrs,
+		})
+	}
+
+	return plusEntries, nextCookie, eof, nil
+}
+
+func (s *BoltMetadataService) SetAttributes(ctx context.Context, inodeID string, mode *uint32, uid, gid *uint32, atime, mtime *int64) (*pms.Attributes, error) {
+	if _, err := s.GetAttributes(ctx, inodeID); err != nil {
+		return nil, err
+	}
+
+	op := pms.MetadataOperation{
+		Type:     pms.OpSetAttr,
+		InodeID:  inodeID,
+		SetMode:  mode,
+		SetUID:   uid,
+		SetGID:   gid,
+		SetATime: atime,
+		SetMTime: mtime,
+	}
+	if err := s.replicateOp(ctx, op); err != nil {
+		return nil, err
+	}
+
+	return s.GetAttributes(ctx, inodeID)
+}
+
+func (s *BoltMetadataService) UpdateInode(ctx context.Context, inodeID string, newSize int64, newChunkList []string, mtime int64) error {
+	if _, err := s.GetInode(ctx, inodeID); err != nil {
+		return err
+	}
+
+	op := pms.MetadataOperation{
+		Type:         pms.OpUpdateInode,
+		InodeID:      inodeID,
+		NewSize:      &newSize,
+		NewChunkList: newChunkList,
+		SetMTime:     &mtime,
+	}
+	return s.replicateOp(ctx, op)
+}
+
+func (s *BoltMetadataService) Create(ctx context.Context, parentInodeID string, name string, mode uint32, uid, gid uint32) (*pms.Inode, error) {
+	parent, err := s.GetInode(ctx, parentInodeID)
+	if err != nil {
+		return nil, err
+	}
+	if parent.Type != pms.TypeDirectory {
+		return nil, inmemoryms.ErrNotDir
+	}
+
+	if _, err := s.Lookup(ctx, parentInodeID, name); err == nil {
+		return nil, inmemoryms.ErrAlreadyExists
+	} else if err != nil && err != inmemoryms.ErrNotFound {
+		return nil, err
+	}
+
+	newID := nextInodeID()
+	op := pms.MetadataOperation{
+		Type:     pms.OpCreate,
+		InodeID:  newID,
+		ParentID: parentInodeID,
+		Name:     name,
+		FileType: pms.TypeFile,
+		Mode:     mode,
+		UID:      uid,
+		GID:      gid,
+	}
+
+	if err := s.replicateOp(ctx, op); err != nil {
+		return nil, err
+	}
+
+	return s.GetInode(ctx, newID)
+}
+
+func (s *BoltMetadataService) Mkdir(ctx context.Context, parentInodeID string, name string, mode uint32, uid, gid uint32) (*pms.Inode, error) {
+	parent, err := s.GetInode(ctx, parentInodeID)
+	if err != nil {
+		return nil, err
+	}
+	if parent.Type != pms.TypeDirectory {
+		return nil, inmemoryms.ErrNotDir
+	}
+
+	if _, err := s.Lookup(ctx, parentInodeID, name); err == nil {
+		return nil, inmemoryms.ErrAlreadyExists
+	} else if err != nil && err != inmemoryms.ErrNotFound {
+		return nil, err
+	}
+
+	newID := nextInodeID()
+	op := pms.MetadataOperation{
+		Type:     pms.OpCreate,
+		InodeID:  newID,
+		ParentID: parentInodeID,
+		Name:     name,
+		FileType: pms.TypeDirectory,
+		Mode:     mode,
+		UID:      uid,
+		GID:      gid,
+	}
+
+	if err := s.replicateOp(ctx, op); err != nil {
+		return nil, err
+	}
+
+	return s.GetInode(ctx, newID)
+}
+
+func (s *BoltMetadataService) Remove(ctx context.Context, parentInodeID string, name string) error {
+	if _, err := s.Lookup(ctx, parentInodeID, name); err != nil {
+		return err
+	}
+
+	op := pms.MetadataOperation{
+		Type:     pms.OpRemove,
+		ParentID: parentInodeID,
+		Name:     name,
+	}
+	return s.replicateOp(ctx, op)
+}
+
+func (s *BoltMetadataService) Rmdir(ctx context.Context, parentInodeID string, name string) error {
+	childID, err := s.Lookup(ctx, parentInodeID, name)
+	if err != nil {
+		return err
+	}
+	child, err := s.GetInode(ctx, childID)
+	if err != nil {
+		return err
+	}
+	if child.Type != pms.TypeDirectory {
+		return inmemoryms.ErrNotDir
+	}
+
+	isEmpty, err := s.directoryIsEmpty(ctx, childID)
+	if err != nil {
+		return err
+	}
+	if !isEmpty {
+		return inmemoryms.ErrNotEmpty
+	}
+
+	op := pms.MetadataOperation{
+		Type:     pms.OpRemove,
+		ParentID: parentInodeID,
+		Name:     name,
+	}
+	return s.replicateOp(ctx, op)
+}
+
+func (s *BoltMetadataService) Rename(ctx context.Context, srcParentID, srcName, dstParentID, dstName string) error {
+	if _, err := s.Lookup(ctx, srcParentID, srcName); err != nil {
+		return err
+	}
+	dstParent, err := s.GetInode(ctx, dstParentID)
+	if err != nil {
+		return err
+	}
+	if dstParent.Type != pms.TypeDirectory {
+		return inmemoryms.ErrNotDir
+	}
+
+	op := pms.MetadataOperation{
+		Type:        pms.OpRename,
+		ParentID:    srcParentID,
+		Name:        srcName,
+		DstParentID: dstParentID,
+		DstName:     dstName,
+	}
+	return s.replicateOp(ctx, op)
+}
+
 func (s *BoltMetadataService) Recover() (uint64, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("bolt metadata service is not initialized")
@@ -676,6 +1257,160 @@ func (s *BoltMetadataService) Recover() (uint64, error) {
 	}
 
 	return 0, nil
+}
+
+func loadSuperblock(tx *bbolt.Tx) (*pms.Superblock, error) {
+	superblockBkt := tx.Bucket(superblockBucket)
+	if superblockBkt == nil {
+		return nil, fmt.Errorf("bolt metadata schema is not initialized")
+	}
+
+	superblockBytes := superblockBkt.Get(superblockKey)
+	if superblockBytes == nil {
+		return nil, inmemoryms.ErrNotFound
+	}
+
+	var superblock pms.Superblock
+	if err := decodeGob(superblockBytes, &superblock); err != nil {
+		return nil, fmt.Errorf("decode superblock: %w", err)
+	}
+
+	return &superblock, nil
+}
+
+func loadStoredInode(inodes *bbolt.Bucket, inodeKey []byte, inodeID string) (*pms.Inode, error) {
+	if inodes == nil {
+		return nil, fmt.Errorf("bolt metadata schema is not initialized")
+	}
+
+	inodeBytes := inodes.Get(inodeKey)
+	if inodeBytes == nil {
+		return nil, inmemoryms.ErrNotFound
+	}
+
+	var inode pms.Inode
+	if err := decodeGob(inodeBytes, &inode); err != nil {
+		return nil, fmt.Errorf("decode inode %q: %w", inodeID, err)
+	}
+
+	return &inode, nil
+}
+
+func loadChunkList(chunkMap *bbolt.Bucket, inodeKey []byte) ([]string, error) {
+	if chunkMap == nil {
+		return nil, fmt.Errorf("bolt metadata schema is not initialized")
+	}
+
+	cursor := chunkMap.Cursor()
+	chunkList := make([]string, 0)
+	for key, value := cursor.Seek(inodeKey); key != nil && bytes.HasPrefix(key, inodeKey); key, value = cursor.Next() {
+		if len(key) != len(inodeKey)+8 {
+			return nil, fmt.Errorf("invalid chunk map key length: got %d", len(key))
+		}
+
+		index := binary.BigEndian.Uint64(key[len(inodeKey):])
+		var chunkID string
+		if err := decodeGob(value, &chunkID); err != nil {
+			return nil, fmt.Errorf("decode chunk descriptor at index %d: %w", index, err)
+		}
+
+		for uint64(len(chunkList)) <= index {
+			chunkList = append(chunkList, "")
+		}
+		chunkList[index] = chunkID
+	}
+
+	return chunkList, nil
+}
+
+func replaceChunkList(chunkMap *bbolt.Bucket, inodeKey []byte, chunkList []string) error {
+	if err := deleteChunkList(chunkMap, inodeKey); err != nil {
+		return err
+	}
+
+	for idx, chunkID := range chunkList {
+		valueBytes, err := encodeGob(chunkID)
+		if err != nil {
+			return fmt.Errorf("encode chunk descriptor at index %d: %w", idx, err)
+		}
+		if err := chunkMap.Put(encodeChunkMapKey(inodeKey, uint64(idx)), valueBytes); err != nil {
+			return fmt.Errorf("store chunk descriptor at index %d: %w", idx, err)
+		}
+	}
+
+	return nil
+}
+
+func deleteChunkList(chunkMap *bbolt.Bucket, inodeKey []byte) error {
+	if chunkMap == nil {
+		return fmt.Errorf("bolt metadata schema is not initialized")
+	}
+
+	cursor := chunkMap.Cursor()
+	for key, _ := cursor.Seek(inodeKey); key != nil && bytes.HasPrefix(key, inodeKey); {
+		nextKey, _ := cursor.Next()
+		deleteKey := append([]byte(nil), key...)
+		if err := chunkMap.Delete(deleteKey); err != nil {
+			return fmt.Errorf("delete chunk descriptor for key %x: %w", deleteKey, err)
+		}
+		key = nextKey
+	}
+
+	return nil
+}
+
+func encodeChunkMapKey(inodeKey []byte, chunkIndex uint64) []byte {
+	key := make([]byte, len(inodeKey)+8)
+	copy(key, inodeKey)
+	binary.BigEndian.PutUint64(key[len(inodeKey):], chunkIndex)
+	return key
+}
+
+func nextInodeID() string {
+	if inodeIDCounter.Load() == 0 {
+		inodeIDCounter.CompareAndSwap(0, uint64(time.Now().UnixNano()))
+	}
+	return strconv.FormatUint(inodeIDCounter.Add(1), 10)
+}
+
+func (s *BoltMetadataService) directoryIsEmpty(ctx context.Context, inodeID string) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fmt.Errorf("bolt metadata service is not initialized")
+	}
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+
+	inodeKey, err := encodeInodeKey(inodeID)
+	if err != nil {
+		return false, fmt.Errorf("encode inode id %q: %w", inodeID, err)
+	}
+
+	empty := true
+	err = s.db.View(func(tx *bbolt.Tx) error {
+		dentries := tx.Bucket(dentriesBucket)
+		inodes := tx.Bucket(inodesBucket)
+		if dentries == nil || inodes == nil {
+			return fmt.Errorf("bolt metadata schema is not initialized")
+		}
+
+		inode, err := loadStoredInode(inodes, inodeKey, inodeID)
+		if err != nil {
+			return err
+		}
+		if inode.Type != pms.TypeDirectory {
+			return inmemoryms.ErrNotDir
+		}
+
+		key, _ := dentries.Cursor().Seek(inodeKey)
+		empty = key == nil || !bytes.HasPrefix(key, inodeKey)
+		return nil
+	})
+	if err != nil {
+		return false, err
+	}
+
+	return empty, nil
 }
 
 func decodeInodeID(key []byte) (string, error) {
