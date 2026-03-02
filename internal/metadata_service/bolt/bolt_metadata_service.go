@@ -171,6 +171,104 @@ func (s *BoltMetadataService) ApplyCreate(op pms.MetadataOperation, consistentIn
 	})
 }
 
+func (s *BoltMetadataService) ApplyRename(op pms.MetadataOperation, consistentIndex uint64) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("bolt metadata service is not initialized")
+	}
+
+	srcParentKey, err := encodeInodeKey(op.ParentID)
+	if err != nil {
+		return fmt.Errorf("encode source parent inode id %q: %w", op.ParentID, err)
+	}
+
+	dstParentKey, err := encodeInodeKey(op.DstParentID)
+	if err != nil {
+		return fmt.Errorf("encode destination parent inode id %q: %w", op.DstParentID, err)
+	}
+
+	srcDentryKey := encodeDentryKey(srcParentKey, op.Name)
+	dstDentryKey := encodeDentryKey(dstParentKey, op.DstName)
+
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		inodes := tx.Bucket(inodesBucket)
+		dentries := tx.Bucket(dentriesBucket)
+		metadataState := tx.Bucket(metadataStateBucket)
+		if inodes == nil || dentries == nil || metadataState == nil {
+			return fmt.Errorf("bolt metadata schema is not initialized")
+		}
+
+		srcParentBytes := inodes.Get(srcParentKey)
+		if srcParentBytes == nil {
+			return inmemoryms.ErrNotFound
+		}
+
+		dstParentBytes := inodes.Get(dstParentKey)
+		if dstParentBytes == nil {
+			return inmemoryms.ErrNotFound
+		}
+
+		var srcParent pms.Inode
+		if err := decodeGob(srcParentBytes, &srcParent); err != nil {
+			return fmt.Errorf("decode source parent inode %q: %w", op.ParentID, err)
+		}
+
+		var dstParent pms.Inode
+		if err := decodeGob(dstParentBytes, &dstParent); err != nil {
+			return fmt.Errorf("decode destination parent inode %q: %w", op.DstParentID, err)
+		}
+
+		childKey := dentries.Get(srcDentryKey)
+		if childKey == nil {
+			return inmemoryms.ErrNotFound
+		}
+
+		childKey = append([]byte(nil), childKey...)
+
+		if err := dentries.Delete(srcDentryKey); err != nil {
+			return fmt.Errorf("delete source dentry %q under parent %q: %w", op.Name, op.ParentID, err)
+		}
+
+		if overwrittenChildKey := dentries.Get(dstDentryKey); overwrittenChildKey != nil {
+			overwrittenChildKey = append([]byte(nil), overwrittenChildKey...)
+			if err := inodes.Delete(overwrittenChildKey); err != nil {
+				return fmt.Errorf("delete overwritten inode at destination %q/%q: %w", op.DstParentID, op.DstName, err)
+			}
+		}
+
+		if err := dentries.Put(dstDentryKey, childKey); err != nil {
+			return fmt.Errorf("store destination dentry %q under parent %q: %w", op.DstName, op.DstParentID, err)
+		}
+
+		now := time.Unix(0, op.Timestamp)
+		srcParent.ModifyTime = now
+		srcParent.ChangeTime = now
+		dstParent.ModifyTime = now
+		dstParent.ChangeTime = now
+
+		srcParentBytes, err = encodeGob(storableInode(srcParent))
+		if err != nil {
+			return fmt.Errorf("encode source parent inode %q: %w", op.ParentID, err)
+		}
+		if err := inodes.Put(srcParentKey, srcParentBytes); err != nil {
+			return fmt.Errorf("update source parent inode %q: %w", op.ParentID, err)
+		}
+
+		dstParentBytes, err = encodeGob(storableInode(dstParent))
+		if err != nil {
+			return fmt.Errorf("encode destination parent inode %q: %w", op.DstParentID, err)
+		}
+		if err := inodes.Put(dstParentKey, dstParentBytes); err != nil {
+			return fmt.Errorf("update destination parent inode %q: %w", op.DstParentID, err)
+		}
+
+		if err := metadataState.Put(consistentIndexKey, encodeUint64LE(consistentIndex)); err != nil {
+			return fmt.Errorf("update consistent index %d: %w", consistentIndex, err)
+		}
+
+		return nil
+	})
+}
+
 func encodeInodeKey(inodeID string) ([]byte, error) {
 	parsed, err := strconv.ParseUint(inodeID, 10, 64)
 	if err != nil {
