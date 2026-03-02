@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/gob"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1069,7 +1070,15 @@ func (s *BoltMetadataService) Create(ctx context.Context, parentInodeID string, 
 		return nil, err
 	}
 
-	return s.GetInode(ctx, newID)
+	inode, err := s.GetInode(ctx, newID)
+	if err != nil {
+		if errors.Is(err, inmemoryms.ErrNotFound) {
+			return nil, inmemoryms.ErrAlreadyExists
+		}
+		return nil, err
+	}
+
+	return inode, nil
 }
 
 func (s *BoltMetadataService) Mkdir(ctx context.Context, parentInodeID string, name string, mode uint32, uid, gid uint32) (*pms.Inode, error) {
