@@ -8,6 +8,7 @@ package node
 import (
 	"context"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -45,6 +46,18 @@ func parseEtcdEndpoints(raw string) []string {
 	return endpoints
 }
 
+func envInt(name string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v <= 0 {
+		return fallback
+	}
+	return v
+}
+
 func Build(opts Options) runnable {
 	etcdEndpoints := parseEtcdEndpoints(os.Getenv("ETCD_ENDPOINTS"))
 
@@ -75,11 +88,14 @@ func Build(opts Options) runnable {
 
 	// 4. Replicators (The Consensus/Network Layer)
 	raftConfig := durableraft.RaftConfig{
-		MaxBatchSize:          100,
-		MaxBatchWaitTime:      10 * time.Millisecond,
-		SnapshotThresholdLogs: 1000,
+		MaxBatchSize:          envInt("RAFT_MAX_BATCH_SIZE", 64),
+		MaxBatchWaitTime:      time.Duration(envInt("RAFT_MAX_BATCH_WAIT_MS", 10)) * time.Millisecond,
+		SnapshotThresholdLogs: uint64(envInt("RAFT_SNAPSHOT_THRESHOLD_LOGS", 1000)),
 	}
-	logStore := durableraft.NewMemoryLogStore()
+	logStore, err := durableraft.NewFileLogStore(opts.DataDir + "/raft_wal.json")
+	if err != nil {
+		panic(err)
+	}
 	stableStore := durableraft.NewFileStableStore(opts.DataDir + "/raft_stable.json")
 	snapshotStore := durableraft.NewFileSnapshotStore(opts.DataDir + "/raft_snapshot.bin")
 

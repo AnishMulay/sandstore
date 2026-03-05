@@ -3,6 +3,9 @@ package durable_raft
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
 	"math/rand"
 	"sync"
 	"time"
@@ -13,7 +16,10 @@ import (
 	pmr "github.com/AnishMulay/sandstore/internal/metadata_replicator"
 	"github.com/AnishMulay/sandstore/internal/metadata_replicator/raft_replicator"
 	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
+	ps "github.com/AnishMulay/sandstore/internal/server"
 )
+
+const heartbeatInterval = 50 * time.Millisecond
 
 type DurableRaftReplicator struct {
 	mu sync.Mutex
@@ -37,16 +43,19 @@ type DurableRaftReplicator struct {
 	commitIndex uint64
 	lastApplied uint64
 
+	lastIncludedIndex uint64
+	lastIncludedTerm  uint64
+
 	nextIndex  map[string]uint64
 	matchIndex map[string]uint64
 	leaderID   string
 
 	electionResetEvent time.Time
 	stopCh             chan struct{}
+	stopOnce           sync.Once
 
 	pendingBatch   []raft_replicator.LogEntry
 	pendingClients map[int64]chan error
-	firstBatchTime time.Time
 }
 
 func NewDurableRaftReplicator(
@@ -80,27 +89,33 @@ func NewDurableRaftReplicator(
 func (r *DurableRaftReplicator) Start(applier pmr.ApplyFunc) error {
 	r.applier = applier
 
-	// Flow 3: Crash Recovery and Initialization
 	term, votedFor, err := r.stableStore.GetState()
 	if err != nil {
-		r.ls.Error(log_service.LogEvent{Message: "failed to load stable state, starting fresh"})
-	} else {
-		r.currentTerm = term
-		r.votedFor = votedFor
+		return fmt.Errorf("load stable state: %w", err)
 	}
+	r.currentTerm = term
+	r.votedFor = votedFor
 
-	_, _, err = r.logStore.LastIndexAndTerm()
+	meta, snapshotData, err := r.snapshotStore.LoadSnapshot()
 	if err != nil {
-		r.ls.Error(log_service.LogEvent{Message: "failed to load log state"})
+		return fmt.Errorf("load snapshot state: %w", err)
 	}
-
-	meta, _, err := r.snapshotStore.LoadSnapshot()
-	if err == nil && meta.LastIncludedIndex > 0 {
+	if meta.LastIncludedIndex > 0 {
+		if len(snapshotData) == 0 {
+			return fmt.Errorf("snapshot meta exists without snapshot data")
+		}
+		r.lastIncludedIndex = meta.LastIncludedIndex
+		r.lastIncludedTerm = meta.LastIncludedTerm
 		r.commitIndex = meta.LastIncludedIndex
 		r.lastApplied = meta.LastIncludedIndex
-	} else {
-		r.commitIndex = 0
-		r.lastApplied = 0
+	}
+
+	lastIdx, _, err := r.logStore.LastIndexAndTerm()
+	if err != nil {
+		return fmt.Errorf("load log state: %w", err)
+	}
+	if lastIdx < r.lastIncludedIndex {
+		return fmt.Errorf("wal behind snapshot: lastIdx=%d lastIncluded=%d", lastIdx, r.lastIncludedIndex)
 	}
 
 	r.state = raft_replicator.Follower
@@ -111,20 +126,36 @@ func (r *DurableRaftReplicator) Start(applier pmr.ApplyFunc) error {
 }
 
 func (r *DurableRaftReplicator) Stop() error {
-	close(r.stopCh)
+	r.stopOnce.Do(func() {
+		close(r.stopCh)
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		for idx, ch := range r.pendingClients {
+			select {
+			case ch <- context.Canceled:
+			default:
+			}
+			close(ch)
+			delete(r.pendingClients, idx)
+		}
+	})
 	return nil
 }
 
-// Flow 1: Leader Batching & Fsync (Step 1)
 func (r *DurableRaftReplicator) Replicate(ctx context.Context, data []byte) error {
 	r.mu.Lock()
 	if r.state != raft_replicator.Leader {
 		leaderID := r.leaderID
+		leaderAddr := r.findLeaderAddrLocked(leaderID)
 		r.mu.Unlock()
-		return raft_replicator.ErrNotLeader{LeaderID: leaderID, LeaderAddr: ""}
+		return raft_replicator.ErrNotLeader{LeaderID: leaderID, LeaderAddr: leaderAddr}
 	}
 
-	lastIdx, _, _ := r.logStore.LastIndexAndTerm()
+	lastIdx, _, err := r.logStore.LastIndexAndTerm()
+	if err != nil {
+		r.mu.Unlock()
+		return err
+	}
 	entryIndex := int64(lastIdx) + int64(len(r.pendingBatch)) + 1
 
 	entry := raft_replicator.LogEntry{
@@ -133,18 +164,13 @@ func (r *DurableRaftReplicator) Replicate(ctx context.Context, data []byte) erro
 		Data:      data,
 		Timestamp: time.Now(),
 	}
-
 	r.pendingBatch = append(r.pendingBatch, entry)
-	if len(r.pendingBatch) == 1 {
-		r.firstBatchTime = time.Now()
-	}
 
 	resultCh := make(chan error, 1)
 	r.pendingClients[entry.Index] = resultCh
 
-	// Step 2: BATCHING TRIGGER
-	if len(r.pendingBatch) >= r.config.MaxBatchSize {
-		r.flushPendingBatch() // Flushes inside lock
+	if r.config.MaxBatchSize <= 1 || len(r.pendingBatch) >= r.config.MaxBatchSize {
+		r.flushPendingBatchLocked()
 	}
 	r.mu.Unlock()
 
@@ -157,17 +183,22 @@ func (r *DurableRaftReplicator) Replicate(ctx context.Context, data []byte) erro
 		r.mu.Unlock()
 		return ctx.Err()
 	case <-r.stopCh:
-		return nil
+		return context.Canceled
 	}
 }
 
-// Event Loop
 func (r *DurableRaftReplicator) runEventLoop() {
 	electionTimeout := randomElectionTimeout()
 	ticker := time.NewTicker(10 * time.Millisecond)
-	batchTicker := time.NewTicker(r.config.MaxBatchWaitTime)
+	batchWait := r.config.MaxBatchWaitTime
+	if batchWait <= 0 {
+		batchWait = 10 * time.Millisecond
+	}
+	batchTicker := time.NewTicker(batchWait)
+	compactionTicker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 	defer batchTicker.Stop()
+	defer compactionTicker.Stop()
 
 	for {
 		select {
@@ -176,91 +207,94 @@ func (r *DurableRaftReplicator) runEventLoop() {
 		case <-batchTicker.C:
 			r.mu.Lock()
 			if r.state == raft_replicator.Leader && len(r.pendingBatch) > 0 {
-				r.flushPendingBatch()
+				r.flushPendingBatchLocked()
 			}
 			r.mu.Unlock()
 		case <-ticker.C:
 			r.mu.Lock()
 			elapsed := time.Since(r.electionResetEvent)
-
-			if r.state != raft_replicator.Leader && elapsed >= electionTimeout {
-				r.startElection()
-				electionTimeout = randomElectionTimeout()
-				r.electionResetEvent = time.Now()
-			}
-
 			if r.state == raft_replicator.Leader {
-				if elapsed >= 50*time.Millisecond {
-					r.broadcastAppendEntries()
+				if elapsed >= heartbeatInterval {
+					go r.broadcastAppendEntries()
 					r.electionResetEvent = time.Now()
 				}
+			} else if elapsed >= electionTimeout {
+				r.startElectionLocked()
+				electionTimeout = randomElectionTimeout()
 			}
 			r.mu.Unlock()
-
+		case <-compactionTicker.C:
 			r.checkCompaction()
 		}
 	}
 }
 
-// flushPendingBatch assumes r.mu is locked
-func (r *DurableRaftReplicator) flushPendingBatch() {
+func (r *DurableRaftReplicator) flushPendingBatchLocked() {
 	if len(r.pendingBatch) == 0 {
 		return
 	}
 
-	// Step 3: DURABLE PERSISTENCE (FSYNC)
-	err := r.logStore.StoreLogs(r.pendingBatch)
-	if err != nil {
-		for _, entry := range r.pendingBatch {
+	batch := make([]raft_replicator.LogEntry, len(r.pendingBatch))
+	copy(batch, r.pendingBatch)
+	r.pendingBatch = nil
+
+	if err := r.logStore.StoreLogs(batch); err != nil {
+		for _, entry := range batch {
 			if ch, ok := r.pendingClients[entry.Index]; ok {
-				ch <- err
+				select {
+				case ch <- err:
+				default:
+				}
+				close(ch)
 				delete(r.pendingClients, entry.Index)
 			}
 		}
-		r.pendingBatch = nil
 		return
 	}
 
-	// Logs are stored locally.
-	r.pendingBatch = nil
-	// Step 4: BROADCAST
 	go r.broadcastAppendEntries()
 }
 
-// Basic Election logic (skeleton)
-func (r *DurableRaftReplicator) startElection() {
+func (r *DurableRaftReplicator) startElectionLocked() {
 	r.state = raft_replicator.Candidate
 	r.currentTerm++
 	r.votedFor = r.id
+	r.electionResetEvent = time.Now()
+	r.mustPersistStableLocked()
 
-	_ = r.stableStore.SetState(r.currentTerm, r.votedFor)
-
-	nodes, _ := r.clusterService.GetAllNodes()
-	lastIdx, lastTerm, _ := r.logStore.LastIndexAndTerm()
-	quorum := (len(nodes) / 2) + 1
-
-	if len(nodes) == 1 {
-		r.becomeLeader()
+	nodes, err := r.clusterService.GetAllNodes()
+	if err != nil {
+		r.ls.Error(log_service.LogEvent{Message: "failed to list nodes for election", Metadata: map[string]any{"error": err.Error()}})
 		return
 	}
 
-	var votesReceived int = 1
+	lastIdx, lastTerm := r.getLastLogInfoLocked()
+	quorum := (len(nodes) / 2) + 1
+	if len(nodes) == 1 {
+		r.becomeLeaderLocked(nodes)
+		return
+	}
+
+	savedTerm := r.currentTerm
+	votesReceived := 1
 	var voteMu sync.Mutex
 
 	for _, n := range nodes {
 		if n.ID == r.id {
 			continue
 		}
-		go func(peer cluster_service.Node) {
+
+		peer := n
+		go func() {
 			args := raft_replicator.RequestVoteArgs{
-				Term:         int64(r.currentTerm),
+				Term:         int64(savedTerm),
 				CandidateID:  r.id,
 				LastLogIndex: int64(lastIdx),
 				LastLogTerm:  int64(lastTerm),
 			}
 			msg := communication.Message{
 				From:    r.comm.Address(),
-				Type:    "raft_request_vote",
+				Type:    ps.MsgRaftRequestVote,
 				Payload: args,
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -270,47 +304,65 @@ func (r *DurableRaftReplicator) startElection() {
 			if err != nil || resp.Code != communication.CodeOK {
 				return
 			}
+
 			var reply raft_replicator.RequestVoteReply
-			if json.Unmarshal(resp.Body, &reply) != nil {
+			if err := json.Unmarshal(resp.Body, &reply); err != nil {
 				return
 			}
 
 			r.mu.Lock()
 			defer r.mu.Unlock()
-			if r.state != raft_replicator.Candidate || r.currentTerm != uint64(args.Term) {
+			if r.state != raft_replicator.Candidate || r.currentTerm != savedTerm {
 				return
 			}
 			if reply.Term > int64(r.currentTerm) {
-				r.state = raft_replicator.Follower
-				r.currentTerm = uint64(reply.Term)
-				r.votedFor = ""
-				_ = r.stableStore.SetState(r.currentTerm, "")
+				r.stepDownLocked(uint64(reply.Term), "")
 				return
 			}
+
 			if reply.VoteGranted {
 				voteMu.Lock()
 				votesReceived++
-				v := votesReceived
+				votes := votesReceived
 				voteMu.Unlock()
-				if v >= quorum && r.state == raft_replicator.Candidate {
-					r.becomeLeader()
+				if votes >= quorum && r.state == raft_replicator.Candidate {
+					r.becomeLeaderLocked(nodes)
 				}
 			}
-		}(n)
+		}()
 	}
 }
 
-func (r *DurableRaftReplicator) becomeLeader() {
+func (r *DurableRaftReplicator) becomeLeaderLocked(nodes []cluster_service.Node) {
 	r.state = raft_replicator.Leader
-	nodes, _ := r.clusterService.GetAllNodes()
-	lastIdx, _, _ := r.logStore.LastIndexAndTerm()
+	r.leaderID = r.id
+	lastIdx, _ := r.getLastLogInfoLocked()
+
 	for _, n := range nodes {
 		r.nextIndex[n.ID] = lastIdx + 1
-		r.matchIndex[n.ID] = 0
+		r.matchIndex[n.ID] = r.lastIncludedIndex
 	}
-	r.leaderID = r.id
-	r.flushPendingBatch()
+	r.matchIndex[r.id] = lastIdx
+
+	if len(r.pendingBatch) > 0 {
+		r.flushPendingBatchLocked()
+	}
 	go r.broadcastAppendEntries()
+}
+
+type appendWork struct {
+	node         cluster_service.Node
+	prevLogIndex int64
+	prevLogTerm  int64
+	entries      []raft_replicator.LogEntry
+	term         uint64
+	commitIndex  uint64
+}
+
+type snapshotWork struct {
+	node cluster_service.Node
+	req  communication.InstallSnapshotRequest
+	term uint64
 }
 
 func (r *DurableRaftReplicator) broadcastAppendEntries() {
@@ -319,161 +371,284 @@ func (r *DurableRaftReplicator) broadcastAppendEntries() {
 		r.mu.Unlock()
 		return
 	}
+
 	savedTerm := r.currentTerm
 	savedCommitIndex := r.commitIndex
-	leaderID := r.id
-
-	nodes, _ := r.clusterService.GetAllNodes()
-	type peerState struct {
-		node         cluster_service.Node
-		nextIndex    int64
-		prevLogIndex int64
-		prevLogTerm  int64
-		entries      []raft_replicator.LogEntry
+	nodes, err := r.clusterService.GetAllNodes()
+	if err != nil {
+		r.mu.Unlock()
+		return
 	}
+	lastIdx, _ := r.getLastLogInfoLocked()
 
-	var workList []peerState
-	lastIdx, _, _ := r.logStore.LastIndexAndTerm()
+	var appendWorkList []appendWork
+	var snapshotWorkList []snapshotWork
+
+	snapshotMeta, snapshotData, snapshotErr := r.snapshotStore.LoadSnapshot()
+	if snapshotErr != nil {
+		r.mu.Unlock()
+		r.ls.Error(log_service.LogEvent{Message: "failed to load snapshot for replication", Metadata: map[string]any{"error": snapshotErr.Error()}})
+		return
+	}
 
 	for _, node := range nodes {
 		if node.ID == r.id {
 			continue
 		}
+
 		nextIdx := r.nextIndex[node.ID]
 		if nextIdx == 0 {
-			nextIdx = 1
+			nextIdx = r.lastIncludedIndex + 1
+		}
+
+		if nextIdx <= r.lastIncludedIndex {
+			if snapshotMeta.LastIncludedIndex == 0 || len(snapshotData) == 0 {
+				continue
+			}
+			snapshotWorkList = append(snapshotWorkList, snapshotWork{
+				node: node,
+				req: communication.InstallSnapshotRequest{
+					Term:              int64(savedTerm),
+					LeaderID:          r.id,
+					LastIncludedIndex: int64(snapshotMeta.LastIncludedIndex),
+					LastIncludedTerm:  int64(snapshotMeta.LastIncludedTerm),
+					Data:              snapshotData,
+				},
+				term: savedTerm,
+			})
+			continue
 		}
 
 		prevLogIndex := nextIdx - 1
-		var prevLogTerm int64
-		if prevLogIndex > 0 {
-			if entry, err := r.logStore.GetLog(prevLogIndex); err == nil {
-				prevLogTerm = entry.Term
-			} else {
-				// Snapshot logic goes here later
-			}
-		}
-
-		var entries []raft_replicator.LogEntry
-		if nextIdx <= lastIdx {
-			for i := nextIdx; i <= lastIdx; i++ {
-				if entry, err := r.logStore.GetLog(i); err == nil {
-					entries = append(entries, entry)
+		prevLogTerm := int64(0)
+		if prevLogIndex == r.lastIncludedIndex {
+			prevLogTerm = int64(r.lastIncludedTerm)
+		} else if prevLogIndex > 0 {
+			entry, err := r.logStore.GetLog(prevLogIndex)
+			if err != nil {
+				if errors.Is(err, ErrLogCompacted) && snapshotMeta.LastIncludedIndex > 0 {
+					snapshotWorkList = append(snapshotWorkList, snapshotWork{
+						node: node,
+						req: communication.InstallSnapshotRequest{
+							Term:              int64(savedTerm),
+							LeaderID:          r.id,
+							LastIncludedIndex: int64(snapshotMeta.LastIncludedIndex),
+							LastIncludedTerm:  int64(snapshotMeta.LastIncludedTerm),
+							Data:              snapshotData,
+						},
+						term: savedTerm,
+					})
+					continue
 				}
+				continue
+			}
+			prevLogTerm = entry.Term
+		}
+
+		entries := make([]raft_replicator.LogEntry, 0)
+		if nextIdx <= lastIdx {
+			for idx := nextIdx; idx <= lastIdx; idx++ {
+				entry, err := r.logStore.GetLog(idx)
+				if err != nil {
+					break
+				}
+				entries = append(entries, entry)
 			}
 		}
 
-		workList = append(workList, peerState{
+		appendWorkList = append(appendWorkList, appendWork{
 			node:         node,
-			nextIndex:    int64(nextIdx),
 			prevLogIndex: int64(prevLogIndex),
 			prevLogTerm:  prevLogTerm,
 			entries:      entries,
+			term:         savedTerm,
+			commitIndex:  savedCommitIndex,
 		})
 	}
 	r.mu.Unlock()
 
-	for _, work := range workList {
-		go func(w peerState) {
-			entriesBytes, _ := json.Marshal(w.entries)
-			args := communication.AppendEntriesRequest{
-				Term:         int64(savedTerm),
-				LeaderID:     leaderID,
-				PrevLogIndex: w.prevLogIndex,
-				PrevLogTerm:  w.prevLogTerm,
-				Entries:      entriesBytes,
-				LeaderCommit: int64(savedCommitIndex),
-			}
-			msg := communication.Message{
-				From:    r.comm.Address(),
-				Type:    "raft_append_entries",
-				Payload: args,
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			resp, err := r.comm.Send(ctx, w.node.Address, msg)
-			if err != nil || resp.Code != communication.CodeOK {
-				return
-			}
-
-			var reply raft_replicator.AppendEntriesReply
-			if json.Unmarshal(resp.Body, &reply) != nil {
-				return
-			}
-
-			r.mu.Lock()
-			defer r.mu.Unlock()
-
-			if r.state != raft_replicator.Leader || r.currentTerm != savedTerm {
-				return
-			}
-
-			if reply.Term > int64(r.currentTerm) {
-				r.state = raft_replicator.Follower
-				r.currentTerm = uint64(reply.Term)
-				r.votedFor = ""
-				_ = r.stableStore.SetState(r.currentTerm, "")
-				return
-			}
-
-			if reply.Success {
-				newMatchIndex := uint64(w.prevLogIndex + int64(len(w.entries)))
-				if newMatchIndex > r.matchIndex[w.node.ID] {
-					r.matchIndex[w.node.ID] = newMatchIndex
-					r.nextIndex[w.node.ID] = newMatchIndex + 1
-					r.advanceCommitIndex()
-				}
-			} else {
-				newNext := r.nextIndex[w.node.ID] - 1
-				if newNext < 1 {
-					newNext = 1
-				}
-				r.nextIndex[w.node.ID] = newNext
-				if reply.ConflictIndex > 0 {
-					r.nextIndex[w.node.ID] = uint64(reply.ConflictIndex)
-				}
-			}
-		}(work)
+	for _, work := range appendWorkList {
+		w := work
+		go r.replicateAppendEntries(w)
+	}
+	for _, work := range snapshotWorkList {
+		w := work
+		go r.replicateSnapshot(w)
 	}
 }
 
-func (r *DurableRaftReplicator) advanceCommitIndex() {
-	lastIdx, _, _ := r.logStore.LastIndexAndTerm()
+func (r *DurableRaftReplicator) replicateAppendEntries(w appendWork) {
+	entriesBytes, err := json.Marshal(w.entries)
+	if err != nil {
+		return
+	}
+
+	args := communication.AppendEntriesRequest{
+		Term:         int64(w.term),
+		LeaderID:     r.id,
+		PrevLogIndex: w.prevLogIndex,
+		PrevLogTerm:  w.prevLogTerm,
+		Entries:      entriesBytes,
+		LeaderCommit: int64(w.commitIndex),
+	}
+	msg := communication.Message{
+		From:    r.comm.Address(),
+		Type:    ps.MsgRaftAppendEntries,
+		Payload: args,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	resp, err := r.comm.Send(ctx, w.node.Address, msg)
+	if err != nil || resp.Code != communication.CodeOK {
+		return
+	}
+
+	var reply raft_replicator.AppendEntriesReply
+	if err := json.Unmarshal(resp.Body, &reply); err != nil {
+		return
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.state != raft_replicator.Leader || r.currentTerm != w.term {
+		return
+	}
+	if reply.Term > int64(r.currentTerm) {
+		r.stepDownLocked(uint64(reply.Term), "")
+		return
+	}
+
+	if reply.Success {
+		newMatchIndex := uint64(w.prevLogIndex)
+		if len(w.entries) > 0 {
+			newMatchIndex = uint64(w.entries[len(w.entries)-1].Index)
+		}
+		if newMatchIndex > r.matchIndex[w.node.ID] {
+			r.matchIndex[w.node.ID] = newMatchIndex
+			r.nextIndex[w.node.ID] = newMatchIndex + 1
+			r.advanceCommitIndexLocked()
+		}
+		return
+	}
+
+	if reply.ConflictIndex > 0 {
+		r.nextIndex[w.node.ID] = uint64(reply.ConflictIndex)
+		if r.nextIndex[w.node.ID] < 1 {
+			r.nextIndex[w.node.ID] = 1
+		}
+		return
+	}
+
+	if r.nextIndex[w.node.ID] > 1 {
+		r.nextIndex[w.node.ID]--
+	}
+}
+
+func (r *DurableRaftReplicator) replicateSnapshot(w snapshotWork) {
+	msg := communication.Message{
+		From:    r.comm.Address(),
+		Type:    ps.MsgRaftInstallSnapshot,
+		Payload: w.req,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	resp, err := r.comm.Send(ctx, w.node.Address, msg)
+	if err != nil || resp.Code != communication.CodeOK {
+		return
+	}
+
+	var reply raft_replicator.InstallSnapshotReply
+	if err := json.Unmarshal(resp.Body, &reply); err != nil {
+		return
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if r.state != raft_replicator.Leader || r.currentTerm != w.term {
+		return
+	}
+	if reply.Term > int64(r.currentTerm) {
+		r.stepDownLocked(uint64(reply.Term), "")
+		return
+	}
+	if reply.Success {
+		idx := uint64(w.req.LastIncludedIndex)
+		r.matchIndex[w.node.ID] = idx
+		r.nextIndex[w.node.ID] = idx + 1
+	}
+}
+
+func (r *DurableRaftReplicator) advanceCommitIndexLocked() {
+	lastIdx, _, err := r.logStore.LastIndexAndTerm()
+	if err != nil {
+		return
+	}
+
+	nodes, err := r.clusterService.GetAllNodes()
+	if err != nil || len(nodes) == 0 {
+		return
+	}
+
 	for n := lastIdx; n > r.commitIndex; n-- {
 		entry, err := r.logStore.GetLog(n)
-		if err != nil || entry.Term != int64(r.currentTerm) {
+		if err != nil {
 			continue
 		}
+		if entry.Term != int64(r.currentTerm) {
+			continue
+		}
+
 		matchCount := 1
-		nodes, _ := r.clusterService.GetAllNodes()
 		for _, node := range nodes {
-			if node.ID != r.id && r.matchIndex[node.ID] >= n {
+			if node.ID == r.id {
+				continue
+			}
+			if r.matchIndex[node.ID] >= n {
 				matchCount++
 			}
 		}
 		if matchCount > len(nodes)/2 {
 			r.commitIndex = n
-			r.applyLogs()
-			break
+			r.applyLogsLocked()
+			return
 		}
 	}
 }
 
-func (r *DurableRaftReplicator) applyLogs() {
-	for r.commitIndex > r.lastApplied {
-		r.lastApplied++
-		entry, err := r.logStore.GetLog(r.lastApplied)
-		if err == nil {
-			err = r.applier(entry.Data)
-			if ch, ok := r.pendingClients[entry.Index]; ok {
-				ch <- err
-				delete(r.pendingClients, entry.Index)
+func (r *DurableRaftReplicator) applyLogsLocked() {
+	for r.lastApplied < r.commitIndex {
+		nextIndex := r.lastApplied + 1
+		if nextIndex <= r.lastIncludedIndex {
+			r.lastApplied = nextIndex
+			continue
+		}
+
+		entry, err := r.logStore.GetLog(nextIndex)
+		if err != nil {
+			return
+		}
+
+		r.lastApplied = nextIndex
+		applyErr := r.applier(entry.Data)
+		if applyErr != nil {
+			r.ls.Error(log_service.LogEvent{Message: "failed to apply log entry", Metadata: map[string]any{"index": entry.Index, "error": applyErr.Error()}})
+		}
+
+		if ch, ok := r.pendingClients[entry.Index]; ok {
+			select {
+			case ch <- applyErr:
+			default:
 			}
+			close(ch)
+			delete(r.pendingClients, entry.Index)
 		}
 	}
 }
 
-// Flow 2: Follower AppendEntries
 func (r *DurableRaftReplicator) HandleAppendEntries(req communication.AppendEntriesRequest) (*raft_replicator.AppendEntriesReply, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -483,48 +658,70 @@ func (r *DurableRaftReplicator) HandleAppendEntries(req communication.AppendEntr
 		Success: false,
 	}
 
-	var entries []raft_replicator.LogEntry
-	if len(req.Entries) > 0 {
-		_ = json.Unmarshal(req.Entries, &entries)
-	}
-
-	if req.Term > int64(r.currentTerm) {
-		r.state = raft_replicator.Follower
-		r.currentTerm = uint64(req.Term)
-		r.votedFor = ""
-		_ = r.stableStore.SetState(r.currentTerm, "")
-	}
-
 	if req.Term < int64(r.currentTerm) {
 		return reply, nil
 	}
 
-	r.electionResetEvent = time.Now()
-	r.leaderID = req.LeaderID
+	if req.Term > int64(r.currentTerm) {
+		r.stepDownLocked(uint64(req.Term), req.LeaderID)
+	}
 
-	// Log Consistency
-	if req.PrevLogIndex > 0 {
-		lastIdx, _, _ := r.logStore.LastIndexAndTerm()
-		if uint64(req.PrevLogIndex) > lastIdx {
+	r.state = raft_replicator.Follower
+	r.leaderID = req.LeaderID
+	r.electionResetEvent = time.Now()
+	reply.Term = int64(r.currentTerm)
+
+	if uint64(req.PrevLogIndex) < r.lastIncludedIndex {
+		reply.ConflictIndex = int64(r.lastIncludedIndex + 1)
+		return reply, nil
+	}
+
+	if req.PrevLogIndex == int64(r.lastIncludedIndex) {
+		if req.PrevLogTerm != int64(r.lastIncludedTerm) {
+			reply.ConflictIndex = int64(r.lastIncludedIndex)
+			reply.ConflictTerm = int64(r.lastIncludedTerm)
+			return reply, nil
+		}
+	} else if req.PrevLogIndex > 0 {
+		prevEntry, err := r.logStore.GetLog(uint64(req.PrevLogIndex))
+		if err != nil {
+			lastIdx, _, _ := r.logStore.LastIndexAndTerm()
 			reply.ConflictIndex = int64(lastIdx + 1)
 			return reply, nil
 		}
-		entry, err := r.logStore.GetLog(uint64(req.PrevLogIndex))
-		if err == nil && entry.Term != req.PrevLogTerm {
-			reply.ConflictTerm = entry.Term
+		if prevEntry.Term != req.PrevLogTerm {
+			reply.ConflictTerm = prevEntry.Term
+			reply.ConflictIndex = req.PrevLogIndex
 			return reply, nil
 		}
 	}
 
-	// Conflict resolution & truncate
+	var entries []raft_replicator.LogEntry
+	if len(req.Entries) > 0 {
+		if err := json.Unmarshal(req.Entries, &entries); err != nil {
+			return reply, nil
+		}
+	}
+
 	var newLogs []raft_replicator.LogEntry
 	for i, entry := range entries {
+		if uint64(entry.Index) <= r.lastIncludedIndex {
+			continue
+		}
+
 		existing, err := r.logStore.GetLog(uint64(entry.Index))
-		if err == nil && existing.Term != entry.Term {
-			_ = r.logStore.DeleteRange(uint64(entry.Index), ^uint64(0)) // Delete rest
-			newLogs = entries[i:]
-			break
-		} else if err != nil { // Doesn't exist
+		if err == nil {
+			if existing.Term != entry.Term {
+				if err := r.logStore.DeleteRange(uint64(entry.Index), math.MaxUint64); err != nil {
+					return reply, nil
+				}
+				newLogs = entries[i:]
+				break
+			}
+			continue
+		}
+
+		if errors.Is(err, ErrLogNotFound) || errors.Is(err, ErrLogCompacted) {
 			newLogs = entries[i:]
 			break
 		}
@@ -532,18 +729,25 @@ func (r *DurableRaftReplicator) HandleAppendEntries(req communication.AppendEntr
 
 	if len(newLogs) > 0 {
 		if err := r.logStore.StoreLogs(newLogs); err != nil {
-			return reply, nil // Return failure
+			return reply, nil
 		}
 	}
 
-	lastNewIdx := uint64(req.PrevLogIndex) + uint64(len(entries))
+	lastIdx, _, err := r.logStore.LastIndexAndTerm()
+	if err != nil {
+		return reply, nil
+	}
+
 	if uint64(req.LeaderCommit) > r.commitIndex {
-		if uint64(req.LeaderCommit) < lastNewIdx {
-			r.commitIndex = uint64(req.LeaderCommit)
-		} else {
-			r.commitIndex = lastNewIdx
+		targetCommit := uint64(req.LeaderCommit)
+		if targetCommit > lastIdx {
+			targetCommit = lastIdx
 		}
-		r.applyLogs()
+		if targetCommit < r.lastIncludedIndex {
+			targetCommit = r.lastIncludedIndex
+		}
+		r.commitIndex = targetCommit
+		r.applyLogsLocked()
 	}
 
 	reply.Success = true
@@ -559,38 +763,201 @@ func (r *DurableRaftReplicator) HandleRequestVote(req raft_replicator.RequestVot
 		VoteGranted: false,
 	}
 
+	if req.Term < int64(r.currentTerm) {
+		return reply, nil
+	}
 	if req.Term > int64(r.currentTerm) {
-		r.state = raft_replicator.Follower
-		r.currentTerm = uint64(req.Term)
-		r.votedFor = ""
-		_ = r.stableStore.SetState(r.currentTerm, "")
+		r.stepDownLocked(uint64(req.Term), "")
+	}
+
+	lastIdx, lastTerm := r.getLastLogInfoLocked()
+	logIsUpToDate := req.LastLogTerm > int64(lastTerm) || (req.LastLogTerm == int64(lastTerm) && req.LastLogIndex >= int64(lastIdx))
+
+	if (r.votedFor == "" || r.votedFor == req.CandidateID) && logIsUpToDate {
+		r.votedFor = req.CandidateID
+		r.mustPersistStableLocked()
+		r.electionResetEvent = time.Now()
+		reply.VoteGranted = true
+	}
+
+	reply.Term = int64(r.currentTerm)
+	return reply, nil
+}
+
+func (r *DurableRaftReplicator) HandleInstallSnapshot(req communication.InstallSnapshotRequest) (*raft_replicator.InstallSnapshotReply, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	reply := &raft_replicator.InstallSnapshotReply{
+		Term:    int64(r.currentTerm),
+		Success: false,
 	}
 
 	if req.Term < int64(r.currentTerm) {
 		return reply, nil
 	}
-
-	lastIdx, lastTerm, _ := r.logStore.LastIndexAndTerm()
-	logIsUpToDate := req.LastLogTerm > int64(lastTerm) || (req.LastLogTerm == int64(lastTerm) && req.LastLogIndex >= int64(lastIdx))
-
-	if (r.votedFor == "" || r.votedFor == req.CandidateID) && logIsUpToDate {
-		r.votedFor = req.CandidateID
-		_ = r.stableStore.SetState(r.currentTerm, r.votedFor)
-		r.electionResetEvent = time.Now()
-		reply.VoteGranted = true
-		reply.Term = int64(r.currentTerm)
+	if req.Term > int64(r.currentTerm) {
+		r.stepDownLocked(uint64(req.Term), req.LeaderID)
 	}
 
+	r.state = raft_replicator.Follower
+	r.leaderID = req.LeaderID
+	r.electionResetEvent = time.Now()
+	reply.Term = int64(r.currentTerm)
+
+	incomingIndex := uint64(req.LastIncludedIndex)
+	incomingTerm := uint64(req.LastIncludedTerm)
+	if incomingIndex <= r.lastIncludedIndex {
+		reply.Success = true
+		return reply, nil
+	}
+
+	retainSuffix := false
+	if entry, err := r.logStore.GetLog(incomingIndex); err == nil && uint64(entry.Term) == incomingTerm {
+		retainSuffix = true
+	}
+
+	meta := SnapshotMeta{LastIncludedIndex: incomingIndex, LastIncludedTerm: incomingTerm}
+	if err := r.snapshotStore.SaveSnapshot(meta, req.Data); err != nil {
+		return reply, nil
+	}
+
+	if retainSuffix {
+		if err := r.logStore.DeleteRange(0, incomingIndex); err != nil {
+			return reply, nil
+		}
+	} else {
+		lastIdx, _, err := r.logStore.LastIndexAndTerm()
+		if err != nil {
+			return reply, nil
+		}
+		if err := r.logStore.DeleteRange(0, lastIdx); err != nil {
+			return reply, nil
+		}
+		if err := r.stateMachine.RestoreSnapshot(req.Data); err != nil {
+			return reply, nil
+		}
+	}
+
+	r.lastIncludedIndex = incomingIndex
+	r.lastIncludedTerm = incomingTerm
+	if r.commitIndex < incomingIndex {
+		r.commitIndex = incomingIndex
+	}
+	if r.lastApplied < incomingIndex {
+		r.lastApplied = incomingIndex
+	}
+
+	reply.Success = true
 	return reply, nil
 }
 
 func (r *DurableRaftReplicator) checkCompaction() {
-	lastIdx, _, _ := r.logStore.LastIndexAndTerm()
-	if lastIdx > r.config.SnapshotThresholdLogs {
-		// Compaction logic Flow 4
+	if r.config.SnapshotThresholdLogs == 0 {
+		return
+	}
+
+	r.mu.Lock()
+	if r.lastApplied <= r.lastIncludedIndex {
+		r.mu.Unlock()
+		return
+	}
+	if r.lastApplied-r.lastIncludedIndex < r.config.SnapshotThresholdLogs {
+		r.mu.Unlock()
+		return
+	}
+
+	snapshotIndex := r.lastApplied
+	snapshotTerm := r.lastIncludedTerm
+	if snapshotIndex > r.lastIncludedIndex {
+		if entry, err := r.logStore.GetLog(snapshotIndex); err == nil {
+			snapshotTerm = uint64(entry.Term)
+		}
+	}
+	r.mu.Unlock()
+
+	snapshotData, err := r.stateMachine.SerializeSnapshot()
+	if err != nil {
+		r.ls.Error(log_service.LogEvent{Message: "state machine snapshot failed", Metadata: map[string]any{"error": err.Error()}})
+		return
+	}
+
+	meta := SnapshotMeta{LastIncludedIndex: snapshotIndex, LastIncludedTerm: snapshotTerm}
+	if err := r.snapshotStore.SaveSnapshot(meta, snapshotData); err != nil {
+		r.ls.Error(log_service.LogEvent{Message: "snapshot store write failed", Metadata: map[string]any{"error": err.Error()}})
+		return
+	}
+
+	if err := r.logStore.DeleteRange(0, snapshotIndex); err != nil {
+		r.ls.Error(log_service.LogEvent{Message: "wal compaction failed", Metadata: map[string]any{"error": err.Error()}})
+		return
+	}
+
+	r.mu.Lock()
+	if snapshotIndex > r.lastIncludedIndex {
+		r.lastIncludedIndex = snapshotIndex
+		r.lastIncludedTerm = snapshotTerm
+	}
+	r.mu.Unlock()
+}
+
+func (r *DurableRaftReplicator) findLeaderAddrLocked(leaderID string) string {
+	if leaderID == "" {
+		return ""
+	}
+	nodes, err := r.clusterService.GetAllNodes()
+	if err != nil {
+		return ""
+	}
+	for _, n := range nodes {
+		if n.ID == leaderID {
+			return n.Address
+		}
+	}
+	return ""
+}
+
+func (r *DurableRaftReplicator) getLastLogInfoLocked() (uint64, uint64) {
+	idx, term, err := r.logStore.LastIndexAndTerm()
+	if err != nil {
+		return r.lastIncludedIndex, r.lastIncludedTerm
+	}
+	if idx == r.lastIncludedIndex && term == 0 {
+		return r.lastIncludedIndex, r.lastIncludedTerm
+	}
+	return idx, term
+}
+
+func (r *DurableRaftReplicator) stepDownLocked(newTerm uint64, leaderID string) {
+	r.state = raft_replicator.Follower
+	r.currentTerm = newTerm
+	r.votedFor = ""
+	if leaderID != "" {
+		r.leaderID = leaderID
+	}
+	r.failAllPendingLocked(fmt.Errorf("leadership changed during replication"))
+	r.electionResetEvent = time.Now()
+	r.mustPersistStableLocked()
+}
+
+func (r *DurableRaftReplicator) mustPersistStableLocked() {
+	if err := r.stableStore.SetState(r.currentTerm, r.votedFor); err != nil {
+		panic(fmt.Sprintf("durable raft stable store write failed: %v", err))
 	}
 }
 
 func randomElectionTimeout() time.Duration {
-	return time.Duration(150+rand.Intn(150)) * time.Millisecond
+	return time.Duration(300+rand.Intn(300)) * time.Millisecond
+}
+
+func (r *DurableRaftReplicator) failAllPendingLocked(err error) {
+	r.pendingBatch = nil
+	for idx, ch := range r.pendingClients {
+		select {
+		case ch <- err:
+		default:
+		}
+		close(ch)
+		delete(r.pendingClients, idx)
+	}
 }

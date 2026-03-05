@@ -16,6 +16,7 @@ COPY . .
 
 RUN GOOS="${GOOS}" GOARCH="${GOARCH}" go build -tags="${TAGS}" -o /build/sandstore ./cmd/sandstore
 RUN GOOS="${GOOS}" GOARCH="${GOARCH}" go build -o /build/smoke ./clients/open_smoke
+RUN GOOS="${GOOS}" GOARCH="${GOARCH}" go build -o /build/durability_smoke ./clients/durability_smoke
 
 FROM alpine:latest AS runner
 
@@ -23,5 +24,6 @@ RUN mkdir -p /var/lib/sandstore/data /var/lib/sandstore/logs
 
 COPY --from=builder /build/sandstore /usr/local/bin/sandstore
 COPY --from=builder /build/smoke /usr/local/bin/smoke
+COPY --from=builder /build/durability_smoke /usr/local/bin/durability_smoke
 
 ENTRYPOINT ["/usr/local/bin/sandstore"]

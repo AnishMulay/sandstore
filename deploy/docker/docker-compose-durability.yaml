@@ -1,4 +1,14 @@
 services:
+  # Shared sandstore image build settings
+  sandstore-image:
+    image: sandstore-node:latest
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        TAGS: "grpc etcd"
+    profiles: ["_never"]
+
   etcd:
     image: quay.io/coreos/etcd:v3.5.0
     container_name: sandstore-etcd
@@ -36,8 +46,7 @@ services:
       - /bin/sh
       - -c
       - |
-        apk add --no-cache bash curl
-        apk add --no-cache docker-cli
+        apk add --no-cache bash curl docker-cli
         chmod +x /init-etcd.sh
         /init-etcd.sh
     networks:
@@ -45,11 +54,19 @@ services:
 
   node-1:
     image: sandstore-node:latest
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        TAGS: "grpc etcd"
     depends_on:
       etcd-init:
         condition: service_completed_successfully
     environment:
       ETCD_ENDPOINTS: etcd:2379
+      RAFT_MAX_BATCH_SIZE: "64"
+      RAFT_MAX_BATCH_WAIT_MS: "10"
+      RAFT_SNAPSHOT_THRESHOLD_LOGS: "200"
     command:
       - --server
       - node
@@ -61,16 +78,26 @@ services:
       - /var/lib/sandstore/data
     volumes:
       - ../../run/node-1/data:/var/lib/sandstore/data
+    ports:
+      - "8080:8080"
     networks:
       - sandstore-net
 
   node-2:
     image: sandstore-node:latest
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        TAGS: "grpc etcd"
     depends_on:
       etcd-init:
         condition: service_completed_successfully
     environment:
       ETCD_ENDPOINTS: etcd:2379
+      RAFT_MAX_BATCH_SIZE: "64"
+      RAFT_MAX_BATCH_WAIT_MS: "10"
+      RAFT_SNAPSHOT_THRESHOLD_LOGS: "200"
     command:
       - --server
       - node
@@ -82,16 +109,26 @@ services:
       - /var/lib/sandstore/data
     volumes:
       - ../../run/node-2/data:/var/lib/sandstore/data
+    ports:
+      - "8081:8080"
     networks:
       - sandstore-net
 
   node-3:
     image: sandstore-node:latest
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        TAGS: "grpc etcd"
     depends_on:
       etcd-init:
         condition: service_completed_successfully
     environment:
       ETCD_ENDPOINTS: etcd:2379
+      RAFT_MAX_BATCH_SIZE: "64"
+      RAFT_MAX_BATCH_WAIT_MS: "10"
+      RAFT_SNAPSHOT_THRESHOLD_LOGS: "200"
     command:
       - --server
       - node
@@ -103,11 +140,18 @@ services:
       - /var/lib/sandstore/data
     volumes:
       - ../../run/node-3/data:/var/lib/sandstore/data
+    ports:
+      - "8082:8080"
     networks:
       - sandstore-net
 
   smoke-test:
     image: sandstore-node:latest
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        TAGS: "grpc etcd"
     depends_on:
       node-1:
         condition: service_started
@@ -115,48 +159,23 @@ services:
         condition: service_started
       node-3:
         condition: service_started
+    environment:
+      SANDSTORE_NODE_ADDRS: node-1:8080,node-2:8080,node-3:8080
+      DURABILITY_SNAPSHOT_FILE_COUNT: "600"
     volumes:
-      - ../../run/node-1/data/logs:/cluster-logs/node-1:ro
-      - ../../run/node-2/data/logs:/cluster-logs/node-2:ro
-      - ../../run/node-3/data/logs:/cluster-logs/node-3:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     entrypoint:
       - /bin/sh
       - -c
       - |
-        apk add --no-cache netcat-openbsd
+        apk add --no-cache netcat-openbsd docker-cli
 
         until nc -z node-1 8080 && nc -z node-2 8080 && nc -z node-3 8080; do
-          echo "Waiting for Sand Store nodes..."
+          echo "Waiting for Sandstore nodes..."
           sleep 2
         done
 
-        echo "Detecting current leader from node logs..."
-        LEADER_ADDR=""
-        for _ in $$(seq 1 60); do
-          for NODE in node-1 node-2 node-3; do
-            LOG_FILE="/cluster-logs/$${NODE}/$${NODE}.log"
-            if [ -f "$$LOG_FILE" ] && grep -q "Became Leader" "$$LOG_FILE"; then
-              LEADER_ADDR="$${NODE}:8080"
-              break
-            fi
-          done
-
-          if [ -n "$$LEADER_ADDR" ]; then
-            break
-          fi
-
-          sleep 1
-        done
-
-        if [ -z "$$LEADER_ADDR" ]; then
-          echo "Failed to discover leader from logs; defaulting to node-1:8080"
-          LEADER_ADDR="node-1:8080"
-        fi
-
-        export SANDSTORE_ADDR="$$LEADER_ADDR"
-        echo "Discovered leader: $$SANDSTORE_ADDR"
-
-        exec /usr/local/bin/smoke
+        exec /usr/local/bin/durability_smoke
     networks:
       - sandstore-net
 

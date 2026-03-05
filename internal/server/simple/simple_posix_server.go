@@ -89,6 +89,7 @@ func (s *SimpleServer) registerPayloads() {
 	// Replicator Payloads
 	s.comm.RegisterPayloadType(ps.MsgRaftRequestVote, reflect.TypeOf(raft.RequestVoteArgs{}))
 	s.comm.RegisterPayloadType(ps.MsgRaftAppendEntries, reflect.TypeOf(communication.AppendEntriesRequest{}))
+	s.comm.RegisterPayloadType(ps.MsgRaftInstallSnapshot, reflect.TypeOf(communication.InstallSnapshotRequest{}))
 
 	// Chunk Replication Payloads
 	s.comm.RegisterPayloadType(ps.MsgChunkWrite, reflect.TypeOf(communication.WriteChunkRequest{}))
@@ -260,6 +261,16 @@ func (s *SimpleServer) handleMessage(msg communication.Message) (*communication.
 			HandleAppendEntries(communication.AppendEntriesRequest) (*raft.AppendEntriesReply, error)
 		}); ok {
 			res, err := repl.HandleAppendEntries(req)
+			return s.respond(res, err)
+		}
+		return s.respond(nil, errors.New("not implemented"))
+
+	case ps.MsgRaftInstallSnapshot:
+		req := msg.Payload.(communication.InstallSnapshotRequest)
+		if repl, ok := s.metaRepl.(interface {
+			HandleInstallSnapshot(communication.InstallSnapshotRequest) (*raft.InstallSnapshotReply, error)
+		}); ok {
+			res, err := repl.HandleInstallSnapshot(req)
 			return s.respond(res, err)
 		}
 		return s.respond(nil, errors.New("not implemented"))

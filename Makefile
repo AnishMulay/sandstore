@@ -21,9 +21,11 @@ SANDSTORE_BINARY=sandstore
 CLIENT_BINARY=bin/client
 MCP_BINARY=sandstore-mcp
 OPEN_SMOKE_BINARY=bin/open-smoke
+DURABILITY_SMOKE_BINARY=bin/durability-smoke
 LEGACY_CLIENT_BINARY=client
 LEGACY_MCP_BINARY=mcp
 LEGACY_OPEN_SMOKE_BINARY=open_smoke
+LEGACY_DURABILITY_SMOKE_BINARY=durability_smoke
 
 # Generate protobuf files
 .PHONY: proto
@@ -63,6 +65,18 @@ client:
 .PHONY: test
 test:
 	go test -v ./...
+
+.PHONY: durability-smoke
+durability-smoke:
+	@set -e; \
+	compose_file=deploy/docker/docker-compose-durability.yaml; \
+	docker compose -f $$compose_file up --build -d etcd etcd-init node-1 node-2 node-3; \
+	set +e; \
+	docker compose -f $$compose_file run --rm --no-deps smoke-test; \
+	status=$$?; \
+	set -e; \
+	docker compose -f $$compose_file down -v --remove-orphans; \
+	exit $$status
 
 # Build Docker image
 .PHONY: docker-build
@@ -161,4 +175,4 @@ clean:
 	-@docker compose -f deploy/docker/docker-compose.yaml down -v --remove-orphans >/dev/null 2>&1 || true
 	-@docker compose -f deploy/docker/etcd/docker-compose.yaml down -v --remove-orphans >/dev/null 2>&1 || true
 	rm -rf ./bin ./run ./logs ./chunks ./.gocache ./.gomodcache ./.gocache-local ./.gomodcache-local
-	rm -f $(SANDSTORE_BINARY) $(CLIENT_BINARY) $(MCP_BINARY) $(OPEN_SMOKE_BINARY) $(LEGACY_CLIENT_BINARY) $(LEGACY_MCP_BINARY) $(LEGACY_OPEN_SMOKE_BINARY) config.yaml
+	rm -f $(SANDSTORE_BINARY) $(CLIENT_BINARY) $(MCP_BINARY) $(OPEN_SMOKE_BINARY) $(DURABILITY_SMOKE_BINARY) $(LEGACY_CLIENT_BINARY) $(LEGACY_MCP_BINARY) $(LEGACY_OPEN_SMOKE_BINARY) $(LEGACY_DURABILITY_SMOKE_BINARY) config.yaml

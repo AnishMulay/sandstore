@@ -59,10 +59,15 @@ type AppendEntriesArgs struct {
 }
 
 type AppendEntriesReply struct {
-	Term      int64
-	Success   bool
+	Term          int64
+	Success       bool
 	ConflictIndex int64
 	ConflictTerm  int64
+}
+
+type InstallSnapshotReply struct {
+	Term    int64
+	Success bool
 }
 
 // --- Errors ---

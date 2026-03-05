@@ -47,6 +47,8 @@ go.work.sum
 /client
 /mcp
 /open_smoke
+/durability_smoke
+/main
 
 # macOS Finder metadata
 .DS_Store
