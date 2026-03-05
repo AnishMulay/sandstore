@@ -14,15 +14,16 @@ type Message struct {
 }
 
 const (
-	MessageTypeStoreFile      = "store_file"
-	MessageTypeReadFile       = "read_file"
-	MessageTypeDeleteFile     = "delete_file"
-	MessageTypeStoreChunk     = "store_chunk"
-	MessageTypeStoreMetadata  = "store_metadata"
-	MessageTypeDeleteMetadata = "delete_metadata"
-	MessageTypeStopServer     = "stop_server"
-	MessageTypeRequestVote    = "request_vote"
-	MessageTypeAppendEntries  = "append_entries"
+	MessageTypeStoreFile       = "store_file"
+	MessageTypeReadFile        = "read_file"
+	MessageTypeDeleteFile      = "delete_file"
+	MessageTypeStoreChunk      = "store_chunk"
+	MessageTypeStoreMetadata   = "store_metadata"
+	MessageTypeDeleteMetadata  = "delete_metadata"
+	MessageTypeStopServer      = "stop_server"
+	MessageTypeRequestVote     = "request_vote"
+	MessageTypeAppendEntries   = "append_entries"
+	MessageTypeInstallSnapshot = "install_snapshot"
 	// Chunk Replication Messages
 	MessageTypeWriteChunk  = "chunk_write" // Replaces "store_chunk"
 	MessageTypeReadChunk   = "chunk_read"
@@ -87,6 +88,14 @@ type AppendEntriesRequest struct {
 	PrevLogTerm  int64
 	Entries      []byte // Serialized metadata log entries
 	LeaderCommit int64  // Leader's commit index
+}
+
+type InstallSnapshotRequest struct {
+	Term              int64
+	LeaderID          string
+	LastIncludedIndex int64
+	LastIncludedTerm  int64
+	Data              []byte
 }
 
 type SandCode string

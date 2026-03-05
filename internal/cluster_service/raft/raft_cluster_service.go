@@ -209,6 +209,15 @@ func (r *RaftClusterService) GetHealthyNodes() ([]cluster.Node, error) {
 	return healthyNodes, nil
 }
 
+func (r *RaftClusterService) GetAllNodes() ([]cluster.Node, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	nodes := make([]cluster.Node, len(r.nodes))
+	copy(nodes, r.nodes)
+	return nodes, nil
+}
+
 func (r *RaftClusterService) resetElectionTimer() {
 	if r.electionTimer != nil {
 		r.electionTimer.Stop()
@@ -784,5 +793,3 @@ func (r *RaftClusterService) ReplicateEntries(entriesData []byte, logIndex int64
 	// Call callback immediately while we still have the context
 	callback(logIndex, ackCount >= quorumSize)
 }
-
-var _ cluster.ClusterService = (*RaftClusterService)(nil)

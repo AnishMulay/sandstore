@@ -1,0 +1,184 @@
+services:
+  # Shared sandstore image build settings
+  sandstore-image:
+    image: sandstore-node:latest
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        TAGS: "grpc etcd"
+    profiles: ["_never"]
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.0
+    container_name: sandstore-etcd
+    command:
+      - /usr/local/bin/etcd
+      - --name=etcd
+      - --data-dir=/etcd-data
+      - --advertise-client-urls=http://etcd:2379
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --initial-advertise-peer-urls=http://etcd:2380
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --initial-cluster=etcd=http://etcd:2380
+      - --initial-cluster-state=new
+    healthcheck:
+      test: ["CMD-SHELL", "ETCDCTL_API=3 etcdctl --endpoints=http://127.0.0.1:2379 endpoint health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    networks:
+      - sandstore-net
+
+  etcd-init:
+    image: alpine:latest
+    depends_on:
+      etcd:
+        condition: service_healthy
+    environment:
+      ETCD_CONTAINER: sandstore-etcd
+      CLUSTER_NODES: node-1@node-1:8080,node-2@node-2:8080,node-3@node-3:8080
+    volumes:
+      - ../../scripts/dev/init-etcd.sh:/init-etcd.sh:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    command:
+      - /bin/sh
+      - -c
+      - |
+        apk add --no-cache bash curl docker-cli
+        chmod +x /init-etcd.sh
+        /init-etcd.sh
+    networks:
+      - sandstore-net
+
+  node-1:
+    image: sandstore-node:latest
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        TAGS: "grpc etcd"
+    depends_on:
+      etcd-init:
+        condition: service_completed_successfully
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      RAFT_MAX_BATCH_SIZE: "64"
+      RAFT_MAX_BATCH_WAIT_MS: "10"
+      RAFT_SNAPSHOT_THRESHOLD_LOGS: "200"
+    command:
+      - --server
+      - node
+      - --node-id
+      - node-1
+      - --listen
+      - node-1:8080
+      - --data-dir
+      - /var/lib/sandstore/data
+    volumes:
+      - ../../run/node-1/data:/var/lib/sandstore/data
+    ports:
+      - "8080:8080"
+    networks:
+      - sandstore-net
+
+  node-2:
+    image: sandstore-node:latest
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        TAGS: "grpc etcd"
+    depends_on:
+      etcd-init:
+        condition: service_completed_successfully
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      RAFT_MAX_BATCH_SIZE: "64"
+      RAFT_MAX_BATCH_WAIT_MS: "10"
+      RAFT_SNAPSHOT_THRESHOLD_LOGS: "200"
+    command:
+      - --server
+      - node
+      - --node-id
+      - node-2
+      - --listen
+      - node-2:8080
+      - --data-dir
+      - /var/lib/sandstore/data
+    volumes:
+      - ../../run/node-2/data:/var/lib/sandstore/data
+    ports:
+      - "8081:8080"
+    networks:
+      - sandstore-net
+
+  node-3:
+    image: sandstore-node:latest
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        TAGS: "grpc etcd"
+    depends_on:
+      etcd-init:
+        condition: service_completed_successfully
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      RAFT_MAX_BATCH_SIZE: "64"
+      RAFT_MAX_BATCH_WAIT_MS: "10"
+      RAFT_SNAPSHOT_THRESHOLD_LOGS: "200"
+    command:
+      - --server
+      - node
+      - --node-id
+      - node-3
+      - --listen
+      - node-3:8080
+      - --data-dir
+      - /var/lib/sandstore/data
+    volumes:
+      - ../../run/node-3/data:/var/lib/sandstore/data
+    ports:
+      - "8082:8080"
+    networks:
+      - sandstore-net
+
+  smoke-test:
+    image: sandstore-node:latest
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        TAGS: "grpc etcd"
+    depends_on:
+      node-1:
+        condition: service_started
+      node-2:
+        condition: service_started
+      node-3:
+        condition: service_started
+    environment:
+      SANDSTORE_NODE_ADDRS: node-1:8080,node-2:8080,node-3:8080
+      DURABILITY_SNAPSHOT_FILE_COUNT: "600"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        apk add --no-cache netcat-openbsd docker-cli
+
+        until nc -z node-1 8080 && nc -z node-2 8080 && nc -z node-3 8080; do
+          echo "Waiting for Sandstore nodes..."
+          sleep 2
+        done
+
+        exec /usr/local/bin/durability_smoke
+    networks:
+      - sandstore-net
+
+networks:
+  sandstore-net:
+    driver: bridge

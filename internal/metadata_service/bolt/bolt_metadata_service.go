@@ -1470,3 +1470,55 @@ func storableInode(inode pms.Inode) pms.Inode {
 	inode.ChunkList = nil
 	return inode
 }
+
+// SerializeSnapshot serializes the entire bbolt database to a byte slice.
+func (s *BoltMetadataService) SerializeSnapshot() ([]byte, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("bolt metadata service is not initialized")
+	}
+
+	var buf bytes.Buffer
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		_, err := tx.WriteTo(&buf)
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to serialize snapshot: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
+// RestoreSnapshot restores the bbolt database from a given byte slice snapshot.
+func (s *BoltMetadataService) RestoreSnapshot(data []byte) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("bolt metadata service is not initialized")
+	}
+
+	// 1. Write the snapshot data to a temporary file
+	tempFilePath := s.filePath + ".tmp"
+	if err := os.WriteFile(tempFilePath, data, 0o600); err != nil {
+		return fmt.Errorf("failed to write snapshot to temp file: %w", err)
+	}
+	defer os.Remove(tempFilePath) // Clean up temp file on failure / success
+
+	// 2. Close the current database
+	if err := s.Close(); err != nil {
+		return fmt.Errorf("failed to close current db during snapshot restore: %w", err)
+	}
+	s.db = nil
+
+	// 3. Atomically swap the files (overwrite the old state)
+	if err := os.Rename(tempFilePath, s.filePath); err != nil {
+		return fmt.Errorf("failed to atomic rename snapshot file: %w", err)
+	}
+
+	// 4. Reopen the database
+	db, err := bbolt.Open(s.filePath, 0o600, &bbolt.Options{Timeout: time.Second})
+	if err != nil {
+		return fmt.Errorf("failed to reopen bolt metadata db %q: %w", s.filePath, err)
+	}
+	s.db = db
+
+	return nil
+}

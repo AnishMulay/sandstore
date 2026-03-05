@@ -46,6 +46,7 @@ func NewHTTPCommunicator(listenAddress string, ls log_service.LogService) *HTTPC
 	c.payloadTypes[communication.MessageTypeStopServer] = reflect.TypeOf((*communication.StopServerRequest)(nil)).Elem()
 	c.payloadTypes[communication.MessageTypeRequestVote] = reflect.TypeOf((*communication.RequestVoteRequest)(nil)).Elem()
 	c.payloadTypes[communication.MessageTypeAppendEntries] = reflect.TypeOf((*communication.AppendEntriesRequest)(nil)).Elem()
+	c.payloadTypes[communication.MessageTypeInstallSnapshot] = reflect.TypeOf((*communication.InstallSnapshotRequest)(nil)).Elem()
 
 	return c
 }

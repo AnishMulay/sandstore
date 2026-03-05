@@ -21,8 +21,9 @@ const (
 	MsgFsInfo      = "fsinfo"
 
 	// Raft Operations (for the Replicator)
-	MsgRaftRequestVote   = "raft_request_vote"
-	MsgRaftAppendEntries = "raft_append_entries"
+	MsgRaftRequestVote     = "raft_request_vote"
+	MsgRaftAppendEntries   = "raft_append_entries"
+	MsgRaftInstallSnapshot = "raft_install_snapshot"
 
 	// Chunk Operations (for the Replicator)
 	MsgChunkWrite  = "chunk_write"
