@@ -75,3 +75,10 @@ type MetadataService interface {
 	// GetFsInfo returns static filesystem configuration (block size, limits).
 	GetFsInfo(ctx context.Context) (*FileSystemInfo, error)
 }
+
+// SnapshotableStateMachine defines the interface for a state machine that can be snapshotted
+// by the Durable Raft consensus engine.
+type SnapshotableStateMachine interface {
+	SerializeSnapshot() ([]byte, error)
+	RestoreSnapshot(data []byte) error
+}
