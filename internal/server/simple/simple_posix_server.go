@@ -22,7 +22,7 @@ type SimpleServer struct {
 	fs        pfs.FileService
 	cs        pcs.ChunkService
 	ls        log_service.LogService
-	metaRepl  *raft.RaftMetadataReplicator
+	metaRepl  any
 	chunkRepl *crep.DefaultChunkReplicator
 }
 
@@ -31,7 +31,7 @@ func NewSimpleServer(
 	fs pfs.FileService,
 	cs pcs.ChunkService,
 	ls log_service.LogService,
-	metaRepl *raft.RaftMetadataReplicator,
+	metaRepl any,
 	chunkRepl *crep.DefaultChunkReplicator,
 ) *SimpleServer {
 	return &SimpleServer{
@@ -246,13 +246,23 @@ func (s *SimpleServer) handleMessage(msg communication.Message) (*communication.
 	// --- REPLICATOR OPERATIONS (Raft) ---
 	case ps.MsgRaftRequestVote:
 		req := msg.Payload.(raft.RequestVoteArgs)
-		res, err := s.metaRepl.HandleRequestVote(req)
-		return s.respond(res, err)
+		if repl, ok := s.metaRepl.(interface {
+			HandleRequestVote(raft.RequestVoteArgs) (*raft.RequestVoteReply, error)
+		}); ok {
+			res, err := repl.HandleRequestVote(req)
+			return s.respond(res, err)
+		}
+		return s.respond(nil, errors.New("not implemented"))
 
 	case ps.MsgRaftAppendEntries:
 		req := msg.Payload.(communication.AppendEntriesRequest)
-		res, err := s.metaRepl.HandleAppendEntries(req)
-		return s.respond(res, err)
+		if repl, ok := s.metaRepl.(interface {
+			HandleAppendEntries(communication.AppendEntriesRequest) (*raft.AppendEntriesReply, error)
+		}); ok {
+			res, err := repl.HandleAppendEntries(req)
+			return s.respond(res, err)
+		}
+		return s.respond(nil, errors.New("not implemented"))
 
 	default:
 		return &communication.Response{

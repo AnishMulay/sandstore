@@ -12,6 +12,7 @@ import (
 	"github.com/AnishMulay/sandstore/internal/log_service"
 	pmr "github.com/AnishMulay/sandstore/internal/metadata_replicator"
 	"github.com/AnishMulay/sandstore/internal/metadata_replicator/raft_replicator"
+	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
 )
 
 type DurableRaftReplicator struct {
@@ -27,6 +28,7 @@ type DurableRaftReplicator struct {
 	logStore      LogStore
 	stableStore   StableStore
 	snapshotStore SnapshotStore
+	stateMachine  pms.SnapshotableStateMachine
 
 	state       raft_replicator.RaftState
 	currentTerm uint64
@@ -56,6 +58,7 @@ func NewDurableRaftReplicator(
 	logStore LogStore,
 	stableStore StableStore,
 	snapshotStore SnapshotStore,
+	stateMachine pms.SnapshotableStateMachine,
 ) *DurableRaftReplicator {
 	return &DurableRaftReplicator{
 		id:             id,
@@ -66,6 +69,7 @@ func NewDurableRaftReplicator(
 		logStore:       logStore,
 		stableStore:    stableStore,
 		snapshotStore:  snapshotStore,
+		stateMachine:   stateMachine,
 		nextIndex:      make(map[string]uint64),
 		matchIndex:     make(map[string]uint64),
 		pendingClients: make(map[int64]chan error),

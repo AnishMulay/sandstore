@@ -9,6 +9,7 @@ import (
 	"context"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/AnishMulay/sandstore/internal/cluster_service"
 	clustercetcd "github.com/AnishMulay/sandstore/internal/cluster_service/etcd"
@@ -19,7 +20,7 @@ import (
 	chunkrepl "github.com/AnishMulay/sandstore/internal/chunk_replicator/default_replicator"
 	chunkservice "github.com/AnishMulay/sandstore/internal/chunk_service/local_disc"
 	fileservice "github.com/AnishMulay/sandstore/internal/file_service/simple"
-	metadatarepl "github.com/AnishMulay/sandstore/internal/metadata_replicator/raft_replicator"
+	durableraft "github.com/AnishMulay/sandstore/internal/metadata_replicator/durable_raft"
 	metadataservice "github.com/AnishMulay/sandstore/internal/metadata_service/bolt"
 	simpleserver "github.com/AnishMulay/sandstore/internal/server/simple"
 )
@@ -66,15 +67,25 @@ func Build(opts Options) runnable {
 		panic(err)
 	}
 
-	// 4. Replicators (The Consensus/Network Layer)
-	metaRepl := metadatarepl.NewRaftMetadataReplicator(opts.NodeID, clusterService, comm, ls)
-	chunkRepl := chunkrepl.NewDefaultChunkReplicator(clusterService, comm, ls)
-
 	// 5. Core Services (The Logic Layer)
 	ms, err := metadataservice.NewBoltMetadataService(opts.DataDir + "/state.db")
 	if err != nil {
 		panic(err)
 	}
+
+	// 4. Replicators (The Consensus/Network Layer)
+	raftConfig := durableraft.RaftConfig{
+		MaxBatchSize:          100,
+		MaxBatchWaitTime:      10 * time.Millisecond,
+		SnapshotThresholdLogs: 1000,
+	}
+	logStore := durableraft.NewMemoryLogStore()
+	stableStore := durableraft.NewFileStableStore(opts.DataDir + "/raft_stable.json")
+	snapshotStore := durableraft.NewFileSnapshotStore(opts.DataDir + "/raft_snapshot.bin")
+
+	metaRepl := durableraft.NewDurableRaftReplicator(opts.NodeID, clusterService, comm, ls, raftConfig, logStore, stableStore, snapshotStore, ms)
+	chunkRepl := chunkrepl.NewDefaultChunkReplicator(clusterService, comm, ls)
+
 	ms.SetReplicator(metaRepl)
 	chunkDir := opts.DataDir + "/chunks/" + opts.NodeID
 	cs := chunkservice.NewLocalDiscChunkService(chunkDir, ls, chunkRepl, 2)
