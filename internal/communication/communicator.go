@@ -25,9 +25,12 @@ const (
 	MessageTypeAppendEntries   = "append_entries"
 	MessageTypeInstallSnapshot = "install_snapshot"
 	// Chunk Replication Messages
-	MessageTypeWriteChunk  = "chunk_write" // Replaces "store_chunk"
-	MessageTypeReadChunk   = "chunk_read"
-	MessageTypeDeleteChunk = "chunk_delete"
+	MessageTypeWriteChunk   = "chunk_write" // Replaces "store_chunk"
+	MessageTypeReadChunk    = "chunk_read"
+	MessageTypeDeleteChunk  = "chunk_delete"
+	MessageTypePrepareChunk = "chunk_prepare"
+	MessageTypeCommitChunk  = "chunk_commit"
+	MessageTypeAbortChunk   = "chunk_abort"
 )
 
 type WriteChunkRequest struct {
@@ -42,6 +45,23 @@ type ReadChunkRequest struct {
 }
 
 type DeleteChunkRequest struct {
+	ChunkID string
+}
+
+type PrepareChunkRequest struct {
+	TxnID    string
+	ChunkID  string
+	Data     []byte
+	Checksum string
+}
+
+type CommitChunkRequest struct {
+	TxnID   string
+	ChunkID string
+}
+
+type AbortChunkRequest struct {
+	TxnID   string
 	ChunkID string
 }
 

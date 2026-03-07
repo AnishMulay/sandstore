@@ -17,7 +17,8 @@ import (
 )
 
 const firstUserFD uint64 = 3
-const maxBufferSize = 8 * 1024 * 1024
+const writeBufferLimit = 2 * 1024 * 1024
+const writeRPCChunkSize = 8 * 1024 * 1024
 
 // NewSandstoreClient constructs a client bound to one server address and
 // initializes an empty descriptor table.
@@ -171,15 +172,15 @@ func (c *SandstoreClient) Read(fd int, n int) ([]byte, error) {
 	return data, nil
 }
 
-// Write sends data to the server in sequential max-8MB MsgWrite RPCs and
-// advances the logical offset by successful chunks.
+// Write appends data to the per-fd client buffer and flushes buffered bytes
+// when the buffer grows beyond writeBufferLimit.
 //
 // Thread-safety:
 // - Acquires TableMu read lock to resolve fd.
 // - Acquires SandstoreFD.Mu for offset/buffer mutation and RPC sequencing.
 //
 // Consistency:
-// - Chunk N+1 is not sent until Chunk N receives an OK response.
+// - Any flush triggered by overflow is sent as sequential max-8MB MsgWrite RPCs.
 func (c *SandstoreClient) Write(fd int, data []byte) (int, error) {
 	if c == nil {
 		return 0, fmt.Errorf("sandstore client is nil")
@@ -209,52 +210,94 @@ func (c *SandstoreClient) Write(fd int, data []byte) (int, error) {
 		return 0, fmt.Errorf("file not open for writing")
 	}
 
-	sendInChunks := func(startOffset int64, payload []byte) (int, error) {
-		if len(payload) == 0 {
-			return 0, nil
-		}
-
-		written := 0
-		for written < len(payload) {
-			end := written + maxBufferSize
-			if end > len(payload) {
-				end = len(payload)
-			}
-
-			resp, err := c.send(ps.MsgWrite, ps.WriteRequest{
-				InodeID: fileStruct.InodeID,
-				Offset:  startOffset + int64(written),
-				Data:    payload[written:end],
-			})
-			if err != nil {
-				return written, fmt.Errorf("write %q failed: %w", fileStruct.FilePath, err)
-			}
-			if resp.Code != communication.CodeOK {
-				return written, responseError("write", fileStruct.FilePath, resp)
-			}
-
-			written = end
-		}
-
-		return written, nil
+	if len(data) == 0 {
+		return 0, nil
 	}
 
-	if len(fileStruct.Buffer) > 0 {
-		flushOffset := fileStruct.Offset - int64(len(fileStruct.Buffer))
-		_, err := sendInChunks(flushOffset, fileStruct.Buffer)
-		if err != nil {
+	if len(fileStruct.Buffer) > 0 && len(fileStruct.Buffer)+len(data) > writeBufferLimit {
+		if err := c.flushBufferedWrites(fileStruct, "write"); err != nil {
 			return 0, err
 		}
-		fileStruct.Buffer = fileStruct.Buffer[:0]
 	}
 
-	written, err := sendInChunks(fileStruct.Offset, data)
-	fileStruct.Offset += int64(written)
+	fileStruct.Buffer = append(fileStruct.Buffer, data...)
+	fileStruct.Offset += int64(len(data))
+
+	if len(fileStruct.Buffer) <= writeBufferLimit {
+		return len(data), nil
+	}
+
+	flushBytes := len(fileStruct.Buffer) - writeBufferLimit
+	flushOffset := fileStruct.Offset - int64(len(fileStruct.Buffer))
+	toFlush := make([]byte, flushBytes)
+	copy(toFlush, fileStruct.Buffer[:flushBytes])
+
+	if err := c.sendWriteInChunks(fileStruct, flushOffset, toFlush, "write"); err != nil {
+		return 0, err
+	}
+
+	remaining := len(fileStruct.Buffer) - flushBytes
+	copy(fileStruct.Buffer[:remaining], fileStruct.Buffer[flushBytes:])
+	fileStruct.Buffer = fileStruct.Buffer[:remaining]
+
+	return len(data), nil
+}
+
+func (c *SandstoreClient) sendWriteInChunks(fileStruct *SandstoreFD, startOffset int64, payload []byte, op string) error {
+	if len(payload) == 0 {
+		return nil
+	}
+
+	written := 0
+	for written < len(payload) {
+		currOffset := startOffset + int64(written)
+		chunkLimit := int64(writeRPCChunkSize)
+		if mod := currOffset % writeRPCChunkSize; mod != 0 {
+			remainingInChunk := writeRPCChunkSize - mod
+			if remainingInChunk < chunkLimit {
+				chunkLimit = remainingInChunk
+			}
+		}
+
+		end := written + int(chunkLimit)
+		if end > len(payload) {
+			end = len(payload)
+		}
+
+		resp, err := c.send(ps.MsgWrite, ps.WriteRequest{
+			InodeID: fileStruct.InodeID,
+			Offset:  startOffset + int64(written),
+			Data:    payload[written:end],
+		})
+		if err != nil {
+			return fmt.Errorf("%s %q failed: %w", op, fileStruct.FilePath, err)
+		}
+		if resp.Code != communication.CodeOK {
+			return responseError(op, fileStruct.FilePath, resp)
+		}
+
+		written = end
+	}
+
+	return nil
+}
+
+func (c *SandstoreClient) flushBufferedWrites(fileStruct *SandstoreFD, op string) error {
+	if len(fileStruct.Buffer) == 0 {
+		return nil
+	}
+
+	flushOffset := fileStruct.Offset - int64(len(fileStruct.Buffer))
+	payload := make([]byte, len(fileStruct.Buffer))
+	copy(payload, fileStruct.Buffer)
+
+	err := c.sendWriteInChunks(fileStruct, flushOffset, payload, op)
 	if err != nil {
-		return written, err
+		return err
 	}
 
-	return written, nil
+	fileStruct.Buffer = fileStruct.Buffer[:0]
+	return nil
 }
 
 // Fsync flushes all buffered write data for fd to the server.
@@ -295,25 +338,7 @@ func (c *SandstoreClient) Fsync(fd int) error {
 	fileStruct.Mu.Lock()
 	defer fileStruct.Mu.Unlock()
 
-	if len(fileStruct.Buffer) == 0 {
-		return nil
-	}
-
-	flushOffset := fileStruct.Offset - int64(len(fileStruct.Buffer))
-	resp, err := c.send(ps.MsgWrite, ps.WriteRequest{
-		InodeID: fileStruct.InodeID,
-		Offset:  flushOffset,
-		Data:    fileStruct.Buffer,
-	})
-	if err != nil {
-		return fmt.Errorf("fsync %q failed: %w", fileStruct.FilePath, err)
-	}
-	if resp.Code != communication.CodeOK {
-		return responseError("fsync", fileStruct.FilePath, resp)
-	}
-
-	fileStruct.Buffer = fileStruct.Buffer[:0]
-	return nil
+	return c.flushBufferedWrites(fileStruct, "fsync")
 }
 
 // Close detaches fd from the client table and flushes any remaining buffered
@@ -356,23 +381,7 @@ func (c *SandstoreClient) Close(fd int) error {
 	fileStruct.Mu.Lock()
 	defer fileStruct.Mu.Unlock()
 
-	if len(fileStruct.Buffer) > 0 {
-		flushOffset := fileStruct.Offset - int64(len(fileStruct.Buffer))
-		resp, err := c.send(ps.MsgWrite, ps.WriteRequest{
-			InodeID: fileStruct.InodeID,
-			Offset:  flushOffset,
-			Data:    fileStruct.Buffer,
-		})
-		if err != nil {
-			return fmt.Errorf("close %q failed: %w", fileStruct.FilePath, err)
-		}
-		if resp.Code != communication.CodeOK {
-			return responseError("close", fileStruct.FilePath, resp)
-		}
-		fileStruct.Buffer = fileStruct.Buffer[:0]
-	}
-
-	return nil
+	return c.flushBufferedWrites(fileStruct, "close")
 }
 
 // Remove unlinks filepath on the server and eagerly removes any matching open

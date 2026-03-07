@@ -49,18 +49,14 @@ type LocalDiscChunkService struct {
 func NewLocalDiscChunkService(
 	baseDir string,
 	ls log_service.LogService,
-	replicator chunk_replicator.ChunkReplicator,
-	replicationFactor int,
 ) *LocalDiscChunkService {
 	if err := os.MkdirAll(baseDir, os.ModePerm); err != nil {
 		panic(err)
 	}
 	return &LocalDiscChunkService{
-		baseDir:           baseDir,
-		ls:                ls,
-		replicator:        replicator,
-		replicationFactor: replicationFactor,
-		preparedIndex:     make(map[string]PreparedIndexEntry),
+		baseDir:       baseDir,
+		ls:            ls,
+		preparedIndex: make(map[string]PreparedIndexEntry),
 	}
 }
 

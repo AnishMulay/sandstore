@@ -25,25 +25,9 @@ import (
 const (
 	defaultChunkSize    int64 = 8 * 1024 * 1024
 	defaultReplicaCount       = 3
-
-	messageTypeChunkPrepare = "chunk_prepare"
-	messageTypeChunkCommit  = "chunk_commit"
-	messageTypeChunkAbort   = "chunk_abort"
 )
 
 var ErrCrossChunkWrite = errors.New("write spans multiple chunks")
-
-type prepareChunkRequest struct {
-	TxnID    string
-	ChunkID  string
-	Data     []byte
-	Checksum string
-}
-
-type finalizeChunkRequest struct {
-	TxnID   string
-	ChunkID string
-}
 
 type TransactionalFileService struct {
 	ms             pms.MetadataService
@@ -249,8 +233,8 @@ func (s *TransactionalFileService) broadcastPrepare(
 
 			msg := communication.Message{
 				From: s.comm.Address(),
-				Type: messageTypeChunkPrepare,
-				Payload: prepareChunkRequest{
+				Type: communication.MessageTypePrepareChunk,
+				Payload: communication.PrepareChunkRequest{
 					TxnID:    txnID,
 					ChunkID:  chunkID,
 					Data:     data,
@@ -299,8 +283,8 @@ func (s *TransactionalFileService) broadcastCommitAsync(txnID string, chunkID st
 
 			msg := communication.Message{
 				From: s.comm.Address(),
-				Type: messageTypeChunkCommit,
-				Payload: finalizeChunkRequest{
+				Type: communication.MessageTypeCommitChunk,
+				Payload: communication.CommitChunkRequest{
 					TxnID:   txnID,
 					ChunkID: chunkID,
 				},
@@ -323,8 +307,8 @@ func (s *TransactionalFileService) broadcastAbortAsync(txnID string, chunkID str
 
 			msg := communication.Message{
 				From: s.comm.Address(),
-				Type: messageTypeChunkAbort,
-				Payload: finalizeChunkRequest{
+				Type: communication.MessageTypeAbortChunk,
+				Payload: communication.AbortChunkRequest{
 					TxnID:   txnID,
 					ChunkID: chunkID,
 				},
@@ -438,17 +422,28 @@ func (s *TransactionalFileService) resolveNodeAddress(ctx context.Context, nodeI
 }
 
 func (s *TransactionalFileService) selectPrepareTargets() ([]cluster_service.Node, error) {
-	nodes, err := s.clusterService.GetHealthyNodes()
-	if err != nil {
-		return nil, err
-	}
-	if len(nodes) < s.replicaCount {
-		return nil, fmt.Errorf("insufficient healthy nodes for prepare: need %d have %d", s.replicaCount, len(nodes))
+	nodes, err := s.clusterService.GetAllNodes()
+	if err != nil || len(nodes) == 0 {
+		nodes, err = s.clusterService.GetHealthyNodes()
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	sort.Slice(nodes, func(i, j int) bool { return nodes[i].ID < nodes[j].ID })
+	filtered := make([]cluster_service.Node, 0, len(nodes))
+	for _, node := range nodes {
+		if node.ID == "" || node.Address == "" {
+			continue
+		}
+		filtered = append(filtered, node)
+	}
+	if len(filtered) < s.replicaCount {
+		return nil, fmt.Errorf("insufficient nodes for prepare: need %d have %d", s.replicaCount, len(filtered))
+	}
+
+	sort.Slice(filtered, func(i, j int) bool { return filtered[i].ID < filtered[j].ID })
 	targets := make([]cluster_service.Node, s.replicaCount)
-	copy(targets, nodes[:s.replicaCount])
+	copy(targets, filtered[:s.replicaCount])
 	return targets, nil
 }
 
