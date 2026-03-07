@@ -17,7 +17,7 @@ import (
 )
 
 const firstUserFD uint64 = 3
-const maxBufferSize = 2 * 1024 * 1024
+const maxBufferSize = 8 * 1024 * 1024
 
 // NewSandstoreClient constructs a client bound to one server address and
 // initializes an empty descriptor table.
@@ -34,12 +34,12 @@ func NewSandstoreClient(serverAddr string, comm *grpccomm.GRPCCommunicator) *San
 // Open resolves path to an inode and returns a process-local file descriptor.
 //
 // Behavior:
-// - Uses LookupPath first.
-// - If not found and O_CREATE is set, issues Create then retries lookup on
-//   already-exists races.
-// - Inserts a new SandstoreFD with Offset 0 and an empty write buffer.
-// - O_EXCL is not currently enforced client-side; an existing path is opened
-//   successfully when lookup returns OK.
+//   - Uses LookupPath first.
+//   - If not found and O_CREATE is set, issues Create then retries lookup on
+//     already-exists races.
+//   - Inserts a new SandstoreFD with Offset 0 and an empty write buffer.
+//   - O_EXCL is not currently enforced client-side; an existing path is opened
+//     successfully when lookup returns OK.
 //
 // Thread-safety:
 // - Performs network RPCs without holding TableMu.
@@ -114,8 +114,8 @@ func (c *SandstoreClient) Open(path string, mode int) (int, error) {
 // - Acquires the file-level mutex (SandstoreFD.Mu) for the full operation.
 //
 // Consistency:
-// - Uses MsgRead, which is a local server read path and therefore eventually
-//   consistent with the latest committed cluster state.
+//   - Uses MsgRead, which is a local server read path and therefore eventually
+//     consistent with the latest committed cluster state.
 func (c *SandstoreClient) Read(fd int, n int) ([]byte, error) {
 	if c == nil {
 		return nil, fmt.Errorf("sandstore client is nil")
@@ -171,22 +171,15 @@ func (c *SandstoreClient) Read(fd int, n int) ([]byte, error) {
 	return data, nil
 }
 
-// Write appends data to the per-fd client buffer and advances the logical
-// offset.
-//
-// Behavior:
-// - If appending would exceed maxBufferSize, flushes the existing buffer first
-//   with MsgWrite at (Offset - len(Buffer)).
-// - Newly provided data is buffered after any overflow flush.
-// - Returns len(data) on success.
+// Write sends data to the server in sequential max-8MB MsgWrite RPCs and
+// advances the logical offset by successful chunks.
 //
 // Thread-safety:
 // - Acquires TableMu read lock to resolve fd.
-// - Acquires SandstoreFD.Mu for buffer and offset mutation.
+// - Acquires SandstoreFD.Mu for offset/buffer mutation and RPC sequencing.
 //
 // Consistency:
-// - Buffered bytes are not persisted until overflow flush, Fsync, or Close.
-// - Each MsgWrite flush is a synchronous, Raft-replicated write before return.
+// - Chunk N+1 is not sent until Chunk N receives an OK response.
 func (c *SandstoreClient) Write(fd int, data []byte) (int, error) {
 	if c == nil {
 		return 0, fmt.Errorf("sandstore client is nil")
@@ -216,25 +209,52 @@ func (c *SandstoreClient) Write(fd int, data []byte) (int, error) {
 		return 0, fmt.Errorf("file not open for writing")
 	}
 
-	if len(fileStruct.Buffer)+len(data) > maxBufferSize {
-		flushOffset := fileStruct.Offset - int64(len(fileStruct.Buffer))
-		resp, err := c.send(ps.MsgWrite, ps.WriteRequest{
-			InodeID: fileStruct.InodeID,
-			Offset:  flushOffset,
-			Data:    fileStruct.Buffer,
-		})
-		if err != nil {
-			return 0, fmt.Errorf("write %q failed: %w", fileStruct.FilePath, err)
+	sendInChunks := func(startOffset int64, payload []byte) (int, error) {
+		if len(payload) == 0 {
+			return 0, nil
 		}
-		if resp.Code != communication.CodeOK {
-			return 0, responseError("write", fileStruct.FilePath, resp)
+
+		written := 0
+		for written < len(payload) {
+			end := written + maxBufferSize
+			if end > len(payload) {
+				end = len(payload)
+			}
+
+			resp, err := c.send(ps.MsgWrite, ps.WriteRequest{
+				InodeID: fileStruct.InodeID,
+				Offset:  startOffset + int64(written),
+				Data:    payload[written:end],
+			})
+			if err != nil {
+				return written, fmt.Errorf("write %q failed: %w", fileStruct.FilePath, err)
+			}
+			if resp.Code != communication.CodeOK {
+				return written, responseError("write", fileStruct.FilePath, resp)
+			}
+
+			written = end
+		}
+
+		return written, nil
+	}
+
+	if len(fileStruct.Buffer) > 0 {
+		flushOffset := fileStruct.Offset - int64(len(fileStruct.Buffer))
+		_, err := sendInChunks(flushOffset, fileStruct.Buffer)
+		if err != nil {
+			return 0, err
 		}
 		fileStruct.Buffer = fileStruct.Buffer[:0]
 	}
 
-	fileStruct.Buffer = append(fileStruct.Buffer, data...)
-	fileStruct.Offset += int64(len(data))
-	return len(data), nil
+	written, err := sendInChunks(fileStruct.Offset, data)
+	fileStruct.Offset += int64(written)
+	if err != nil {
+		return written, err
+	}
+
+	return written, nil
 }
 
 // Fsync flushes all buffered write data for fd to the server.
@@ -248,8 +268,8 @@ func (c *SandstoreClient) Write(fd int, data []byte) (int, error) {
 // - Acquires SandstoreFD.Mu exclusively while checking/flushing the buffer.
 //
 // Consistency:
-// - Uses synchronous MsgWrite; success means the write reached the server's
-//   replicated write path.
+//   - Uses synchronous MsgWrite; success means the write reached the server's
+//     replicated write path.
 func (c *SandstoreClient) Fsync(fd int) error {
 	if c == nil {
 		return fmt.Errorf("sandstore client is nil")
@@ -359,10 +379,10 @@ func (c *SandstoreClient) Close(fd int) error {
 // descriptor entry from the local table.
 //
 // Behavior:
-// - Holds the global table lock for the full operation.
-// - If filepath is currently open, locks that file entry before RPC.
-// - Resolves parent inode, sends MsgRemove, and deletes the matching local fd
-//   on success.
+//   - Holds the global table lock for the full operation.
+//   - If filepath is currently open, locks that file entry before RPC.
+//   - Resolves parent inode, sends MsgRemove, and deletes the matching local fd
+//     on success.
 //
 // Thread-safety:
 // - Acquires TableMu write lock for the full method ("big lock").
@@ -470,15 +490,15 @@ func (c *SandstoreClient) Remove(filepath string) error {
 // open-file path cache entries.
 //
 // Behavior:
-// - Resolves source and destination parent inode IDs.
-// - Sends MsgRename with {SrcParentID, SrcName, DstParentID, DstName}.
-// - Updates FilePath from src -> dst for local entries that currently point to
-//   src only; descriptors already pointing to dst are intentionally unchanged.
+//   - Resolves source and destination parent inode IDs.
+//   - Sends MsgRename with {SrcParentID, SrcName, DstParentID, DstName}.
+//   - Updates FilePath from src -> dst for local entries that currently point to
+//     src only; descriptors already pointing to dst are intentionally unchanged.
 //
 // Thread-safety:
-// - Acquires TableMu write lock for the full RPC + local update sequence
-//   ("world freeze").
-// - Acquires SandstoreFD.Mu while mutating each matching FilePath.
+//   - Acquires TableMu write lock for the full RPC + local update sequence
+//     ("world freeze").
+//   - Acquires SandstoreFD.Mu while mutating each matching FilePath.
 //
 // Consistency:
 // - MsgRename is a synchronous, Raft-replicated atomic metadata operation.
@@ -562,8 +582,8 @@ func (c *SandstoreClient) Rename(src string, dst string) error {
 // - Sends MsgMkdir with parent inode, name, mode, uid=0, gid=0.
 //
 // Thread-safety:
-// - Acquires no TableMu or per-file locks; this method does not read or mutate
-//   OpenFiles.
+//   - Acquires no TableMu or per-file locks; this method does not read or mutate
+//     OpenFiles.
 //
 // Consistency:
 // - Parent lookup is a server metadata read.
@@ -754,8 +774,8 @@ func (c *SandstoreClient) ListDir(path string) ([]pms.DirEntry, error) {
 // - Acquires no TableMu or per-file locks.
 //
 // Consistency:
-// - LookupPath and MsgGetAttr are server read paths and are eventually
-//   consistent with committed cluster state.
+//   - LookupPath and MsgGetAttr are server read paths and are eventually
+//     consistent with committed cluster state.
 func (c *SandstoreClient) Stat(path string) (*pms.Attributes, error) {
 	if c == nil {
 		return nil, fmt.Errorf("sandstore client is nil")
