@@ -4,6 +4,15 @@ import (
 	"context"
 )
 
+type IntentState int
+
+const (
+	StateUnknown   IntentState = 0
+	StatePrepared  IntentState = 1 // Rarely stored in Raft, mostly implied by disk
+	StateCommitted IntentState = 2
+	StateAborted   IntentState = 3
+)
+
 type MetadataService interface {
 	// --- Lifecycle ---
 	Start() error
@@ -74,6 +83,12 @@ type MetadataService interface {
 	// --- 15. FSINFO ---
 	// GetFsInfo returns static filesystem configuration (block size, limits).
 	GetFsInfo(ctx context.Context) (*FileSystemInfo, error)
+
+	// Phase 1 additions:
+	UpdateChunkPlacement(ctx context.Context, chunkID string, nodeIDs []string) error
+	GetChunkPlacement(ctx context.Context, chunkID string) ([]string, error)
+	GetIntentState(ctx context.Context, txnID string) (IntentState, error)
+	SetIntentState(ctx context.Context, txnID string, state IntentState) error
 }
 
 // SnapshotableStateMachine defines the interface for a state machine that can be snapshotted
