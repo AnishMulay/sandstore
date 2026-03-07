@@ -3,7 +3,11 @@ package raft_replicator
 import (
 	"fmt"
 	"time"
+
+	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
 )
+
+type MetadataOperation = pms.MetadataOperation
 
 // RaftState captures the current role of the node
 type RaftState int
@@ -34,6 +38,41 @@ type LogEntry struct {
 	Data      []byte
 	Timestamp time.Time
 }
+
+// To ensure atomic updates to both the Intent Log and Metadata, the Raft
+// State Machine decodes a unified envelope.
+type PayloadType int
+
+const (
+	PayloadPosixMeta   PayloadType = 1
+	PayloadChunkIntent PayloadType = 2
+)
+
+type RaftCommandEnvelope struct {
+	Type        PayloadType
+	PosixMeta   *MetadataOperation    // Existing POSIX metadata operations
+	ChunkIntent *ChunkIntentOperation // New 2PC Intent operations
+}
+
+// ChunkIntentOperation replaces ChunkCommitOperation to allow explicit Aborts.
+// Proposed to Raft ONLY by the ReplicationCoordinator.
+type ChunkIntentOperation struct {
+	TxnID     string
+	ChunkID   string
+	NodeIDs   []string    // The physical placement mapping
+	State     IntentState // Usually StateCommitted, rarely StateAborted
+	Timestamp int64
+}
+
+// Stored in the shared Raft bbolt database.
+type IntentState int
+
+const (
+	StateUnknown   IntentState = 0
+	StatePrepared  IntentState = 1 // Rarely stored in Raft, mostly implied by disk
+	StateCommitted IntentState = 2
+	StateAborted   IntentState = 3
+)
 
 // --- RPC Request/Response Structs ---
 

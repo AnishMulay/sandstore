@@ -2,9 +2,12 @@ package simple
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"reflect"
+	"time"
 
 	crep "github.com/AnishMulay/sandstore/internal/chunk_replicator/default_replicator"
 	pcs "github.com/AnishMulay/sandstore/internal/chunk_service"
@@ -99,6 +102,9 @@ func (s *SimpleServer) registerPayloads() {
 	s.comm.RegisterPayloadType(communication.MessageTypeWriteChunk, reflect.TypeOf(communication.WriteChunkRequest{}))
 	s.comm.RegisterPayloadType(communication.MessageTypeReadChunk, reflect.TypeOf(communication.ReadChunkRequest{}))
 	s.comm.RegisterPayloadType(communication.MessageTypeDeleteChunk, reflect.TypeOf(communication.DeleteChunkRequest{}))
+	s.comm.RegisterPayloadType(communication.MessageTypePrepareChunk, reflect.TypeOf(communication.PrepareChunkRequest{}))
+	s.comm.RegisterPayloadType(communication.MessageTypeCommitChunk, reflect.TypeOf(communication.CommitChunkRequest{}))
+	s.comm.RegisterPayloadType(communication.MessageTypeAbortChunk, reflect.TypeOf(communication.AbortChunkRequest{}))
 }
 
 func (s *SimpleServer) RegisterTypedHandler(messageType string, payloadType reflect.Type, handler func(msg communication.Message) (*communication.Response, error)) {
@@ -223,14 +229,34 @@ func (s *SimpleServer) handleMessage(msg communication.Message) (*communication.
 		return s.respond(info, err)
 
 	// --- CHUNK REPLICATION (LOCAL ONLY) ---
+	case communication.MessageTypePrepareChunk:
+		req := msg.Payload.(communication.PrepareChunkRequest)
+		err := s.cs.PrepareChunk(ctx, req.TxnID, req.ChunkID, req.Data, req.Checksum)
+		return s.respond(nil, err)
+
+	case communication.MessageTypeCommitChunk:
+		req := msg.Payload.(communication.CommitChunkRequest)
+		err := s.cs.CommitChunk(ctx, req.TxnID, req.ChunkID)
+		return s.respond(nil, err)
+
+	case communication.MessageTypeAbortChunk:
+		req := msg.Payload.(communication.AbortChunkRequest)
+		err := s.cs.AbortChunk(ctx, req.TxnID, req.ChunkID)
+		return s.respond(nil, err)
+
 	case ps.MsgChunkWrite:
 		req := msg.Payload.(communication.WriteChunkRequest)
-		err := s.cs.WriteChunkLocal(req.ChunkID, req.Data)
+		txnID := "legacy-" + req.ChunkID + "-" + time.Now().Format("20060102150405.000000000")
+		checksum := checksumHex(req.Data)
+		err := s.cs.PrepareChunk(ctx, txnID, req.ChunkID, req.Data, checksum)
+		if err == nil {
+			err = s.cs.CommitChunk(ctx, txnID, req.ChunkID)
+		}
 		return s.respond(nil, err)
 
 	case ps.MsgChunkRead:
 		req := msg.Payload.(communication.ReadChunkRequest)
-		data, err := s.cs.ReadChunkLocal(req.ChunkID)
+		data, err := s.cs.ReadChunk(ctx, req.ChunkID)
 		if err != nil {
 			return s.respond(nil, err)
 		}
@@ -238,7 +264,7 @@ func (s *SimpleServer) handleMessage(msg communication.Message) (*communication.
 
 	case ps.MsgChunkDelete:
 		req := msg.Payload.(communication.DeleteChunkRequest)
-		err := s.cs.DeleteChunkLocal(req.ChunkID)
+		err := s.cs.DeleteChunkLocal(ctx, req.ChunkID)
 		if err != nil {
 			return s.respond(nil, err)
 		}
@@ -281,6 +307,11 @@ func (s *SimpleServer) handleMessage(msg communication.Message) (*communication.
 			Body: []byte("unknown message type: " + msg.Type),
 		}, nil
 	}
+}
+
+func checksumHex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }
 
 // respond is a helper to standardize JSON responses and error codes

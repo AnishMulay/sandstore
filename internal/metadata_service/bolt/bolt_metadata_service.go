@@ -16,6 +16,7 @@ import (
 	"time"
 
 	pmr "github.com/AnishMulay/sandstore/internal/metadata_replicator"
+	rr "github.com/AnishMulay/sandstore/internal/metadata_replicator/raft_replicator"
 	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
 	inmemoryms "github.com/AnishMulay/sandstore/internal/metadata_service/inmemory"
 	"github.com/google/uuid"
@@ -28,6 +29,8 @@ var (
 	inodesBucket        = []byte("inodes")
 	dentriesBucket      = []byte("dentries")
 	chunkMapBucket      = []byte("chunk_map")
+	chunkPlacementsBkt  = []byte("chunk_placements")
+	chunkIntentsBkt     = []byte("chunk_intents")
 
 	consistentIndexKey = []byte("consistent_index")
 	superblockKey      = []byte("sb")
@@ -39,6 +42,8 @@ var requiredBuckets = [][]byte{
 	inodesBucket,
 	dentriesBucket,
 	chunkMapBucket,
+	chunkPlacementsBkt,
+	chunkIntentsBkt,
 }
 
 var inodeIDCounter atomic.Uint64
@@ -131,9 +136,24 @@ func (s *BoltMetadataService) Stop() error {
 }
 
 func (s *BoltMetadataService) ApplyTransaction(data []byte) error {
-	var op pms.MetadataOperation
-	if err := json.Unmarshal(data, &op); err != nil {
+	var envelope rr.RaftCommandEnvelope
+	if err := json.Unmarshal(data, &envelope); err != nil {
 		return err
+	}
+
+	switch envelope.Type {
+	case rr.PayloadPosixMeta:
+		return s.applyStandardMetadata(envelope.PosixMeta)
+	case rr.PayloadChunkIntent:
+		return s.applyChunkIntentAtomic(envelope.ChunkIntent, envelope.PosixMeta)
+	default:
+		return fmt.Errorf("unknown envelope type: %v", envelope.Type)
+	}
+}
+
+func (s *BoltMetadataService) applyStandardMetadata(op *pms.MetadataOperation) error {
+	if op == nil {
+		return fmt.Errorf("missing metadata operation in raft envelope")
 	}
 
 	consistentIndex, err := s.nextConsistentIndex()
@@ -143,18 +163,112 @@ func (s *BoltMetadataService) ApplyTransaction(data []byte) error {
 
 	switch op.Type {
 	case pms.OpCreate:
-		return s.ApplyCreate(op, consistentIndex)
+		return s.ApplyCreate(*op, consistentIndex)
 	case pms.OpRemove:
-		return s.ApplyRemove(op, consistentIndex)
+		return s.ApplyRemove(*op, consistentIndex)
 	case pms.OpRename:
-		return s.ApplyRename(op, consistentIndex)
+		return s.ApplyRename(*op, consistentIndex)
 	case pms.OpSetAttr:
-		return s.ApplySetAttr(op, consistentIndex)
+		return s.ApplySetAttr(*op, consistentIndex)
 	case pms.OpUpdateInode:
-		return s.ApplyUpdateInode(op, consistentIndex)
+		return s.ApplyUpdateInode(*op, consistentIndex)
 	default:
 		return fmt.Errorf("unknown operation type: %v", op.Type)
 	}
+}
+
+func (s *BoltMetadataService) applyChunkIntentAtomic(intent *rr.ChunkIntentOperation, metaUpdate *pms.MetadataOperation) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("bolt metadata service is not initialized")
+	}
+	if intent == nil {
+		return fmt.Errorf("missing chunk intent operation in raft envelope")
+	}
+
+	consistentIndex, err := s.nextConsistentIndex()
+	if err != nil {
+		return err
+	}
+
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		intentsBucket, err := tx.CreateBucketIfNotExists(chunkIntentsBkt)
+		if err != nil {
+			return err
+		}
+
+		intentBytes, err := json.Marshal(intent)
+		if err != nil {
+			return fmt.Errorf("marshal chunk intent: %w", err)
+		}
+		if err := intentsBucket.Put([]byte(intent.TxnID), intentBytes); err != nil {
+			return err
+		}
+
+		placementBucket, err := tx.CreateBucketIfNotExists(chunkPlacementsBkt)
+		if err != nil {
+			return err
+		}
+
+		placementBytes, err := json.Marshal(intent.NodeIDs)
+		if err != nil {
+			return fmt.Errorf("marshal chunk placement: %w", err)
+		}
+		if err := placementBucket.Put([]byte(intent.ChunkID), placementBytes); err != nil {
+			return err
+		}
+
+		if metaUpdate != nil && metaUpdate.Type == pms.OpUpdateInode {
+			inodes := tx.Bucket(inodesBucket)
+			chunkMap := tx.Bucket(chunkMapBucket)
+			if inodes == nil || chunkMap == nil {
+				return fmt.Errorf("bolt metadata schema is not initialized")
+			}
+
+			inodeKey, err := encodeInodeKey(metaUpdate.InodeID)
+			if err != nil {
+				return fmt.Errorf("encode inode id %q: %w", metaUpdate.InodeID, err)
+			}
+
+			inode, err := loadStoredInode(inodes, inodeKey, metaUpdate.InodeID)
+			if err != nil {
+				return err
+			}
+
+			if metaUpdate.NewSize != nil {
+				inode.FileSize = *metaUpdate.NewSize
+			}
+			if metaUpdate.NewChunkList != nil {
+				if err := replaceChunkList(chunkMap, inodeKey, metaUpdate.NewChunkList); err != nil {
+					return fmt.Errorf("update chunk list for inode %q: %w", metaUpdate.InodeID, err)
+				}
+			}
+
+			if metaUpdate.Timestamp > 0 {
+				inode.ModifyTime = time.Unix(0, metaUpdate.Timestamp)
+			} else {
+				inode.ModifyTime = time.Now()
+			}
+			inode.ChangeTime = inode.ModifyTime
+
+			inodeBytes, err := encodeGob(storableInode(*inode))
+			if err != nil {
+				return fmt.Errorf("encode inode %q: %w", metaUpdate.InodeID, err)
+			}
+			if err := inodes.Put(inodeKey, inodeBytes); err != nil {
+				return fmt.Errorf("update inode %q: %w", metaUpdate.InodeID, err)
+			}
+		}
+
+		metadataState := tx.Bucket(metadataStateBucket)
+		if metadataState == nil {
+			return fmt.Errorf("bolt metadata schema is not initialized")
+		}
+		if err := metadataState.Put(consistentIndexKey, encodeUint64LE(consistentIndex)); err != nil {
+			return fmt.Errorf("update consistent index %d: %w", consistentIndex, err)
+		}
+
+		return nil
+	})
 }
 
 func (s *BoltMetadataService) replicateOp(ctx context.Context, op pms.MetadataOperation) error {
@@ -165,7 +279,12 @@ func (s *BoltMetadataService) replicateOp(ctx context.Context, op pms.MetadataOp
 	op.OpID = uuid.New().String()
 	op.Timestamp = time.Now().UnixNano()
 
-	data, err := json.Marshal(op)
+	envelope := rr.RaftCommandEnvelope{
+		Type:      rr.PayloadPosixMeta,
+		PosixMeta: &op,
+	}
+
+	data, err := json.Marshal(envelope)
 	if err != nil {
 		return fmt.Errorf("failed to marshal op: %w", err)
 	}
@@ -1039,6 +1158,134 @@ func (s *BoltMetadataService) UpdateInode(ctx context.Context, inodeID string, n
 	return s.replicateOp(ctx, op)
 }
 
+func (s *BoltMetadataService) UpdateChunkPlacement(ctx context.Context, chunkID string, nodeIDs []string) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("bolt metadata service is not initialized")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		placementBucket, err := tx.CreateBucketIfNotExists(chunkPlacementsBkt)
+		if err != nil {
+			return err
+		}
+
+		placementBytes, err := json.Marshal(nodeIDs)
+		if err != nil {
+			return fmt.Errorf("marshal chunk placement: %w", err)
+		}
+
+		return placementBucket.Put([]byte(chunkID), placementBytes)
+	})
+}
+
+func (s *BoltMetadataService) GetChunkPlacement(ctx context.Context, chunkID string) ([]string, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("bolt metadata service is not initialized")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	var nodeIDs []string
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		placementBucket := tx.Bucket(chunkPlacementsBkt)
+		if placementBucket == nil {
+			return inmemoryms.ErrNotFound
+		}
+
+		placementBytes := placementBucket.Get([]byte(chunkID))
+		if placementBytes == nil {
+			return inmemoryms.ErrNotFound
+		}
+
+		if err := json.Unmarshal(placementBytes, &nodeIDs); err != nil {
+			return fmt.Errorf("unmarshal chunk placement: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return append([]string(nil), nodeIDs...), nil
+}
+
+func (s *BoltMetadataService) GetIntentState(ctx context.Context, txnID string) (pms.IntentState, error) {
+	if s == nil || s.db == nil {
+		return pms.StateUnknown, fmt.Errorf("bolt metadata service is not initialized")
+	}
+	if err := ctx.Err(); err != nil {
+		return pms.StateUnknown, err
+	}
+
+	state := pms.StateUnknown
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		intentsBucket := tx.Bucket(chunkIntentsBkt)
+		if intentsBucket == nil {
+			state = pms.StateUnknown
+			return nil
+		}
+
+		intentBytes := intentsBucket.Get([]byte(txnID))
+		if intentBytes == nil {
+			state = pms.StateUnknown
+			return nil
+		}
+
+		var intent rr.ChunkIntentOperation
+		if err := json.Unmarshal(intentBytes, &intent); err != nil {
+			return fmt.Errorf("unmarshal chunk intent: %w", err)
+		}
+		state = toMetadataIntentState(intent.State)
+		return nil
+	})
+	if err != nil {
+		return pms.StateUnknown, err
+	}
+
+	return state, nil
+}
+
+func (s *BoltMetadataService) SetIntentState(ctx context.Context, txnID string, state pms.IntentState) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("bolt metadata service is not initialized")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		intentsBucket, err := tx.CreateBucketIfNotExists(chunkIntentsBkt)
+		if err != nil {
+			return err
+		}
+
+		intent := rr.ChunkIntentOperation{
+			TxnID:     txnID,
+			State:     toRaftIntentState(state),
+			Timestamp: time.Now().UnixNano(),
+		}
+
+		if existing := intentsBucket.Get([]byte(txnID)); existing != nil {
+			if err := json.Unmarshal(existing, &intent); err != nil {
+				return fmt.Errorf("unmarshal existing chunk intent: %w", err)
+			}
+			intent.State = toRaftIntentState(state)
+			intent.Timestamp = time.Now().UnixNano()
+		}
+
+		intentBytes, err := json.Marshal(intent)
+		if err != nil {
+			return fmt.Errorf("marshal chunk intent: %w", err)
+		}
+
+		return intentsBucket.Put([]byte(txnID), intentBytes)
+	})
+}
+
 func (s *BoltMetadataService) Create(ctx context.Context, parentInodeID string, name string, mode uint32, uid, gid uint32) (*pms.Inode, error) {
 	parent, err := s.GetInode(ctx, parentInodeID)
 	if err != nil {
@@ -1463,6 +1710,32 @@ func encodeGob(value any) ([]byte, error) {
 
 func decodeGob(data []byte, target any) error {
 	return gob.NewDecoder(bytes.NewReader(data)).Decode(target)
+}
+
+func toMetadataIntentState(state rr.IntentState) pms.IntentState {
+	switch state {
+	case rr.StatePrepared:
+		return pms.StatePrepared
+	case rr.StateCommitted:
+		return pms.StateCommitted
+	case rr.StateAborted:
+		return pms.StateAborted
+	default:
+		return pms.StateUnknown
+	}
+}
+
+func toRaftIntentState(state pms.IntentState) rr.IntentState {
+	switch state {
+	case pms.StatePrepared:
+		return rr.StatePrepared
+	case pms.StateCommitted:
+		return rr.StateCommitted
+	case pms.StateAborted:
+		return rr.StateAborted
+	default:
+		return rr.StateUnknown
+	}
 }
 
 func storableInode(inode pms.Inode) pms.Inode {
