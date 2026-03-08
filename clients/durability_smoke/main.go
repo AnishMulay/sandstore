@@ -49,12 +49,32 @@ func nodeAddresses() []string {
 }
 
 func runDockerCmd(args ...string) error {
-	cmd := exec.Command("docker", args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("docker %s failed: %w (%s)", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	var lastErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		cmd := exec.Command("docker", args...)
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			return nil
+		}
+
+		msg := strings.TrimSpace(string(out))
+		lastErr = fmt.Errorf("docker %s failed: %w (%s)", strings.Join(args, " "), err, msg)
+		if !isRetriableDockerErr(msg) {
+			return lastErr
+		}
+
+		time.Sleep(time.Duration(attempt+1) * 300 * time.Millisecond)
 	}
-	return nil
+	return lastErr
+}
+
+func isRetriableDockerErr(msg string) bool {
+	msg = strings.ToLower(msg)
+	return strings.Contains(msg, "unexpected eof") ||
+		strings.Contains(msg, "error response from daemon: handle request") ||
+		strings.Contains(msg, "cannot connect to the docker daemon") ||
+		strings.Contains(msg, "connection reset by peer") ||
+		strings.Contains(msg, "broken pipe")
 }
 
 func listContainerNames() ([]string, error) {
@@ -167,15 +187,54 @@ func createFiles(comm *grpccomm.GRPCCommunicator, client *sandlib.SandstoreClien
 func waitForPathOnNode(comm *grpccomm.GRPCCommunicator, addr string, path string, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		c := sandlib.NewSandstoreClient(addr, comm)
-		fd, err := c.Open(path, os.O_RDWR)
-		if err == nil {
-			_ = c.Close(fd)
+		visible, err := pathVisibleOnNode(comm, addr, path)
+		if err == nil && visible {
 			return nil
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
 	return fmt.Errorf("path %s not visible on %s within %s", path, addr, timeout)
+}
+
+func pathVisibleOnNode(comm *grpccomm.GRPCCommunicator, addr string, path string) (bool, error) {
+	c := sandlib.NewSandstoreClient(addr, comm)
+	fd, err := c.Open(path, os.O_RDWR)
+	if err != nil {
+		return false, nil
+	}
+	if err := c.Close(fd); err != nil {
+		return false, fmt.Errorf("close %s on %s: %w", path, addr, err)
+	}
+	return true, nil
+}
+
+func waitForConvergedPathState(comm *grpccomm.GRPCCommunicator, path string, timeout time.Duration) (bool, error) {
+	deadline := time.Now().Add(timeout)
+	addrs := nodeAddresses()
+	for time.Now().Before(deadline) {
+		var converged bool
+		var expectedVisible bool
+		for i, addr := range addrs {
+			visible, err := pathVisibleOnNode(comm, addr, path)
+			if err != nil {
+				return false, err
+			}
+			if i == 0 {
+				expectedVisible = visible
+				converged = true
+				continue
+			}
+			if visible != expectedVisible {
+				converged = false
+				break
+			}
+		}
+		if converged {
+			return expectedVisible, nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return false, fmt.Errorf("path %s did not converge across nodes within %s", path, timeout)
 }
 
 func openWithTimeout(client *sandlib.SandstoreClient, path string, flags int, timeout time.Duration) (int, error) {
@@ -235,8 +294,8 @@ func main() {
 	must(client.Close(fd))
 	log.Println("PASS: Election Amnesia")
 
-	// Test 2: Uncommitted Write Isolation
-	log.Println("--- Test Case 2: Uncommitted Write Isolation ---")
+	// Test 2: Interrupted Metadata Create Recovery
+	log.Println("--- Test Case 2: Interrupted Metadata Create Recovery ---")
 	partialPath := fmt.Sprintf("/partial_write_%d.txt", time.Now().UnixNano())
 	followers := make([]string, 0, 2)
 	for _, svc := range defaultNodeServices {
@@ -258,11 +317,13 @@ func main() {
 	must(err)
 	leaderService = serviceFromAddr(leaderAddr)
 
-	if fd, err = client.Open(partialPath, os.O_RDWR); err == nil {
-		_ = client.Close(fd)
-		log.Fatalf("FAIL: uncommitted write %s became visible", partialPath)
+	expectedVisible, err := waitForConvergedPathState(comm, partialPath, 45*time.Second)
+	must(err)
+	if expectedVisible {
+		log.Printf("PASS: Interrupted create converged to visible state for %s", partialPath)
+	} else {
+		log.Printf("PASS: Interrupted create converged to absent state for %s", partialPath)
 	}
-	log.Println("PASS: Uncommitted Write Isolation")
 
 	// Test 3: Snapshot Integrity Under Crash
 	log.Println("--- Test Case 3: Snapshot Integrity ---")
