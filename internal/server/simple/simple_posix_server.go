@@ -13,16 +13,17 @@ import (
 	pcs "github.com/AnishMulay/sandstore/internal/chunk_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	grpccomm "github.com/AnishMulay/sandstore/internal/communication/grpc"
-	pfs "github.com/AnishMulay/sandstore/internal/file_service"
 	"github.com/AnishMulay/sandstore/internal/log_service"
 	raft "github.com/AnishMulay/sandstore/internal/metadata_replicator/raft_replicator"
 	inmemoryms "github.com/AnishMulay/sandstore/internal/metadata_service/inmemory"
+	"github.com/AnishMulay/sandstore/internal/orchestrators"
 	ps "github.com/AnishMulay/sandstore/internal/server"
 )
 
 type SimpleServer struct {
 	comm      *grpccomm.GRPCCommunicator
-	fs        pfs.FileService
+	cpo       orchestrators.ControlPlaneOrchestrator
+	dpo       orchestrators.DataPlaneOrchestrator
 	cs        pcs.ChunkService
 	ls        log_service.LogService
 	metaRepl  any
@@ -31,7 +32,8 @@ type SimpleServer struct {
 
 func NewSimpleServer(
 	comm *grpccomm.GRPCCommunicator,
-	fs pfs.FileService,
+	cpo orchestrators.ControlPlaneOrchestrator,
+	dpo orchestrators.DataPlaneOrchestrator,
 	cs pcs.ChunkService,
 	ls log_service.LogService,
 	metaRepl any,
@@ -39,7 +41,8 @@ func NewSimpleServer(
 ) *SimpleServer {
 	return &SimpleServer{
 		comm:      comm,
-		fs:        fs,
+		cpo:       cpo,
+		dpo:       dpo,
 		cs:        cs,
 		ls:        ls,
 		metaRepl:  metaRepl,
@@ -53,8 +56,8 @@ func (s *SimpleServer) Start() error {
 	// 1. Register Payload Types with Communicator
 	s.registerPayloads()
 
-	// 2. Start File Service (which starts Metadata/Chunk services)
-	if err := s.fs.Start(); err != nil {
+	// 2. Start Control Plane
+	if err := s.cpo.Start(); err != nil {
 		return err
 	}
 
@@ -64,8 +67,8 @@ func (s *SimpleServer) Start() error {
 
 func (s *SimpleServer) Stop() error {
 	s.ls.Info(log_service.LogEvent{Message: "Stopping Simple POSIX Server"})
-	if err := s.fs.Stop(); err != nil {
-		s.ls.Error(log_service.LogEvent{Message: "Failed to stop file service", Metadata: map[string]any{"error": err.Error()}})
+	if err := s.cpo.Stop(); err != nil {
+		s.ls.Error(log_service.LogEvent{Message: "Failed to stop control plane", Metadata: map[string]any{"error": err.Error()}})
 	}
 	return s.comm.Stop()
 }
@@ -125,80 +128,117 @@ func (s *SimpleServer) handleMessage(msg communication.Message) (*communication.
 	// --- 1. GETATTR ---
 	case ps.MsgGetAttr:
 		req := msg.Payload.(ps.GetAttrRequest)
-		attr, err := s.fs.GetAttr(ctx, req.InodeID)
+		attr, err := s.cpo.GetAttr(ctx, req.InodeID)
 		return s.respond(attr, err)
 
 	// --- 2. SETATTR ---
 	case ps.MsgSetAttr:
 		req := msg.Payload.(ps.SetAttrRequest)
-		attr, err := s.fs.SetAttr(ctx, req.InodeID, req.Mode, req.UID, req.GID, req.ATime, req.MTime)
+		attr, err := s.cpo.SetAttr(ctx, req.InodeID, req.Mode, req.UID, req.GID, req.ATime, req.MTime)
 		return s.respond(attr, err)
 
 	// --- 3. LOOKUP ---
 	case ps.MsgLookup:
 		req := msg.Payload.(ps.LookupRequest)
-		id, err := s.fs.Lookup(ctx, req.ParentID, req.Name)
+		id, err := s.cpo.Lookup(ctx, req.ParentID, req.Name)
 		return s.respond(id, err)
 
 	// --- 3a. LOOKUP PATH ---
 	case ps.MsgLookupPath:
 		req := msg.Payload.(ps.LookupPathRequest)
-		id, err := s.fs.LookupPath(ctx, req.Path)
+		id, err := s.cpo.LookupPath(ctx, req.Path)
 		return s.respond(id, err)
 
 	// --- 4. ACCESS ---
 	case ps.MsgAccess:
 		req := msg.Payload.(ps.AccessRequest)
-		err := s.fs.Access(ctx, req.InodeID, req.UID, req.GID, req.AccessMask)
+		err := s.cpo.Access(ctx, req.InodeID, req.UID, req.GID, req.AccessMask)
 		// Access returns no data, just success/fail status
 		return s.respond(nil, err)
 
 	// --- 5. READ ---
 	case ps.MsgRead:
 		req := msg.Payload.(ps.ReadRequest)
-		data, err := s.fs.Read(ctx, req.InodeID, req.Offset, req.Length)
+		readCtx, err := s.cpo.PrepareFileRead(ctx, req.InodeID, req.Offset)
+		if err != nil {
+			return s.respond(nil, err)
+		}
+		data, err := s.dpo.ExecuteRead(ctx, readCtx.ChunkID, readCtx.TargetNodes)
 		return s.respond(data, err)
 
 	// --- 6. WRITE ---
 	case ps.MsgWrite:
 		req := msg.Payload.(ps.WriteRequest)
-		n, err := s.fs.Write(ctx, req.InodeID, req.Offset, req.Data)
-		return s.respond(n, err)
+		writeCtx, err := s.cpo.PrepareFileWrite(ctx, req.InodeID, req.Offset, int64(len(req.Data)))
+		if err != nil {
+			return s.respond(int64(0), err)
+		}
+
+		writePayload := req.Data
+		if writeCtx.FullPayload != nil {
+			info, err := s.cpo.GetFsInfo(ctx)
+			if err != nil {
+				_ = s.cpo.AbortFileWrite(ctx, writeCtx.TxnID, writeCtx.TargetNodes)
+				return s.respond(int64(0), err)
+			}
+			writeOffset := req.Offset % info.ChunkSize
+			if int(writeOffset)+len(req.Data) > len(writeCtx.FullPayload) {
+				_ = s.cpo.AbortFileWrite(ctx, writeCtx.TxnID, writeCtx.TargetNodes)
+				return s.respond(int64(0), errors.New("buffered write exceeds prepared payload"))
+			}
+			copy(writeCtx.FullPayload[int(writeOffset):], req.Data)
+			writePayload = writeCtx.FullPayload
+		}
+
+		err = s.dpo.ExecuteWrite(ctx, writeCtx.TxnID, writeCtx.ChunkID, writePayload, writeCtx.TargetNodes)
+		if err != nil {
+			_ = s.cpo.AbortFileWrite(ctx, writeCtx.TxnID, writeCtx.TargetNodes)
+			return s.respond(int64(0), err)
+		}
+
+		newEOF := req.Offset + int64(len(req.Data))
+		err = s.cpo.CommitFileWrite(ctx, writeCtx.TxnID, req.InodeID, writeCtx.ChunkID, newEOF, writeCtx.IsNewChunk, writeCtx.TargetNodes)
+		if err != nil {
+			_ = s.cpo.AbortFileWrite(ctx, writeCtx.TxnID, writeCtx.TargetNodes)
+			return s.respond(int64(0), err)
+		}
+
+		return s.respond(int64(len(req.Data)), nil)
 
 	// --- 7. CREATE ---
 	case ps.MsgCreate:
 		req := msg.Payload.(ps.CreateRequest)
-		inode, err := s.fs.Create(ctx, req.ParentID, req.Name, req.Mode, req.UID, req.GID)
+		inode, err := s.cpo.Create(ctx, req.ParentID, req.Name, req.Mode, req.UID, req.GID)
 		return s.respond(inode, err)
 
 	// --- 8. MKDIR ---
 	case ps.MsgMkdir:
 		req := msg.Payload.(ps.MkdirRequest)
-		inode, err := s.fs.Mkdir(ctx, req.ParentID, req.Name, req.Mode, req.UID, req.GID)
+		inode, err := s.cpo.Mkdir(ctx, req.ParentID, req.Name, req.Mode, req.UID, req.GID)
 		return s.respond(inode, err)
 
 	// --- 9. REMOVE ---
 	case ps.MsgRemove:
 		req := msg.Payload.(ps.RemoveRequest)
-		err := s.fs.Remove(ctx, req.ParentID, req.Name)
+		err := s.cpo.Remove(ctx, req.ParentID, req.Name)
 		return s.respond(nil, err)
 
 	// --- 10. RMDIR ---
 	case ps.MsgRmdir:
 		req := msg.Payload.(ps.RmdirRequest)
-		err := s.fs.Rmdir(ctx, req.ParentID, req.Name)
+		err := s.cpo.Rmdir(ctx, req.ParentID, req.Name)
 		return s.respond(nil, err)
 
 	// --- 11. RENAME ---
 	case ps.MsgRename:
 		req := msg.Payload.(ps.RenameRequest)
-		err := s.fs.Rename(ctx, req.SrcParentID, req.SrcName, req.DstParentID, req.DstName)
+		err := s.cpo.Rename(ctx, req.SrcParentID, req.SrcName, req.DstParentID, req.DstName)
 		return s.respond(nil, err)
 
 	// --- 12. READDIR ---
 	case ps.MsgReadDir:
 		req := msg.Payload.(ps.ReadDirRequest)
-		entries, cookie, eof, err := s.fs.ReadDir(ctx, req.InodeID, req.Cookie, req.MaxEntries)
+		entries, cookie, eof, err := s.cpo.ReadDir(ctx, req.InodeID, req.Cookie, req.MaxEntries)
 		// Wrap multiple returns in a map
 		res := map[string]any{
 			"entries": entries,
@@ -210,7 +250,7 @@ func (s *SimpleServer) handleMessage(msg communication.Message) (*communication.
 	// --- 13. READDIRPLUS ---
 	case ps.MsgReadDirPlus:
 		req := msg.Payload.(ps.ReadDirPlusRequest)
-		entries, cookie, eof, err := s.fs.ReadDirPlus(ctx, req.InodeID, req.Cookie, req.MaxEntries)
+		entries, cookie, eof, err := s.cpo.ReadDirPlus(ctx, req.InodeID, req.Cookie, req.MaxEntries)
 		res := map[string]any{
 			"entries": entries,
 			"cookie":  cookie,
@@ -220,12 +260,12 @@ func (s *SimpleServer) handleMessage(msg communication.Message) (*communication.
 
 	// --- 14. FSSTAT ---
 	case ps.MsgFsStat:
-		stats, err := s.fs.GetFsStat(ctx)
+		stats, err := s.cpo.GetFsStat(ctx)
 		return s.respond(stats, err)
 
 	// --- 15. FSINFO ---
 	case ps.MsgFsInfo:
-		info, err := s.fs.GetFsInfo(ctx)
+		info, err := s.cpo.GetFsInfo(ctx)
 		return s.respond(info, err)
 
 	// --- CHUNK REPLICATION (LOCAL ONLY) ---
