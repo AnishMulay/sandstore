@@ -338,6 +338,11 @@ func (r *DurableRaftReplicator) becomeLeaderLocked(nodes []cluster_service.Node)
 	r.leaderID = r.id
 	lastIdx, _ := r.getLastLogInfoLocked()
 
+	r.ls.Info(log_service.LogEvent{
+		Message:  "Became Leader",
+		Metadata: map[string]any{"nodeID": r.id, "term": r.currentTerm},
+	})
+
 	for _, n := range nodes {
 		r.nextIndex[n.ID] = lastIdx + 1
 		r.matchIndex[n.ID] = r.lastIncludedIndex

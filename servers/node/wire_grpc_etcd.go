@@ -1,8 +1,3 @@
-//go:build grpc && etcd
-
-// This file is only compiled when both 'grpc' and 'etcd' build tags are set.
-// It keeps transport/cluster wiring modular at compile time.
-
 package node
 
 import (
@@ -20,9 +15,9 @@ import (
 
 	chunkrepl "github.com/AnishMulay/sandstore/internal/chunk_replicator/default_replicator"
 	chunkservice "github.com/AnishMulay/sandstore/internal/chunk_service/local_disc"
-	transactional "github.com/AnishMulay/sandstore/internal/file_service/transactional"
 	durableraft "github.com/AnishMulay/sandstore/internal/metadata_replicator/durable_raft"
 	metadataservice "github.com/AnishMulay/sandstore/internal/metadata_service/bolt"
+	"github.com/AnishMulay/sandstore/internal/orchestrators"
 	simpleserver "github.com/AnishMulay/sandstore/internal/server/simple"
 )
 
@@ -109,14 +104,17 @@ func Build(opts Options) runnable {
 	// chunkRepl is no longer used by ChunkService, it's strictly local.
 	cs := chunkservice.NewLocalDiscChunkService(chunkDir, ls)
 
-	// fs is now the 2PC Coordinator.
-	// It requires the Communicator (for RPCs), Raft (for atomic commits), and ClusterService (for placement)
 	chunkSize := int64(8 * 1024 * 1024) // 8MB default
-	fs := transactional.NewTransactionalFileService(ms, comm, metaRepl, clusterService, ls, chunkSize)
+	replicaCount := 3
+
+	placementStrategy := orchestrators.NewLegacySortedPlacementStrategy(clusterService, replicaCount)
+	endpointResolver := orchestrators.NewStaticEndpointResolver(clusterService)
+	dpo := orchestrators.NewRaftDataPlaneOrchestrator(comm, endpointResolver, chunkSize)
+	txnCoordinator := orchestrators.NewRaftTransactionCoordinator(comm, metaRepl)
+	cpo := orchestrators.NewControlPlaneOrchestrator(ms, placementStrategy, txnCoordinator, chunkSize, replicaCount)
 
 	// 6. Server (The Gateway)
-	// The SimpleServer remains unchanged because fs and cs still satisfy the base interfaces
-	srv := simpleserver.NewSimpleServer(comm, fs, cs, ls, metaRepl, chunkRepl)
+	srv := simpleserver.NewSimpleServer(comm, cpo, dpo, cs, ls, metaRepl, chunkRepl)
 
 	return &singleNodeServer{
 		server:         srv,

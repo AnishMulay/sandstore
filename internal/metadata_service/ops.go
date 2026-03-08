@@ -1,14 +1,16 @@
 package metadata_service
 
+import "github.com/AnishMulay/sandstore/internal/domain"
+
 // OpType identifies the intent of a replicated log entry.
 type OpType int
 
 const (
-	OpCreate      OpType = iota // Covers both File and Dir creation
-	OpRemove             // Covers Unlink and Rmdir
+	OpCreate OpType = iota // Covers both File and Dir creation
+	OpRemove               // Covers Unlink and Rmdir
 	OpRename
-	OpSetAttr            // For SETATTR
-	OpUpdateInode        // For WRITE (Size/Chunks update)
+	OpSetAttr     // For SETATTR
+	OpUpdateInode // For WRITE (Size/Chunks update)
 )
 
 // MetadataOperation is the container struct serialized to JSON/Protobuf.
@@ -16,9 +18,9 @@ type MetadataOperation struct {
 	Type OpType `json:"type"`
 
 	// --- Target Identity ---
-	InodeID     string `json:"inodeId,omitempty"`
-	ParentID    string `json:"parentId,omitempty"`
-	Name        string `json:"name,omitempty"`
+	InodeID  string `json:"inodeId,omitempty"`
+	ParentID string `json:"parentId,omitempty"`
+	Name     string `json:"name,omitempty"`
 
 	// --- For Create/Mkdir ---
 	FileType InodeType `json:"fileType,omitempty"` // Distinguishes Mkdir vs Create
@@ -38,9 +40,9 @@ type MetadataOperation struct {
 	SetMTime *int64  `json:"setMtime,omitempty"`
 
 	// --- For UpdateInode (Write Support) ---
-	NewSize      *int64   `json:"newSize,omitempty"`
-	NewChunkList []string `json:"newChunkList,omitempty"`
-	
+	NewSize      *int64                   `json:"newSize,omitempty"`
+	NewChunkList []domain.ChunkDescriptor `json:"newChunkList,omitempty"`
+
 	// --- Common ---
 	OpID      string `json:"opId"`
 	Timestamp int64  `json:"timestamp"`

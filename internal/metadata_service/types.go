@@ -2,6 +2,8 @@ package metadata_service
 
 import (
 	"time"
+
+	"github.com/AnishMulay/sandstore/internal/domain"
 )
 
 type InodeType int
@@ -40,7 +42,7 @@ type Inode struct {
 	Children map[string]string `json:"children,omitempty"`
 
 	// For Files: The "Chunk List"
-	ChunkList []string `json:"chunkList,omitempty"`
+	ChunkList []domain.ChunkDescriptor `json:"chunkList,omitempty"`
 }
 
 type Dentry struct {

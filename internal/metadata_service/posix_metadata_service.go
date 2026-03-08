@@ -2,6 +2,8 @@ package metadata_service
 
 import (
 	"context"
+
+	"github.com/AnishMulay/sandstore/internal/domain"
 )
 
 type IntentState int
@@ -45,7 +47,7 @@ type MetadataService interface {
 	// --- 6. WRITE Support ---
 	// UpdateInode updates file size, modification time, and the chunk list.
 	// This is called by FileService after writing data to the ChunkService.
-	UpdateInode(ctx context.Context, inodeID string, newSize int64, newChunkList []string, mtime int64) error
+	UpdateInode(ctx context.Context, inodeID string, newSize int64, newChunkList []domain.ChunkDescriptor, mtime int64) error
 
 	// --- 7. CREATE ---
 	// Create creates a new file and its directory entry atomically.
