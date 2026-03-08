@@ -12,23 +12,36 @@ import (
 )
 
 type RaftDataPlaneOrchestrator struct {
-	comm communication.Communicator
+	comm             communication.Communicator
+	endpointResolver EndpointResolver
+	chunkSize        int64
 }
 
 var _ DataPlaneOrchestrator = (*RaftDataPlaneOrchestrator)(nil)
 
-func NewRaftDataPlaneOrchestrator(comm communication.Communicator) *RaftDataPlaneOrchestrator {
-	return &RaftDataPlaneOrchestrator{comm: comm}
+func NewRaftDataPlaneOrchestrator(comm communication.Communicator, endpointResolver EndpointResolver, chunkSize int64) *RaftDataPlaneOrchestrator {
+	return &RaftDataPlaneOrchestrator{
+		comm:             comm,
+		endpointResolver: endpointResolver,
+		chunkSize:        chunkSize,
+	}
 }
 
 func (d *RaftDataPlaneOrchestrator) ExecuteWrite(
 	ctx context.Context,
 	txnID string,
 	chunkID string,
+	offset int64,
 	data []byte,
 	targets []domain.ChunkLocation,
+	isNewChunk bool,
 ) error {
-	checksum := d.calculateChecksum(data)
+	finalData, err := d.prepareWritePayload(ctx, chunkID, offset, data, targets, isNewChunk)
+	if err != nil {
+		return err
+	}
+
+	checksum := d.calculateChecksum(finalData)
 
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(targets))
@@ -44,12 +57,18 @@ func (d *RaftDataPlaneOrchestrator) ExecuteWrite(
 				Payload: communication.PrepareChunkRequest{
 					TxnID:    txnID,
 					ChunkID:  chunkID,
-					Data:     data,
+					Data:     finalData,
 					Checksum: checksum,
 				},
 			}
 
-			resp, err := d.comm.Send(ctx, target.PhysicalEndpoint, msg)
+			addr, err := d.resolveEndpoint(ctx, target)
+			if err != nil {
+				errCh <- fmt.Errorf("resolve endpoint for node %s failed: %w", target.LogicalNodeAlias, err)
+				return
+			}
+
+			resp, err := d.comm.Send(ctx, addr, msg)
 			if err != nil {
 				errCh <- fmt.Errorf("prepare to node %s failed: %w", target.LogicalNodeAlias, err)
 				return
@@ -105,7 +124,12 @@ func (d *RaftDataPlaneOrchestrator) sendReadRPC(
 		},
 	}
 
-	resp, err := d.comm.Send(ctx, target.PhysicalEndpoint, msg)
+	addr, err := d.resolveEndpoint(ctx, target)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := d.comm.Send(ctx, addr, msg)
 	if err != nil {
 		return nil, err
 	}
@@ -118,4 +142,52 @@ func (d *RaftDataPlaneOrchestrator) sendReadRPC(
 func (d *RaftDataPlaneOrchestrator) calculateChecksum(data []byte) string {
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])
+}
+
+func (d *RaftDataPlaneOrchestrator) prepareWritePayload(
+	ctx context.Context,
+	chunkID string,
+	offset int64,
+	data []byte,
+	targets []domain.ChunkLocation,
+	isNewChunk bool,
+) ([]byte, error) {
+	writeOffset := offset % d.chunkSize
+	requiredLen := int(writeOffset) + len(data)
+	isFullOverwrite := writeOffset == 0 && int64(len(data)) == d.chunkSize
+
+	if isNewChunk {
+		out := make([]byte, requiredLen)
+		copy(out[int(writeOffset):], data)
+		return out, nil
+	}
+
+	if isFullOverwrite {
+		out := make([]byte, len(data))
+		copy(out, data)
+		return out, nil
+	}
+
+	existingData, err := d.ExecuteRead(ctx, chunkID, targets)
+	if err != nil {
+		return nil, err
+	}
+
+	finalLen := len(existingData)
+	if requiredLen > finalLen {
+		finalLen = requiredLen
+	}
+
+	out := make([]byte, finalLen)
+	copy(out, existingData)
+	copy(out[int(writeOffset):], data)
+	return out, nil
+}
+
+func (d *RaftDataPlaneOrchestrator) resolveEndpoint(ctx context.Context, target domain.ChunkLocation) (string, error) {
+	if d.endpointResolver == nil {
+		return target.PhysicalEndpoint, nil
+	}
+
+	return d.endpointResolver.ResolveEndpoint(ctx, target.LogicalNodeAlias)
 }

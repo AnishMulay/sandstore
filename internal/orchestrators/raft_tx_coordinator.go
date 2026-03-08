@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/AnishMulay/sandstore/internal/communication"
@@ -17,7 +16,6 @@ import (
 type RaftTransactionCoordinator struct {
 	comm       communication.Communicator
 	replicator pmr.MetadataReplicator
-	txnChunks  sync.Map
 }
 
 var _ TransactionCoordinator = (*RaftTransactionCoordinator)(nil)
@@ -31,40 +29,28 @@ func NewRaftTransactionCoordinator(comm communication.Communicator, replicator p
 
 func (c *RaftTransactionCoordinator) NewTransaction(txnID string) TxHandle {
 	return &RaftTxHandle{
-		coordinator: c,
-		txnID:       txnID,
-		comm:        c.comm,
-		replicator:  c.replicator,
+		txnID:      txnID,
+		comm:       c.comm,
+		replicator: c.replicator,
 	}
 }
 
 type RaftTxHandle struct {
-	coordinator *RaftTransactionCoordinator
-	txnID       string
-	chunkID     string
-	comm        communication.Communicator
-	replicator  pmr.MetadataReplicator
+	txnID      string
+	comm       communication.Communicator
+	replicator pmr.MetadataReplicator
 }
 
 var _ TxHandle = (*RaftTxHandle)(nil)
 
 func (h *RaftTxHandle) Init(ctx context.Context, chunkID string, participants []domain.ChunkLocation) error {
 	_ = ctx
+	_ = chunkID
 	_ = participants
-
-	h.chunkID = chunkID
-	if h.coordinator != nil {
-		h.coordinator.txnChunks.Store(h.txnID, chunkID)
-	}
 	return nil
 }
 
-func (h *RaftTxHandle) Commit(ctx context.Context, metaUpdate *pms.MetadataOperation, participants []domain.ChunkLocation) error {
-	chunkID, err := h.resolveChunkID()
-	if err != nil {
-		return err
-	}
-
+func (h *RaftTxHandle) Commit(ctx context.Context, chunkID string, metaUpdate *pms.MetadataOperation, participants []domain.ChunkLocation) error {
 	envelope := rr.RaftCommandEnvelope{
 		Type: rr.PayloadChunkIntent,
 		ChunkIntent: &rr.ChunkIntentOperation{
@@ -86,21 +72,14 @@ func (h *RaftTxHandle) Commit(ctx context.Context, metaUpdate *pms.MetadataOpera
 	}
 
 	h.broadcastCommitAsync(h.txnID, chunkID, participants)
-	h.clearTxnChunk()
 
 	return nil
 }
 
-func (h *RaftTxHandle) Abort(ctx context.Context, participants []domain.ChunkLocation) error {
+func (h *RaftTxHandle) Abort(ctx context.Context, chunkID string, participants []domain.ChunkLocation) error {
 	_ = ctx
 
-	chunkID, err := h.resolveChunkID()
-	if err != nil {
-		return err
-	}
-
 	h.broadcastAbortAsync(h.txnID, chunkID, participants)
-	h.clearTxnChunk()
 	return nil
 }
 
@@ -139,28 +118,6 @@ func (h *RaftTxHandle) broadcastAbortAsync(txnID string, chunkID string, partici
 			}
 			_, _ = h.comm.Send(ctx, participant.PhysicalEndpoint, msg)
 		}(participant)
-	}
-}
-
-func (h *RaftTxHandle) resolveChunkID() (string, error) {
-	if h.chunkID != "" {
-		return h.chunkID, nil
-	}
-	if h.coordinator != nil {
-		if chunkID, ok := h.coordinator.txnChunks.Load(h.txnID); ok {
-			if id, ok := chunkID.(string); ok && id != "" {
-				h.chunkID = id
-				return id, nil
-			}
-		}
-	}
-
-	return "", fmt.Errorf("transaction %s not initialized", h.txnID)
-}
-
-func (h *RaftTxHandle) clearTxnChunk() {
-	if h.coordinator != nil {
-		h.coordinator.txnChunks.Delete(h.txnID)
 	}
 }
 

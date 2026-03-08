@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"time"
 
@@ -174,32 +175,22 @@ func (s *SimpleServer) handleMessage(msg communication.Message) (*communication.
 			return s.respond(int64(0), err)
 		}
 
-		writePayload := req.Data
-		if writeCtx.FullPayload != nil {
-			info, err := s.cpo.GetFsInfo(ctx)
-			if err != nil {
-				_ = s.cpo.AbortFileWrite(ctx, writeCtx.TxnID, writeCtx.TargetNodes)
-				return s.respond(int64(0), err)
-			}
-			writeOffset := req.Offset % info.ChunkSize
-			if int(writeOffset)+len(req.Data) > len(writeCtx.FullPayload) {
-				_ = s.cpo.AbortFileWrite(ctx, writeCtx.TxnID, writeCtx.TargetNodes)
-				return s.respond(int64(0), errors.New("buffered write exceeds prepared payload"))
-			}
-			copy(writeCtx.FullPayload[int(writeOffset):], req.Data)
-			writePayload = writeCtx.FullPayload
-		}
-
-		err = s.dpo.ExecuteWrite(ctx, writeCtx.TxnID, writeCtx.ChunkID, writePayload, writeCtx.TargetNodes)
+		err = s.dpo.ExecuteWrite(ctx, writeCtx.TxnID, writeCtx.ChunkID, req.Offset, req.Data, writeCtx.TargetNodes, writeCtx.IsNewChunk)
 		if err != nil {
-			_ = s.cpo.AbortFileWrite(ctx, writeCtx.TxnID, writeCtx.TargetNodes)
+			abortErr := s.cpo.AbortFileWrite(ctx, writeCtx.TxnID, writeCtx.ChunkID, writeCtx.TargetNodes)
+			if abortErr != nil {
+				return s.respond(int64(0), fmt.Errorf("write failed: %v, AND abort failed: %v", err, abortErr))
+			}
 			return s.respond(int64(0), err)
 		}
 
 		newEOF := req.Offset + int64(len(req.Data))
 		err = s.cpo.CommitFileWrite(ctx, writeCtx.TxnID, req.InodeID, writeCtx.ChunkID, newEOF, writeCtx.IsNewChunk, writeCtx.TargetNodes)
 		if err != nil {
-			_ = s.cpo.AbortFileWrite(ctx, writeCtx.TxnID, writeCtx.TargetNodes)
+			abortErr := s.cpo.AbortFileWrite(ctx, writeCtx.TxnID, writeCtx.ChunkID, writeCtx.TargetNodes)
+			if abortErr != nil {
+				return s.respond(int64(0), fmt.Errorf("commit failed: %v, AND abort failed: %v", err, abortErr))
+			}
 			return s.respond(int64(0), err)
 		}
 

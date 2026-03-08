@@ -20,7 +20,6 @@ var (
 
 type controlPlaneOrchestrator struct {
 	metadataService   pms.MetadataService
-	dataPlane         DataPlaneOrchestrator
 	placementStrategy PlacementStrategy
 	txnCoordinator    TransactionCoordinator
 	chunkSize         int64
@@ -31,7 +30,6 @@ var _ ControlPlaneOrchestrator = (*controlPlaneOrchestrator)(nil)
 
 func NewControlPlaneOrchestrator(
 	metadataService pms.MetadataService,
-	dataPlane DataPlaneOrchestrator,
 	placementStrategy PlacementStrategy,
 	txnCoordinator TransactionCoordinator,
 	chunkSize int64,
@@ -46,7 +44,6 @@ func NewControlPlaneOrchestrator(
 
 	return &controlPlaneOrchestrator{
 		metadataService:   metadataService,
-		dataPlane:         dataPlane,
 		placementStrategy: placementStrategy,
 		txnCoordinator:    txnCoordinator,
 		chunkSize:         chunkSize,
@@ -107,11 +104,6 @@ func (c *controlPlaneOrchestrator) PrepareFileWrite(ctx context.Context, inodeID
 		targets = inode.ChunkList[chunkIdx].Locations
 	}
 
-	fullPayload, err := c.prepareFullChunkBuffer(ctx, chunkID, offset, length, isNewChunk, targets)
-	if err != nil {
-		return nil, err
-	}
-
 	txnID := uuid.NewString()
 	handle := c.txnCoordinator.NewTransaction(txnID)
 	if err := handle.Init(ctx, chunkID, targets); err != nil {
@@ -123,7 +115,6 @@ func (c *controlPlaneOrchestrator) PrepareFileWrite(ctx context.Context, inodeID
 		ChunkID:     chunkID,
 		TargetNodes: targets,
 		IsNewChunk:  isNewChunk,
-		FullPayload: fullPayload,
 	}, nil
 }
 
@@ -169,12 +160,12 @@ func (c *controlPlaneOrchestrator) CommitFileWrite(
 		Timestamp:    mtime,
 	}
 
-	return handle.Commit(ctx, metaUpdate, targets)
+	return handle.Commit(ctx, chunkID, metaUpdate, targets)
 }
 
-func (c *controlPlaneOrchestrator) AbortFileWrite(ctx context.Context, txnID string, targets []domain.ChunkLocation) error {
+func (c *controlPlaneOrchestrator) AbortFileWrite(ctx context.Context, txnID string, chunkID string, targets []domain.ChunkLocation) error {
 	handle := c.txnCoordinator.NewTransaction(txnID)
-	return handle.Abort(ctx, targets)
+	return handle.Abort(ctx, chunkID, targets)
 }
 
 func (c *controlPlaneOrchestrator) PrepareFileRead(ctx context.Context, inodeID string, offset int64) (*domain.ReadContext, error) {
@@ -250,40 +241,6 @@ func (c *controlPlaneOrchestrator) GetFsStat(ctx context.Context) (*pms.FileSyst
 
 func (c *controlPlaneOrchestrator) GetFsInfo(ctx context.Context) (*pms.FileSystemInfo, error) {
 	return c.metadataService.GetFsInfo(ctx)
-}
-
-func (c *controlPlaneOrchestrator) prepareFullChunkBuffer(
-	ctx context.Context,
-	chunkID string,
-	offset int64,
-	length int64,
-	isNewChunk bool,
-	targets []domain.ChunkLocation,
-) ([]byte, error) {
-	writeOffset := offset % c.chunkSize
-	requiredLen := int(writeOffset + length)
-
-	if isNewChunk {
-		return make([]byte, requiredLen), nil
-	}
-
-	if writeOffset == 0 && length == c.chunkSize {
-		return make([]byte, requiredLen), nil
-	}
-
-	existingData, err := c.dataPlane.ExecuteRead(ctx, chunkID, targets)
-	if err != nil {
-		return nil, err
-	}
-
-	finalLen := len(existingData)
-	if requiredLen > finalLen {
-		finalLen = requiredLen
-	}
-
-	out := make([]byte, finalLen)
-	copy(out, existingData)
-	return out, nil
 }
 
 func (c *controlPlaneOrchestrator) isWithinChunkBoundary(offset int64, length int64) bool {

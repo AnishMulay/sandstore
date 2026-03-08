@@ -16,7 +16,6 @@ type WriteContext struct {
 	ChunkID     string
 	TargetNodes []ChunkLocation
 	IsNewChunk  bool
-	FullPayload []byte // Holds the post-buffered read-modify-write data
 }
 
 type ReadContext struct {

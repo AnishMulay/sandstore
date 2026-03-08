@@ -25,8 +25,8 @@ type TransactionCoordinator interface {
 // TxHandle isolates the state of a single request.
 type TxHandle interface {
 	Init(ctx context.Context, chunkID string, participants []domain.ChunkLocation) error
-	Commit(ctx context.Context, metaUpdate *pms.MetadataOperation, participants []domain.ChunkLocation) error
-	Abort(ctx context.Context, participants []domain.ChunkLocation) error
+	Commit(ctx context.Context, chunkID string, metaUpdate *pms.MetadataOperation, participants []domain.ChunkLocation) error
+	Abort(ctx context.Context, chunkID string, participants []domain.ChunkLocation) error
 }
 
 // ControlPlaneOrchestrator manages the namespace, permissions, and 2PC intents.
@@ -51,13 +51,13 @@ type ControlPlaneOrchestrator interface {
 
 	PrepareFileWrite(ctx context.Context, inodeID string, offset int64, length int64) (*domain.WriteContext, error)
 	CommitFileWrite(ctx context.Context, txnID string, inodeID string, chunkID string, newEOF int64, isNewChunk bool, targets []domain.ChunkLocation) error
-	AbortFileWrite(ctx context.Context, txnID string, targets []domain.ChunkLocation) error
+	AbortFileWrite(ctx context.Context, txnID string, chunkID string, targets []domain.ChunkLocation) error
 
 	PrepareFileRead(ctx context.Context, inodeID string, offset int64) (*domain.ReadContext, error)
 }
 
 // DataPlaneOrchestrator strictly moves bytes to the physical locations calculated by the Control Plane.
 type DataPlaneOrchestrator interface {
-	ExecuteWrite(ctx context.Context, txnID string, chunkID string, data []byte, targets []domain.ChunkLocation) error
+	ExecuteWrite(ctx context.Context, txnID string, chunkID string, offset int64, data []byte, targets []domain.ChunkLocation, isNewChunk bool) error
 	ExecuteRead(ctx context.Context, chunkID string, targets []domain.ChunkLocation) ([]byte, error)
 }
