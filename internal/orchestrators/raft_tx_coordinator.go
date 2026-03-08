@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/AnishMulay/sandstore/internal/communication"
@@ -16,6 +17,7 @@ import (
 type RaftTransactionCoordinator struct {
 	comm       communication.Communicator
 	replicator pmr.MetadataReplicator
+	txnChunks  sync.Map
 }
 
 var _ TransactionCoordinator = (*RaftTransactionCoordinator)(nil)
@@ -29,17 +31,19 @@ func NewRaftTransactionCoordinator(comm communication.Communicator, replicator p
 
 func (c *RaftTransactionCoordinator) NewTransaction(txnID string) TxHandle {
 	return &RaftTxHandle{
-		txnID:      txnID,
-		comm:       c.comm,
-		replicator: c.replicator,
+		coordinator: c,
+		txnID:       txnID,
+		comm:        c.comm,
+		replicator:  c.replicator,
 	}
 }
 
 type RaftTxHandle struct {
-	txnID      string
-	chunkID    string
-	comm       communication.Communicator
-	replicator pmr.MetadataReplicator
+	coordinator *RaftTransactionCoordinator
+	txnID       string
+	chunkID     string
+	comm        communication.Communicator
+	replicator  pmr.MetadataReplicator
 }
 
 var _ TxHandle = (*RaftTxHandle)(nil)
@@ -49,19 +53,23 @@ func (h *RaftTxHandle) Init(ctx context.Context, chunkID string, participants []
 	_ = participants
 
 	h.chunkID = chunkID
+	if h.coordinator != nil {
+		h.coordinator.txnChunks.Store(h.txnID, chunkID)
+	}
 	return nil
 }
 
 func (h *RaftTxHandle) Commit(ctx context.Context, metaUpdate *pms.MetadataOperation, participants []domain.ChunkLocation) error {
-	if h.chunkID == "" {
-		return fmt.Errorf("transaction %s not initialized", h.txnID)
+	chunkID, err := h.resolveChunkID()
+	if err != nil {
+		return err
 	}
 
 	envelope := rr.RaftCommandEnvelope{
 		Type: rr.PayloadChunkIntent,
 		ChunkIntent: &rr.ChunkIntentOperation{
 			TxnID:     h.txnID,
-			ChunkID:   h.chunkID,
+			ChunkID:   chunkID,
 			NodeIDs:   extractParticipantIDs(participants),
 			State:     rr.StateCommitted,
 			Timestamp: time.Now().UnixNano(),
@@ -77,7 +85,8 @@ func (h *RaftTxHandle) Commit(ctx context.Context, metaUpdate *pms.MetadataOpera
 		return fmt.Errorf("consensus commit failed: %w", err)
 	}
 
-	h.broadcastCommitAsync(h.txnID, h.chunkID, participants)
+	h.broadcastCommitAsync(h.txnID, chunkID, participants)
+	h.clearTxnChunk()
 
 	return nil
 }
@@ -85,11 +94,13 @@ func (h *RaftTxHandle) Commit(ctx context.Context, metaUpdate *pms.MetadataOpera
 func (h *RaftTxHandle) Abort(ctx context.Context, participants []domain.ChunkLocation) error {
 	_ = ctx
 
-	if h.chunkID == "" {
-		return fmt.Errorf("transaction %s not initialized", h.txnID)
+	chunkID, err := h.resolveChunkID()
+	if err != nil {
+		return err
 	}
 
-	h.broadcastAbortAsync(h.txnID, h.chunkID, participants)
+	h.broadcastAbortAsync(h.txnID, chunkID, participants)
+	h.clearTxnChunk()
 	return nil
 }
 
@@ -128,6 +139,28 @@ func (h *RaftTxHandle) broadcastAbortAsync(txnID string, chunkID string, partici
 			}
 			_, _ = h.comm.Send(ctx, participant.PhysicalEndpoint, msg)
 		}(participant)
+	}
+}
+
+func (h *RaftTxHandle) resolveChunkID() (string, error) {
+	if h.chunkID != "" {
+		return h.chunkID, nil
+	}
+	if h.coordinator != nil {
+		if chunkID, ok := h.coordinator.txnChunks.Load(h.txnID); ok {
+			if id, ok := chunkID.(string); ok && id != "" {
+				h.chunkID = id
+				return id, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("transaction %s not initialized", h.txnID)
+}
+
+func (h *RaftTxHandle) clearTxnChunk() {
+	if h.coordinator != nil {
+		h.coordinator.txnChunks.Delete(h.txnID)
 	}
 }
 

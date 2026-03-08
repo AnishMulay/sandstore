@@ -50,8 +50,8 @@ type ControlPlaneOrchestrator interface {
 	GetFsInfo(ctx context.Context) (*pms.FileSystemInfo, error)
 
 	PrepareFileWrite(ctx context.Context, inodeID string, offset int64, length int64) (*domain.WriteContext, error)
-	CommitFileWrite(ctx context.Context, txnID string, chunkID string, newEOF int64, isNewChunk bool) error
-	AbortFileWrite(ctx context.Context, txnID string) error
+	CommitFileWrite(ctx context.Context, txnID string, inodeID string, chunkID string, newEOF int64, isNewChunk bool, targets []domain.ChunkLocation) error
+	AbortFileWrite(ctx context.Context, txnID string, targets []domain.ChunkLocation) error
 
 	PrepareFileRead(ctx context.Context, inodeID string, offset int64) (*domain.ReadContext, error)
 }
