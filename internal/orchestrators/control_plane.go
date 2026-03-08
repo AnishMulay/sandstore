@@ -173,10 +173,13 @@ func (c *controlPlaneOrchestrator) PrepareFileRead(ctx context.Context, inodeID 
 	if err != nil {
 		return nil, err
 	}
+	if offset >= inode.FileSize {
+		return &domain.ReadContext{}, nil
+	}
 
 	chunkIdx := offset / c.chunkSize
 	if int(chunkIdx) >= len(inode.ChunkList) {
-		return nil, errors.New("read past EOF")
+		return &domain.ReadContext{}, nil
 	}
 
 	targetChunk := inode.ChunkList[chunkIdx]

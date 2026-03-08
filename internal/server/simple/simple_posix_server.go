@@ -164,6 +164,9 @@ func (s *SimpleServer) handleMessage(msg communication.Message) (*communication.
 		if err != nil {
 			return s.respond(nil, err)
 		}
+		if readCtx == nil || readCtx.ChunkID == "" {
+			return s.respond([]byte{}, nil)
+		}
 		data, err := s.dpo.ExecuteRead(ctx, readCtx.ChunkID, readCtx.TargetNodes)
 		return s.respond(data, err)
 

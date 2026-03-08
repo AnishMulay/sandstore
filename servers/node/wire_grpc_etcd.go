@@ -1,8 +1,3 @@
-//go:build grpc && etcd
-
-// This file is only compiled when both 'grpc' and 'etcd' build tags are set.
-// It keeps transport/cluster wiring modular at compile time.
-
 package node
 
 import (
