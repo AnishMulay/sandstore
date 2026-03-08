@@ -8,6 +8,8 @@ GOARCH ?= amd64
 REGISTRY_URL ?=
 K8S_IMAGE ?= $(REGISTRY_URL)/sandstore-node:$(PROFILE)-latest
 K8S_MANIFEST_DIR ?= deploy/k8s
+DOCKER_COMPOSE_FILES := deploy/docker/docker-compose.yaml deploy/docker/docker-compose-durability.yaml deploy/docker/etcd/docker-compose.yaml
+CLEAN_PORTS := 2379 2380 9001 9002 9003 8080 8081 8082
 
 SUPPORTED_PROFILES := default-etcd
 
@@ -169,10 +171,48 @@ kill:
 	-@pgrep -fal sandstore || true
 	-@pkill -f sandstore || true
 
-# clean: full local reset (containers + generated artifacts + runtime data)
-.PHONY: clean
-clean:
-	-@docker compose -f deploy/docker/docker-compose.yaml down -v --remove-orphans >/dev/null 2>&1 || true
-	-@docker compose -f deploy/docker/etcd/docker-compose.yaml down -v --remove-orphans >/dev/null 2>&1 || true
+.PHONY: clean-runtime
+clean-runtime:
+	@set -eu; \
+	echo "Stopping local sandstore processes..."; \
+	pkill -f '[s]andstore' >/dev/null 2>&1 || true; \
+	pkill -f '[o]pen-smoke' >/dev/null 2>&1 || true; \
+	pkill -f '[d]urability_smoke' >/dev/null 2>&1 || true; \
+	pkill -f '[d]urability-smoke' >/dev/null 2>&1 || true; \
+	if docker info >/dev/null 2>&1; then \
+		echo "Docker daemon reachable; tearing down project compose stacks..."; \
+		for compose_file in $(DOCKER_COMPOSE_FILES); do \
+			if [ -f "$$compose_file" ]; then \
+				echo "  - docker compose -f $$compose_file down -v --remove-orphans"; \
+				if ! docker compose -f "$$compose_file" down -v --remove-orphans; then \
+					echo "WARNING: failed to tear down $$compose_file" >&2; \
+				fi; \
+			fi; \
+		done; \
+	else \
+		echo "WARNING: Docker daemon is unavailable; skipping compose teardown." >&2; \
+		echo "WARNING: If you previously ran Docker-based sandstore flows, containers or port mappings may remain." >&2; \
+	fi; \
+	if command -v lsof >/dev/null 2>&1; then \
+		lingering_ports=""; \
+		for port in $(CLEAN_PORTS); do \
+			if lsof -nP -iTCP:$$port -sTCP:LISTEN >/dev/null 2>&1; then \
+				lingering_ports="$$lingering_ports $$port"; \
+			fi; \
+		done; \
+		if [ -n "$$lingering_ports" ]; then \
+			echo "WARNING: project-related ports still listening:$$lingering_ports" >&2; \
+			echo "Inspect with: lsof -nP -iTCP -sTCP:LISTEN | egrep ':(2379|2380|9001|9002|9003|8080|8081|8082) '" >&2; \
+		else \
+			echo "Project ports are clear."; \
+		fi; \
+	fi
+
+.PHONY: clean-artifacts
+clean-artifacts:
 	rm -rf ./bin ./run ./logs ./chunks ./.gocache ./.gomodcache ./.gocache-local ./.gomodcache-local
 	rm -f $(SANDSTORE_BINARY) $(CLIENT_BINARY) $(MCP_BINARY) $(OPEN_SMOKE_BINARY) $(DURABILITY_SMOKE_BINARY) $(LEGACY_CLIENT_BINARY) $(LEGACY_MCP_BINARY) $(LEGACY_OPEN_SMOKE_BINARY) $(LEGACY_DURABILITY_SMOKE_BINARY) config.yaml
+
+# clean: full local reset (containers + generated artifacts + runtime data)
+.PHONY: clean
+clean: clean-runtime clean-artifacts
