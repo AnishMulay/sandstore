@@ -6,14 +6,17 @@ import (
 	"time"
 
 	"github.com/AnishMulay/sandstore/internal/domain"
-	pfsinternal "github.com/AnishMulay/sandstore/internal/file_service/internal"
 	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
 	"github.com/google/uuid"
 )
 
 const defaultChunkSize int64 = 8 * 1024 * 1024
 
-var ErrCrossChunkWrite = errors.New("write spans multiple chunks")
+var (
+	ErrCrossChunkWrite = errors.New("write spans multiple chunks")
+	ErrInvalidLength   = errors.New("invalid length")
+	ErrIsDirectory     = errors.New("operation not permitted on a directory")
+)
 
 type controlPlaneOrchestrator struct {
 	metadataService   pms.MetadataService
@@ -73,7 +76,7 @@ func (c *controlPlaneOrchestrator) Stop() error {
 
 func (c *controlPlaneOrchestrator) PrepareFileWrite(ctx context.Context, inodeID string, offset int64, length int64) (*domain.WriteContext, error) {
 	if length < 0 {
-		return nil, pfsinternal.ErrInvalidLength
+		return nil, ErrInvalidLength
 	}
 	if !c.isWithinChunkBoundary(offset, length) {
 		return nil, ErrCrossChunkWrite
@@ -84,7 +87,7 @@ func (c *controlPlaneOrchestrator) PrepareFileWrite(ctx context.Context, inodeID
 		return nil, err
 	}
 	if inode.Type != pms.TypeFile {
-		return nil, pfsinternal.ErrIsDirectory
+		return nil, ErrIsDirectory
 	}
 
 	chunkIdx := offset / c.chunkSize

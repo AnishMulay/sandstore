@@ -2,11 +2,14 @@ package simple
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"time"
 
-	"github.com/AnishMulay/sandstore/internal/log_service"
 	pcs "github.com/AnishMulay/sandstore/internal/chunk_service"
+	"github.com/AnishMulay/sandstore/internal/domain"
 	pfsinternal "github.com/AnishMulay/sandstore/internal/file_service/internal"
+	"github.com/AnishMulay/sandstore/internal/log_service"
 	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
 	"github.com/google/uuid"
 )
@@ -103,7 +106,7 @@ func (s *SimpleFileService) Read(ctx context.Context, inodeID string, offset int
 		if int(i) >= len(inode.ChunkList) {
 			break // Should not happen if FileSize is correct
 		}
-		chunkID := inode.ChunkList[i]
+		chunkID := inode.ChunkList[i].ChunkID
 
 		// Calculate fetch logic
 		chunkPos := i * s.chunkSize
@@ -118,7 +121,7 @@ func (s *SimpleFileService) Read(ctx context.Context, inodeID string, offset int
 		}
 
 		// Fetch Chunk
-		data, err := s.cs.ReadChunk(chunkID)
+		data, err := s.cs.ReadChunk(ctx, chunkID)
 		if err != nil {
 			s.ls.Error(log_service.LogEvent{
 				Message:  "Failed to read chunk",
@@ -163,12 +166,12 @@ func (s *SimpleFileService) Write(ctx context.Context, inodeID string, offset in
 	maxChunkIdx := (endPos - 1) / s.chunkSize
 
 	// Clone the list to modify
-	newChunkList := make([]string, len(inode.ChunkList))
+	newChunkList := make([]domain.ChunkDescriptor, len(inode.ChunkList))
 	copy(newChunkList, inode.ChunkList)
 
 	for int64(len(newChunkList)) <= maxChunkIdx {
 		newID := uuid.New().String()
-		newChunkList = append(newChunkList, newID)
+		newChunkList = append(newChunkList, domain.ChunkDescriptor{ChunkID: newID})
 	}
 
 	// 3. Perform Writes
@@ -177,7 +180,7 @@ func (s *SimpleFileService) Write(ctx context.Context, inodeID string, offset in
 	dataOffset := 0
 
 	for i := startChunkIdx; i <= endChunkIdx; i++ {
-		chunkID := newChunkList[i]
+		chunkID := newChunkList[i].ChunkID
 
 		// Calculate boundaries relative to this chunk
 		chunkStartPos := i * s.chunkSize
@@ -215,7 +218,7 @@ func (s *SimpleFileService) Write(ctx context.Context, inodeID string, offset in
 			// We need to read previous data
 			var existingData []byte
 			if !isNewChunk {
-				existingData, err = s.cs.ReadChunk(chunkID)
+				existingData, err = s.cs.ReadChunk(ctx, chunkID)
 				if err != nil {
 					// If read fails, we might assume it's empty/lost?
 					// Strict consistency says fail.
@@ -251,7 +254,12 @@ func (s *SimpleFileService) Write(ctx context.Context, inodeID string, offset in
 		}
 
 		// Write to Data Plane
-		if err := s.cs.WriteChunk(chunkID, finalChunkData); err != nil {
+		txnID := "legacy-" + chunkID + "-" + time.Now().Format("20060102150405.000000000")
+		checksum := checksumHex(finalChunkData)
+		if err := s.cs.PrepareChunk(ctx, txnID, chunkID, finalChunkData, checksum); err != nil {
+			return 0, pfsinternal.ErrChunkActionFailed
+		}
+		if err := s.cs.CommitChunk(ctx, txnID, chunkID); err != nil {
 			return 0, pfsinternal.ErrChunkActionFailed
 		}
 
@@ -303,12 +311,12 @@ func (s *SimpleFileService) Remove(ctx context.Context, parentInodeID string, na
 	// 3. Garbage Collection (Simple/Sync)
 	// Only delete chunks if it was a file
 	if inode.Type == pms.TypeFile {
-		for _, chunkID := range inode.ChunkList {
+		for _, chunk := range inode.ChunkList {
 			// Best effort delete
-			if err := s.cs.DeleteChunk(chunkID); err != nil {
+			if err := s.cs.DeleteChunkLocal(ctx, chunk.ChunkID); err != nil {
 				s.ls.Warn(log_service.LogEvent{
 					Message:  "Failed to GC chunk after remove",
-					Metadata: map[string]any{"chunkID": chunkID},
+					Metadata: map[string]any{"chunkID": chunk.ChunkID},
 				})
 			}
 		}
@@ -359,4 +367,9 @@ func (s *SimpleFileService) GetFsStat(ctx context.Context) (*pms.FileSystemStats
 
 func (s *SimpleFileService) GetFsInfo(ctx context.Context) (*pms.FileSystemInfo, error) {
 	return s.ms.GetFsInfo(ctx)
+}
+
+func checksumHex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }

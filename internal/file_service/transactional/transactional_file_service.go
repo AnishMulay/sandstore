@@ -13,6 +13,7 @@ import (
 
 	"github.com/AnishMulay/sandstore/internal/cluster_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
+	"github.com/AnishMulay/sandstore/internal/domain"
 	filesvc "github.com/AnishMulay/sandstore/internal/file_service"
 	pfsinternal "github.com/AnishMulay/sandstore/internal/file_service/internal"
 	"github.com/AnishMulay/sandstore/internal/log_service"
@@ -104,7 +105,7 @@ func (s *TransactionalFileService) Write(ctx context.Context, inodeID string, of
 	if isNewChunk {
 		chunkID = uuid.NewString()
 	} else {
-		chunkID = inode.ChunkList[chunkIdx]
+		chunkID = inode.ChunkList[chunkIdx].ChunkID
 	}
 
 	targetNodes, err := s.selectPrepareTargets()
@@ -180,7 +181,7 @@ func (s *TransactionalFileService) Read(ctx context.Context, inodeID string, off
 			break
 		}
 
-		chunkID := inode.ChunkList[i]
+		chunkID := inode.ChunkList[i].ChunkID
 		nodeIDs, err := s.ms.GetChunkPlacement(ctx, chunkID)
 		if err != nil || len(nodeIDs) == 0 {
 			return nil, fmt.Errorf("chunk placement not found in metadata")
@@ -448,13 +449,13 @@ func (s *TransactionalFileService) selectPrepareTargets() ([]cluster_service.Nod
 }
 
 func (s *TransactionalFileService) buildMetadataUpdate(inode *pms.Inode, chunkID string, chunkIdx int64, newEOF int64) *pms.MetadataOperation {
-	newChunkList := make([]string, len(inode.ChunkList))
+	newChunkList := make([]domain.ChunkDescriptor, len(inode.ChunkList))
 	copy(newChunkList, inode.ChunkList)
 
 	for int64(len(newChunkList)) <= chunkIdx {
-		newChunkList = append(newChunkList, "")
+		newChunkList = append(newChunkList, domain.ChunkDescriptor{})
 	}
-	newChunkList[chunkIdx] = chunkID
+	newChunkList[chunkIdx] = domain.ChunkDescriptor{ChunkID: chunkID}
 
 	newSize := inode.FileSize
 	if newEOF > newSize {

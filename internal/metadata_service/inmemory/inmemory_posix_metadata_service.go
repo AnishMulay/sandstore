@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AnishMulay/sandstore/internal/domain"
 	"github.com/AnishMulay/sandstore/internal/log_service"
 	pmr "github.com/AnishMulay/sandstore/internal/metadata_replicator"
 	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
@@ -176,7 +177,7 @@ func (s *InMemoryMetadataService) applyCreate(op pms.MetadataOperation) error {
 		inode.LinkCount = 2 // Self + Parent link
 		parent.LinkCount++  // Parent gets a new link (..)
 	} else {
-		inode.ChunkList = []string{}
+		inode.ChunkList = []domain.ChunkDescriptor{}
 	}
 
 	s.inodes[op.InodeID] = inode
@@ -551,7 +552,7 @@ func (s *InMemoryMetadataService) GetFsInfo(ctx context.Context) (*pms.FileSyste
 	}, nil
 }
 
-func (s *InMemoryMetadataService) GetChunkList(ctx context.Context, inodeID string) ([]string, error) {
+func (s *InMemoryMetadataService) GetChunkList(ctx context.Context, inodeID string) ([]domain.ChunkDescriptor, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -715,7 +716,7 @@ func (s *InMemoryMetadataService) SetAttributes(ctx context.Context, inodeID str
 	return s.GetAttributes(ctx, inodeID)
 }
 
-func (s *InMemoryMetadataService) UpdateInode(ctx context.Context, inodeID string, newSize int64, newChunkList []string, mtime int64) error {
+func (s *InMemoryMetadataService) UpdateInode(ctx context.Context, inodeID string, newSize int64, newChunkList []domain.ChunkDescriptor, mtime int64) error {
 	op := pms.MetadataOperation{
 		Type:         pms.OpUpdateInode,
 		InodeID:      inodeID,
