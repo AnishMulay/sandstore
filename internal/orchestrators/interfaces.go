@@ -73,4 +73,10 @@ type ControlPlaneOrchestrator interface {
 type DataPlaneOrchestrator interface {
 	ExecuteWrite(ctx context.Context, txnID string, chunkID string, offset int64, data []byte, targets []domain.ChunkLocation, isNewChunk bool) error
 	ExecuteRead(ctx context.Context, chunkID string, targets []domain.ChunkLocation) ([]byte, error)
+	HandlePrepareChunk(ctx context.Context, txnID string, chunkID string, data []byte, checksum string) error
+	HandleCommitChunk(ctx context.Context, txnID string, chunkID string) error
+	HandleAbortChunk(ctx context.Context, txnID string, chunkID string) error
+	HandleReadChunk(ctx context.Context, chunkID string) ([]byte, error)
+	HandleDeleteChunk(ctx context.Context, chunkID string) error
+	HandleLegacyChunkWrite(ctx context.Context, chunkID string, data []byte) error
 }

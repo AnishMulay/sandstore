@@ -106,12 +106,12 @@ func Build(opts Options) runnable {
 
 	placementStrategy := orchestrators.NewLegacySortedPlacementStrategy(clusterService, replicaCount)
 	endpointResolver := orchestrators.NewStaticEndpointResolver(clusterService)
-	dpo := orchestrators.NewRaftDataPlaneOrchestrator(comm, endpointResolver, chunkSize)
+	dpo := orchestrators.NewRaftDataPlaneOrchestrator(comm, endpointResolver, chunkSize, cs)
 	txnCoordinator := orchestrators.NewRaftTransactionCoordinator(comm, metaRepl)
 	cpo := orchestrators.NewControlPlaneOrchestrator(ms, placementStrategy, txnCoordinator, metaRepl, chunkSize, replicaCount)
 
 	// 6. Server (The Gateway)
-	srv := simpleserver.NewSimpleServer(comm, cpo, dpo, cs, ls)
+	srv := simpleserver.NewSimpleServer(comm, cpo, dpo, ls)
 
 	return &singleNodeServer{
 		server:         srv,
