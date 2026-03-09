@@ -22,7 +22,7 @@ import (
 const heartbeatInterval = 50 * time.Millisecond
 
 type DurableRaftReplicator struct {
-	mu sync.Mutex
+	mu sync.RWMutex
 
 	id             string
 	clusterService cluster_service.ClusterService
@@ -923,6 +923,12 @@ func (r *DurableRaftReplicator) findLeaderAddrLocked(leaderID string) string {
 		}
 	}
 	return ""
+}
+
+func (r *DurableRaftReplicator) GetLeaderAddress() string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.findLeaderAddrLocked(r.leaderID)
 }
 
 func (r *DurableRaftReplicator) getLastLogInfoLocked() (uint64, uint64) {

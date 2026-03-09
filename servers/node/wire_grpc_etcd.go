@@ -111,7 +111,7 @@ func Build(opts Options) runnable {
 	cpo := orchestrators.NewControlPlaneOrchestrator(ms, placementStrategy, txnCoordinator, metaRepl, chunkSize, replicaCount)
 
 	// 6. Server (The Gateway)
-	srv := simpleserver.NewSimpleServer(comm, cpo, dpo, ls)
+	srv := simpleserver.NewSimpleServer(comm, cpo, dpo, ls, metaRepl)
 
 	return &singleNodeServer{
 		server:         srv,

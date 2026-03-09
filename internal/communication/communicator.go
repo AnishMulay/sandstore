@@ -125,6 +125,7 @@ const (
 	CodeBadRequest    SandCode = "BAD_REQUEST"
 	CodeNotFound      SandCode = "NOT_FOUND"
 	CodeAlreadyExists SandCode = "ALREADY_EXISTS"
+	CodeNotLeader     SandCode = "NOT_LEADER"
 	CodeInternal      SandCode = "INTERNAL"
 	CodeUnavailable   SandCode = "UNAVAILABLE"
 )
