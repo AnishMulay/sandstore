@@ -32,7 +32,7 @@ func envInt(name string, fallback int) int {
 func nodeAddresses() []string {
 	raw := strings.TrimSpace(os.Getenv("SANDSTORE_NODE_ADDRS"))
 	if raw == "" {
-		return []string{"node-1:8080", "node-2:8080", "node-3:8080"}
+		return []string{"127.0.0.1:8080", "127.0.0.1:8081", "127.0.0.1:8082"}
 	}
 	parts := strings.Split(raw, ",")
 	addrs := make([]string, 0, len(parts))
@@ -43,7 +43,7 @@ func nodeAddresses() []string {
 		}
 	}
 	if len(addrs) == 0 {
-		return []string{"node-1:8080", "node-2:8080", "node-3:8080"}
+		return []string{"127.0.0.1:8080", "127.0.0.1:8081", "127.0.0.1:8082"}
 	}
 	return addrs
 }
@@ -126,6 +126,47 @@ func newClientForAddr(addr string, comm *grpccomm.GRPCCommunicator) (*sandlib.Sa
 	return sandlib.NewSandstoreClient([]string{addr}, comm)
 }
 
+func newClient(comm *grpccomm.GRPCCommunicator) (*sandlib.SandstoreClient, error) {
+	return sandlib.NewSandstoreClient(nodeAddresses(), comm)
+}
+
+func bootstrapClient(comm *grpccomm.GRPCCommunicator, timeout time.Duration) (*sandlib.SandstoreClient, error) {
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		client, err := newClient(comm)
+		if err == nil {
+			return client, nil
+		}
+		lastErr = err
+		time.Sleep(500 * time.Millisecond)
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("client bootstrap timed out after %s", timeout)
+	}
+	return nil, lastErr
+}
+
+func currentLeaderService(comm *grpccomm.GRPCCommunicator, fallback string) string {
+	counts := make(map[string]int)
+	bestAddr := fallback
+	bestCount := 0
+
+	for _, addr := range nodeAddresses() {
+		client, err := newClientForAddr(addr, comm)
+		if err != nil || client.ServerAddr == "" {
+			continue
+		}
+		counts[client.ServerAddr]++
+		if counts[client.ServerAddr] > bestCount {
+			bestCount = counts[client.ServerAddr]
+			bestAddr = client.ServerAddr
+		}
+	}
+
+	return serviceFromAddr(bestAddr)
+}
+
 func dockerAction(action string, services ...string) error {
 	args := []string{action}
 	for _, svc := range services {
@@ -138,37 +179,17 @@ func dockerAction(action string, services ...string) error {
 	return runDockerCmd(args...)
 }
 
-func waitForLeader(comm *grpccomm.GRPCCommunicator, timeout time.Duration) (*sandlib.SandstoreClient, string, error) {
-	deadline := time.Now().Add(timeout)
-	probe := fmt.Sprintf("/durability_probe_%d", time.Now().UnixNano())
-	for time.Now().Before(deadline) {
-		for _, addr := range nodeAddresses() {
-			c, err := newClientForAddr(addr, comm)
-			if err != nil {
-				continue
-			}
-			fd, err := c.Open(probe, os.O_CREATE|os.O_RDWR)
-			if err == nil {
-				_ = c.Close(fd)
-				return c, addr, nil
-			}
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
-	return nil, "", fmt.Errorf("leader not discovered within %s", timeout)
-}
-
 func createFiles(comm *grpccomm.GRPCCommunicator, client *sandlib.SandstoreClient, prefix string, count int) (*sandlib.SandstoreClient, string, error) {
 	lastPath := ""
 	for i := 0; i < count; i++ {
 		path := fmt.Sprintf("/%s_%06d", prefix, i)
 		var lastErr error
-		for attempt := 0; attempt < 8; attempt++ {
+		for attempt := 0; attempt < 20; attempt++ {
 			fd, err := client.Open(path, os.O_CREATE|os.O_RDWR)
 			if err == nil {
 				if err := client.Close(fd); err != nil {
 					lastErr = fmt.Errorf("close %s: %w", path, err)
-					time.Sleep(200 * time.Millisecond)
+					time.Sleep(500 * time.Millisecond)
 					continue
 				}
 				lastErr = nil
@@ -176,11 +197,11 @@ func createFiles(comm *grpccomm.GRPCCommunicator, client *sandlib.SandstoreClien
 			}
 			lastErr = err
 
-			nextClient, _, leaderErr := waitForLeader(comm, 20*time.Second)
-			if leaderErr == nil {
+			nextClient, initErr := bootstrapClient(comm, 20*time.Second)
+			if initErr == nil {
 				client = nextClient
 			}
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(500 * time.Millisecond)
 		}
 		if lastErr != nil {
 			return client, "", fmt.Errorf("create %s: %w", path, lastErr)
@@ -281,10 +302,10 @@ func main() {
 
 	must(runDockerCmd("version"))
 
-	client, leaderAddr, err := waitForLeader(comm, 60*time.Second)
+	client, err := bootstrapClient(comm, 60*time.Second)
 	must(err)
-	leaderService := serviceFromAddr(leaderAddr)
-	log.Printf("Leader discovered at %s", leaderAddr)
+	leaderService := currentLeaderService(comm, client.ServerAddr)
+	log.Printf("Client bootstrapped with leader route %s", client.ServerAddr)
 
 	// Test 1: Election Amnesia
 	log.Println("--- Test Case 1: Election Amnesia ---")
@@ -296,8 +317,9 @@ func main() {
 	must(dockerAction("kill", defaultNodeServices...))
 	time.Sleep(2 * time.Second)
 	must(dockerAction("start", defaultNodeServices...))
-	client, _, err = waitForLeader(comm, 60*time.Second)
+	client, err = bootstrapClient(comm, 60*time.Second)
 	must(err)
+	leaderService = currentLeaderService(comm, client.ServerAddr)
 
 	fd, err = client.Open(testPath, os.O_RDWR)
 	must(err)
@@ -323,9 +345,9 @@ func main() {
 	must(dockerAction("unpause", followers...))
 	must(dockerAction("start", leaderService))
 
-	client, leaderAddr, err = waitForLeader(comm, 60*time.Second)
+	client, err = bootstrapClient(comm, 60*time.Second)
 	must(err)
-	leaderService = serviceFromAddr(leaderAddr)
+	leaderService = currentLeaderService(comm, client.ServerAddr)
 
 	expectedVisible, err := waitForConvergedPathState(comm, partialPath, 45*time.Second)
 	must(err)
