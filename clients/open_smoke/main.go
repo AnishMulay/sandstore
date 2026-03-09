@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,22 +21,43 @@ import (
 
 const maxBufferSize = 2 * 1024 * 1024
 
+func parseSeedAddrs(raw string) []string {
+	parts := strings.Split(raw, ",")
+	seeds := make([]string, 0, len(parts))
+	for _, part := range parts {
+		addr := strings.TrimSpace(part)
+		if addr != "" {
+			seeds = append(seeds, addr)
+		}
+	}
+	return seeds
+}
+
 func main() {
-	targetFlag := flag.String("target", "", "Sand Store target address (host:port). Overrides SANDSTORE_ADDR.")
+	targetFlag := flag.String("target", "", "Sand Store target seed address(es), comma-separated host:port. Overrides SANDSTORE_SEEDS and SANDSTORE_ADDR.")
 	flag.Parse()
 
-	serverAddr := *targetFlag
-	if serverAddr == "" {
-		serverAddr = os.Getenv("SANDSTORE_ADDR")
+	targetsRaw := strings.TrimSpace(*targetFlag)
+	if targetsRaw == "" {
+		targetsRaw = strings.TrimSpace(os.Getenv("SANDSTORE_SEEDS"))
 	}
-	if serverAddr == "" {
-		serverAddr = "localhost:8080"
+	if targetsRaw == "" {
+		targetsRaw = strings.TrimSpace(os.Getenv("SANDSTORE_ADDR"))
 	}
+
+	seeds := parseSeedAddrs(targetsRaw)
+	if len(seeds) == 0 {
+		seeds = []string{"localhost:8080"}
+	}
+	serverAddr := strings.Join(seeds, ",")
 
 	logDir := filepath.Join("run", "smoke", "logs")
 	ls := locallog.NewLocalDiscLogService(logDir, "smoke", logservice.InfoLevel)
 	comm := grpccomm.NewGRPCCommunicator(":0", ls)
-	client := sandlib.NewSandstoreClient(serverAddr, comm)
+	client, err := sandlib.NewSandstoreClient(seeds, comm)
+	if err != nil {
+		log.Fatalf("NewSandstoreClient failed for %s: %v", serverAddr, err)
+	}
 
 	path := fmt.Sprintf("/sandlib-smoke-open-read-write-%d.txt", time.Now().UnixNano())
 
