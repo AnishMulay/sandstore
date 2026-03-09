@@ -56,15 +56,10 @@ func (r *ConvergedRouter) SetRouteHint(hint string) {
 
 func (r *ConvergedRouter) fetchTopologyFromSeeds(ctx context.Context) (string, []string, error) {
 	for _, seed := range r.seeds {
-		reqBody, err := json.Marshal(MsgTopologyRequest{TopologyType: "converged"})
-		if err != nil {
-			return "", nil, fmt.Errorf("marshal topology request: %w", err)
-		}
-
 		req := communication.Message{
 			From:    "sandlib",
 			Type:    "topology_request",
-			Payload: reqBody,
+			Payload: MsgTopologyRequest{TopologyType: "converged"},
 		}
 
 		resp, err := r.comm.Send(ctx, seed, req)

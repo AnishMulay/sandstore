@@ -122,6 +122,10 @@ func serviceFromAddr(addr string) string {
 	return host
 }
 
+func newClientForAddr(addr string, comm *grpccomm.GRPCCommunicator) (*sandlib.SandstoreClient, error) {
+	return sandlib.NewSandstoreClient([]string{addr}, comm)
+}
+
 func dockerAction(action string, services ...string) error {
 	args := []string{action}
 	for _, svc := range services {
@@ -139,7 +143,10 @@ func waitForLeader(comm *grpccomm.GRPCCommunicator, timeout time.Duration) (*san
 	probe := fmt.Sprintf("/durability_probe_%d", time.Now().UnixNano())
 	for time.Now().Before(deadline) {
 		for _, addr := range nodeAddresses() {
-			c := sandlib.NewSandstoreClient(addr, comm)
+			c, err := newClientForAddr(addr, comm)
+			if err != nil {
+				continue
+			}
 			fd, err := c.Open(probe, os.O_CREATE|os.O_RDWR)
 			if err == nil {
 				_ = c.Close(fd)
@@ -197,7 +204,10 @@ func waitForPathOnNode(comm *grpccomm.GRPCCommunicator, addr string, path string
 }
 
 func pathVisibleOnNode(comm *grpccomm.GRPCCommunicator, addr string, path string) (bool, error) {
-	c := sandlib.NewSandstoreClient(addr, comm)
+	c, err := newClientForAddr(addr, comm)
+	if err != nil {
+		return false, nil
+	}
 	fd, err := c.Open(path, os.O_RDWR)
 	if err != nil {
 		return false, nil
