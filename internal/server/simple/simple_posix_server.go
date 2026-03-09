@@ -10,7 +10,6 @@ import (
 	"reflect"
 	"time"
 
-	crep "github.com/AnishMulay/sandstore/internal/chunk_replicator/default_replicator"
 	pcs "github.com/AnishMulay/sandstore/internal/chunk_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	grpccomm "github.com/AnishMulay/sandstore/internal/communication/grpc"
@@ -27,8 +26,6 @@ type SimpleServer struct {
 	dpo       orchestrators.DataPlaneOrchestrator
 	cs        pcs.ChunkService
 	ls        log_service.LogService
-	metaRepl  any
-	chunkRepl *crep.DefaultChunkReplicator
 }
 
 func NewSimpleServer(
@@ -37,17 +34,13 @@ func NewSimpleServer(
 	dpo orchestrators.DataPlaneOrchestrator,
 	cs pcs.ChunkService,
 	ls log_service.LogService,
-	metaRepl any,
-	chunkRepl *crep.DefaultChunkReplicator,
 ) *SimpleServer {
 	return &SimpleServer{
-		comm:      comm,
-		cpo:       cpo,
-		dpo:       dpo,
-		cs:        cs,
-		ls:        ls,
-		metaRepl:  metaRepl,
-		chunkRepl: chunkRepl,
+		comm: comm,
+		cpo:  cpo,
+		dpo:  dpo,
+		cs:   cs,
+		ls:   ls,
 	}
 }
 
@@ -307,33 +300,18 @@ func (s *SimpleServer) handleMessage(msg communication.Message) (*communication.
 	// --- REPLICATOR OPERATIONS (Raft) ---
 	case ps.MsgRaftRequestVote:
 		req := msg.Payload.(raft.RequestVoteArgs)
-		if repl, ok := s.metaRepl.(interface {
-			HandleRequestVote(raft.RequestVoteArgs) (*raft.RequestVoteReply, error)
-		}); ok {
-			res, err := repl.HandleRequestVote(req)
-			return s.respond(res, err)
-		}
-		return s.respond(nil, errors.New("not implemented"))
+		res, err := s.cpo.HandleConsensusRequestVote(ctx, req)
+		return s.respond(res, err)
 
 	case ps.MsgRaftAppendEntries:
 		req := msg.Payload.(communication.AppendEntriesRequest)
-		if repl, ok := s.metaRepl.(interface {
-			HandleAppendEntries(communication.AppendEntriesRequest) (*raft.AppendEntriesReply, error)
-		}); ok {
-			res, err := repl.HandleAppendEntries(req)
-			return s.respond(res, err)
-		}
-		return s.respond(nil, errors.New("not implemented"))
+		res, err := s.cpo.HandleConsensusAppendEntries(ctx, req)
+		return s.respond(res, err)
 
 	case ps.MsgRaftInstallSnapshot:
 		req := msg.Payload.(communication.InstallSnapshotRequest)
-		if repl, ok := s.metaRepl.(interface {
-			HandleInstallSnapshot(communication.InstallSnapshotRequest) (*raft.InstallSnapshotReply, error)
-		}); ok {
-			res, err := repl.HandleInstallSnapshot(req)
-			return s.respond(res, err)
-		}
-		return s.respond(nil, errors.New("not implemented"))
+		res, err := s.cpo.HandleConsensusInstallSnapshot(ctx, req)
+		return s.respond(res, err)
 
 	default:
 		return &communication.Response{

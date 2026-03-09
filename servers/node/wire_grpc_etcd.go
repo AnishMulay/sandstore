@@ -13,7 +13,6 @@ import (
 	logservice "github.com/AnishMulay/sandstore/internal/log_service"
 	locallog "github.com/AnishMulay/sandstore/internal/log_service/localdisc"
 
-	chunkrepl "github.com/AnishMulay/sandstore/internal/chunk_replicator/default_replicator"
 	chunkservice "github.com/AnishMulay/sandstore/internal/chunk_service/local_disc"
 	durableraft "github.com/AnishMulay/sandstore/internal/metadata_replicator/durable_raft"
 	metadataservice "github.com/AnishMulay/sandstore/internal/metadata_service/bolt"
@@ -95,13 +94,11 @@ func Build(opts Options) runnable {
 	snapshotStore := durableraft.NewFileSnapshotStore(opts.DataDir + "/raft_snapshot.bin")
 
 	metaRepl := durableraft.NewDurableRaftReplicator(opts.NodeID, clusterService, comm, ls, raftConfig, logStore, stableStore, snapshotStore, ms)
-	chunkRepl := chunkrepl.NewDefaultChunkReplicator(clusterService, comm, ls)
 
 	ms.SetReplicator(metaRepl)
 	chunkDir := opts.DataDir + "/chunks/" + opts.NodeID
 
 	// cs now implements the 2PC interface (Prepare, Commit, Abort)
-	// chunkRepl is no longer used by ChunkService, it's strictly local.
 	cs := chunkservice.NewLocalDiscChunkService(chunkDir, ls)
 
 	chunkSize := int64(8 * 1024 * 1024) // 8MB default
@@ -111,10 +108,10 @@ func Build(opts Options) runnable {
 	endpointResolver := orchestrators.NewStaticEndpointResolver(clusterService)
 	dpo := orchestrators.NewRaftDataPlaneOrchestrator(comm, endpointResolver, chunkSize)
 	txnCoordinator := orchestrators.NewRaftTransactionCoordinator(comm, metaRepl)
-	cpo := orchestrators.NewControlPlaneOrchestrator(ms, placementStrategy, txnCoordinator, chunkSize, replicaCount)
+	cpo := orchestrators.NewControlPlaneOrchestrator(ms, placementStrategy, txnCoordinator, metaRepl, chunkSize, replicaCount)
 
 	// 6. Server (The Gateway)
-	srv := simpleserver.NewSimpleServer(comm, cpo, dpo, cs, ls, metaRepl, chunkRepl)
+	srv := simpleserver.NewSimpleServer(comm, cpo, dpo, cs, ls)
 
 	return &singleNodeServer{
 		server:         srv,
