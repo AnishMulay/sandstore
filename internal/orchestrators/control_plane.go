@@ -5,8 +5,10 @@ import (
 	"errors"
 	"time"
 
+	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/domain"
 	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
+	raft "github.com/AnishMulay/sandstore/internal/metadata_replicator/raft_replicator"
 	"github.com/google/uuid"
 )
 
@@ -22,6 +24,7 @@ type controlPlaneOrchestrator struct {
 	metadataService   pms.MetadataService
 	placementStrategy PlacementStrategy
 	txnCoordinator    TransactionCoordinator
+	consensusHandler  ConsensusMessageHandler
 	chunkSize         int64
 	replicaCount      int
 }
@@ -32,6 +35,7 @@ func NewControlPlaneOrchestrator(
 	metadataService pms.MetadataService,
 	placementStrategy PlacementStrategy,
 	txnCoordinator TransactionCoordinator,
+	consensusHandler ConsensusMessageHandler,
 	chunkSize int64,
 	replicaCount int,
 ) *controlPlaneOrchestrator {
@@ -46,6 +50,7 @@ func NewControlPlaneOrchestrator(
 		metadataService:   metadataService,
 		placementStrategy: placementStrategy,
 		txnCoordinator:    txnCoordinator,
+		consensusHandler:  consensusHandler,
 		chunkSize:         chunkSize,
 		replicaCount:      replicaCount,
 	}
@@ -244,6 +249,30 @@ func (c *controlPlaneOrchestrator) GetFsStat(ctx context.Context) (*pms.FileSyst
 
 func (c *controlPlaneOrchestrator) GetFsInfo(ctx context.Context) (*pms.FileSystemInfo, error) {
 	return c.metadataService.GetFsInfo(ctx)
+}
+
+func (c *controlPlaneOrchestrator) HandleConsensusRequestVote(ctx context.Context, req raft.RequestVoteArgs) (*raft.RequestVoteReply, error) {
+	if c.consensusHandler == nil {
+		return nil, errors.New("consensus handler not configured")
+	}
+
+	return c.consensusHandler.HandleRequestVote(ctx, req)
+}
+
+func (c *controlPlaneOrchestrator) HandleConsensusAppendEntries(ctx context.Context, req communication.AppendEntriesRequest) (*raft.AppendEntriesReply, error) {
+	if c.consensusHandler == nil {
+		return nil, errors.New("consensus handler not configured")
+	}
+
+	return c.consensusHandler.HandleAppendEntries(ctx, req)
+}
+
+func (c *controlPlaneOrchestrator) HandleConsensusInstallSnapshot(ctx context.Context, req communication.InstallSnapshotRequest) (*raft.InstallSnapshotReply, error) {
+	if c.consensusHandler == nil {
+		return nil, errors.New("consensus handler not configured")
+	}
+
+	return c.consensusHandler.HandleInstallSnapshot(ctx, req)
 }
 
 func (c *controlPlaneOrchestrator) isWithinChunkBoundary(offset int64, length int64) bool {

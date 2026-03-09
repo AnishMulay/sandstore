@@ -654,7 +654,8 @@ func (r *DurableRaftReplicator) applyLogsLocked() {
 	}
 }
 
-func (r *DurableRaftReplicator) HandleAppendEntries(req communication.AppendEntriesRequest) (*raft_replicator.AppendEntriesReply, error) {
+func (r *DurableRaftReplicator) HandleAppendEntries(ctx context.Context, req communication.AppendEntriesRequest) (*raft_replicator.AppendEntriesReply, error) {
+	_ = ctx
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -759,7 +760,8 @@ func (r *DurableRaftReplicator) HandleAppendEntries(req communication.AppendEntr
 	return reply, nil
 }
 
-func (r *DurableRaftReplicator) HandleRequestVote(req raft_replicator.RequestVoteArgs) (*raft_replicator.RequestVoteReply, error) {
+func (r *DurableRaftReplicator) HandleRequestVote(ctx context.Context, req raft_replicator.RequestVoteArgs) (*raft_replicator.RequestVoteReply, error) {
+	_ = ctx
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -789,7 +791,8 @@ func (r *DurableRaftReplicator) HandleRequestVote(req raft_replicator.RequestVot
 	return reply, nil
 }
 
-func (r *DurableRaftReplicator) HandleInstallSnapshot(req communication.InstallSnapshotRequest) (*raft_replicator.InstallSnapshotReply, error) {
+func (r *DurableRaftReplicator) HandleInstallSnapshot(ctx context.Context, req communication.InstallSnapshotRequest) (*raft_replicator.InstallSnapshotReply, error) {
+	_ = ctx
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

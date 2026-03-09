@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sync"
+	"time"
 
+	pcs "github.com/AnishMulay/sandstore/internal/chunk_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/domain"
 )
@@ -15,16 +17,48 @@ type RaftDataPlaneOrchestrator struct {
 	comm             communication.Communicator
 	endpointResolver EndpointResolver
 	chunkSize        int64
+	cs               pcs.ChunkService
 }
 
 var _ DataPlaneOrchestrator = (*RaftDataPlaneOrchestrator)(nil)
 
-func NewRaftDataPlaneOrchestrator(comm communication.Communicator, endpointResolver EndpointResolver, chunkSize int64) *RaftDataPlaneOrchestrator {
+func NewRaftDataPlaneOrchestrator(comm communication.Communicator, endpointResolver EndpointResolver, chunkSize int64, cs pcs.ChunkService) *RaftDataPlaneOrchestrator {
 	return &RaftDataPlaneOrchestrator{
 		comm:             comm,
 		endpointResolver: endpointResolver,
 		chunkSize:        chunkSize,
+		cs:               cs,
 	}
+}
+
+func (d *RaftDataPlaneOrchestrator) HandlePrepareChunk(ctx context.Context, txnID string, chunkID string, data []byte, checksum string) error {
+	return d.cs.PrepareChunk(ctx, txnID, chunkID, data, checksum)
+}
+
+func (d *RaftDataPlaneOrchestrator) HandleCommitChunk(ctx context.Context, txnID string, chunkID string) error {
+	return d.cs.CommitChunk(ctx, txnID, chunkID)
+}
+
+func (d *RaftDataPlaneOrchestrator) HandleAbortChunk(ctx context.Context, txnID string, chunkID string) error {
+	return d.cs.AbortChunk(ctx, txnID, chunkID)
+}
+
+func (d *RaftDataPlaneOrchestrator) HandleReadChunk(ctx context.Context, chunkID string) ([]byte, error) {
+	return d.cs.ReadChunk(ctx, chunkID)
+}
+
+func (d *RaftDataPlaneOrchestrator) HandleDeleteChunk(ctx context.Context, chunkID string) error {
+	return d.cs.DeleteChunkLocal(ctx, chunkID)
+}
+
+func (d *RaftDataPlaneOrchestrator) HandleLegacyChunkWrite(ctx context.Context, chunkID string, data []byte) error {
+	txnID := "legacy-" + chunkID + "-" + time.Now().Format("20060102150405.000000000")
+	checksum := d.calculateChecksum(data)
+	err := d.cs.PrepareChunk(ctx, txnID, chunkID, data, checksum)
+	if err == nil {
+		err = d.cs.CommitChunk(ctx, txnID, chunkID)
+	}
+	return err
 }
 
 func (d *RaftDataPlaneOrchestrator) ExecuteWrite(

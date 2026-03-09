@@ -3,8 +3,10 @@ package orchestrators
 import (
 	"context"
 
+	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/domain"
 	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
+	raft "github.com/AnishMulay/sandstore/internal/metadata_replicator/raft_replicator"
 )
 
 // PlacementStrategy determines "WHO" holds the data (Topology Rules).
@@ -27,6 +29,13 @@ type TxHandle interface {
 	Init(ctx context.Context, chunkID string, participants []domain.ChunkLocation) error
 	Commit(ctx context.Context, chunkID string, metaUpdate *pms.MetadataOperation, participants []domain.ChunkLocation) error
 	Abort(ctx context.Context, chunkID string, participants []domain.ChunkLocation) error
+}
+
+// ConsensusMessageHandler defines the peer-to-peer RPCs required by the consensus layer.
+type ConsensusMessageHandler interface {
+	HandleRequestVote(ctx context.Context, req raft.RequestVoteArgs) (*raft.RequestVoteReply, error)
+	HandleAppendEntries(ctx context.Context, req communication.AppendEntriesRequest) (*raft.AppendEntriesReply, error)
+	HandleInstallSnapshot(ctx context.Context, req communication.InstallSnapshotRequest) (*raft.InstallSnapshotReply, error)
 }
 
 // ControlPlaneOrchestrator manages the namespace, permissions, and 2PC intents.
@@ -54,10 +63,20 @@ type ControlPlaneOrchestrator interface {
 	AbortFileWrite(ctx context.Context, txnID string, chunkID string, targets []domain.ChunkLocation) error
 
 	PrepareFileRead(ctx context.Context, inodeID string, offset int64) (*domain.ReadContext, error)
+
+	HandleConsensusRequestVote(ctx context.Context, req raft.RequestVoteArgs) (*raft.RequestVoteReply, error)
+	HandleConsensusAppendEntries(ctx context.Context, req communication.AppendEntriesRequest) (*raft.AppendEntriesReply, error)
+	HandleConsensusInstallSnapshot(ctx context.Context, req communication.InstallSnapshotRequest) (*raft.InstallSnapshotReply, error)
 }
 
 // DataPlaneOrchestrator strictly moves bytes to the physical locations calculated by the Control Plane.
 type DataPlaneOrchestrator interface {
 	ExecuteWrite(ctx context.Context, txnID string, chunkID string, offset int64, data []byte, targets []domain.ChunkLocation, isNewChunk bool) error
 	ExecuteRead(ctx context.Context, chunkID string, targets []domain.ChunkLocation) ([]byte, error)
+	HandlePrepareChunk(ctx context.Context, txnID string, chunkID string, data []byte, checksum string) error
+	HandleCommitChunk(ctx context.Context, txnID string, chunkID string) error
+	HandleAbortChunk(ctx context.Context, txnID string, chunkID string) error
+	HandleReadChunk(ctx context.Context, chunkID string) ([]byte, error)
+	HandleDeleteChunk(ctx context.Context, chunkID string) error
+	HandleLegacyChunkWrite(ctx context.Context, chunkID string, data []byte) error
 }
