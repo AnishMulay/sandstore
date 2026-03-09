@@ -9,7 +9,9 @@ import (
 	pathpkg "path"
 	filepathpkg "path/filepath"
 	"strings"
+	"time"
 
+	"github.com/AnishMulay/sandstore/clients/library/topology"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	grpccomm "github.com/AnishMulay/sandstore/internal/communication/grpc"
 	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
@@ -20,16 +22,32 @@ const firstUserFD uint64 = 3
 const writeBufferLimit = 2 * 1024 * 1024
 const writeRPCChunkSize = 8 * 1024 * 1024
 
-// NewSandstoreClient constructs a client bound to one server address and
-// initializes an empty descriptor table.
-//
-// It performs no network calls and acquires no locks.
-func NewSandstoreClient(serverAddr string, comm *grpccomm.GRPCCommunicator) *SandstoreClient {
+// NewSandstoreClient constructs a client from a seed set and performs the
+// initial topology bootstrap before returning.
+func NewSandstoreClient(seeds []string, comm *grpccomm.GRPCCommunicator) (*SandstoreClient, error) {
+	router := topology.NewConvergedRouter(seeds, comm)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := router.Refresh(ctx); err != nil {
+		return nil, fmt.Errorf("initial topology bootstrap failed: %w", err)
+	}
+
+	translator := &DefaultErrorTranslator{}
+	reqMgr := NewStandardRequestManager(router, comm, translator)
+
+	serverAddr, err := router.GetRoute(true)
+	if err != nil && len(seeds) > 0 {
+		serverAddr = seeds[0]
+	}
+
 	return &SandstoreClient{
 		ServerAddr: serverAddr,
 		Comm:       comm,
+		reqManager: reqMgr,
 		OpenFiles:  make(map[uint64]*SandstoreFD),
-	}
+	}, nil
 }
 
 // Open resolves path to an inode and returns a process-local file descriptor.
