@@ -29,6 +29,7 @@ type SandstoreClient struct {
 	ServerAddr string
 	Comm       *grpccomm.GRPCCommunicator
 
-	OpenFiles map[uint64]*SandstoreFD
-	TableMu   sync.RWMutex
+	reqManager RequestManager
+	OpenFiles  map[uint64]*SandstoreFD
+	TableMu    sync.RWMutex
 }

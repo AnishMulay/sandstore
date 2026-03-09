@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 
+	clienttopology "github.com/AnishMulay/sandstore/clients/library/topology"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	grpccomm "github.com/AnishMulay/sandstore/internal/communication/grpc"
 	"github.com/AnishMulay/sandstore/internal/log_service"
@@ -16,11 +17,16 @@ import (
 	ps "github.com/AnishMulay/sandstore/internal/server"
 )
 
+type TopologyProvider interface {
+	GetLeaderAddress() string
+}
+
 type SimpleServer struct {
-	comm      *grpccomm.GRPCCommunicator
-	cpo       orchestrators.ControlPlaneOrchestrator
-	dpo       orchestrators.DataPlaneOrchestrator
-	ls        log_service.LogService
+	comm     *grpccomm.GRPCCommunicator
+	cpo      orchestrators.ControlPlaneOrchestrator
+	dpo      orchestrators.DataPlaneOrchestrator
+	ls       log_service.LogService
+	topology TopologyProvider
 }
 
 func NewSimpleServer(
@@ -28,12 +34,14 @@ func NewSimpleServer(
 	cpo orchestrators.ControlPlaneOrchestrator,
 	dpo orchestrators.DataPlaneOrchestrator,
 	ls log_service.LogService,
+	topology TopologyProvider,
 ) *SimpleServer {
 	return &SimpleServer{
-		comm: comm,
-		cpo:  cpo,
-		dpo:  dpo,
-		ls:   ls,
+		comm:     comm,
+		cpo:      cpo,
+		dpo:      dpo,
+		ls:       ls,
+		topology: topology,
 	}
 }
 
@@ -78,6 +86,7 @@ func (s *SimpleServer) registerPayloads() {
 	s.comm.RegisterPayloadType(ps.MsgReadDirPlus, reflect.TypeOf(ps.ReadDirPlusRequest{}))
 	s.comm.RegisterPayloadType(ps.MsgFsStat, reflect.TypeOf(ps.FsStatRequest{}))
 	s.comm.RegisterPayloadType(ps.MsgFsInfo, reflect.TypeOf(ps.FsInfoRequest{}))
+	s.comm.RegisterPayloadType(ps.MsgTopologyRequest, reflect.TypeOf(clienttopology.MsgTopologyRequest{}))
 
 	// Replicator Payloads
 	s.comm.RegisterPayloadType(ps.MsgRaftRequestVote, reflect.TypeOf(raft.RequestVoteArgs{}))
@@ -247,6 +256,22 @@ func (s *SimpleServer) handleMessage(msg communication.Message) (*communication.
 	case ps.MsgFsInfo:
 		info, err := s.cpo.GetFsInfo(ctx)
 		return s.respond(info, err)
+
+	case ps.MsgTopologyRequest:
+		leaderAddr := s.topology.GetLeaderAddress()
+		body, err := json.Marshal(clienttopology.MsgTopologyResponse{
+			TopologyData: []byte(leaderAddr),
+		})
+		if err != nil {
+			return &communication.Response{
+				Code: communication.CodeInternal,
+				Body: []byte("failed to marshal response: " + err.Error()),
+			}, nil
+		}
+		return &communication.Response{
+			Code: communication.CodeOK,
+			Body: body,
+		}, nil
 
 	// --- CHUNK REPLICATION (LOCAL ONLY) ---
 	case communication.MessageTypePrepareChunk:
