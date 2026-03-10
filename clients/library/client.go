@@ -21,6 +21,7 @@ import (
 const firstUserFD uint64 = 3
 const writeBufferLimit = 2 * 1024 * 1024
 const writeRPCChunkSize = 8 * 1024 * 1024
+const clientRPCTimeout = 5 * time.Second
 
 // NewSandstoreClient constructs a client from a seed set and performs the
 // initial topology bootstrap before returning.
@@ -931,11 +932,105 @@ func (c *SandstoreClient) createPath(path string, mode int) (*communication.Resp
 }
 
 func (c *SandstoreClient) send(msgType string, payload any) (*communication.Response, error) {
-	return c.Comm.Send(context.Background(), c.ServerAddr, communication.Message{
+	if rm, ok := c.reqManager.(*StandardRequestManager); ok {
+		return c.sendWithRouting(rm, msgType, payload, isMutationMessage(msgType))
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), clientRPCTimeout)
+	defer cancel()
+
+	return c.Comm.Send(ctx, c.ServerAddr, communication.Message{
 		From:    "sandlib",
 		Type:    msgType,
 		Payload: payload,
 	})
+}
+
+func (c *SandstoreClient) sendWithRouting(rm *StandardRequestManager, msgType string, payload any, isMutation bool) (*communication.Response, error) {
+	const maxRetries = 3
+	var lastErr error
+
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		targetAddr, err := rm.router.GetRoute(isMutation)
+		if err != nil {
+			refreshCtx, refreshCancel := context.WithTimeout(context.Background(), clientRPCTimeout)
+			refreshErr := rm.router.Refresh(refreshCtx)
+			refreshCancel()
+			if refreshErr != nil {
+				return nil, err
+			}
+
+			targetAddr, err = rm.router.GetRoute(isMutation)
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), clientRPCTimeout)
+		resp, rawErr := rm.comm.Send(ctx, targetAddr, communication.Message{
+			From:    "sandlib",
+			Type:    msgType,
+			Payload: payload,
+		})
+		cancel()
+
+		sysErr := rm.translator.Translate(resp, rawErr)
+		if sysErr == nil {
+			c.ServerAddr = targetAddr
+			return resp, nil
+		}
+
+		switch sysErr.Class {
+		case topology.ClassSemanticError:
+			return resp, nil
+
+		case topology.ClassAmbiguousFailure, topology.ClassTransportFailure:
+			rm.router.Invalidate(targetAddr)
+			lastErr = sysErr.WrappedErr
+			if isMutation {
+				return nil, sysErr.WrappedErr
+			}
+
+			refreshCtx, refreshCancel := context.WithTimeout(context.Background(), clientRPCTimeout)
+			_ = rm.router.Refresh(refreshCtx)
+			refreshCancel()
+			time.Sleep(calculateJitter(attempt))
+			continue
+
+		case topology.ClassExplicitRejection:
+			if sysErr.RoutingHint != "" {
+				rm.router.SetRouteHint(sysErr.RoutingHint)
+			} else {
+				refreshCtx, refreshCancel := context.WithTimeout(context.Background(), clientRPCTimeout)
+				_ = rm.router.Refresh(refreshCtx)
+				refreshCancel()
+			}
+
+			lastErr = sysErr.WrappedErr
+			time.Sleep(calculateJitter(attempt))
+			continue
+
+		default:
+			return nil, sysErr.WrappedErr
+		}
+	}
+
+	return nil, fmt.Errorf("request %s failed after %d attempts: %w", msgType, maxRetries, lastErr)
+}
+
+func isMutationMessage(msgType string) bool {
+	switch msgType {
+	case ps.MsgSetAttr,
+		ps.MsgWrite,
+		ps.MsgCreate,
+		ps.MsgMkdir,
+		ps.MsgRemove,
+		ps.MsgRmdir,
+		ps.MsgRename:
+		return true
+	default:
+		return false
+	}
 }
 
 func splitParentAndName(path string) (string, string, error) {

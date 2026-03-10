@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -66,7 +67,11 @@ func (r *ConvergedRouter) fetchTopologyFromSeeds(ctx context.Context) (string, [
 		if err == nil && resp != nil && resp.Code == communication.CodeOK {
 			var topoMsg MsgTopologyResponse
 			if err := json.Unmarshal(resp.Body, &topoMsg); err == nil {
-				return string(topoMsg.TopologyData), r.seeds, nil
+				leaderAddr := strings.TrimSpace(string(topoMsg.TopologyData))
+				if leaderAddr == "" {
+					continue
+				}
+				return leaderAddr, r.seeds, nil
 			}
 		}
 	}
@@ -79,7 +84,7 @@ func (r *ConvergedRouter) Refresh(ctx context.Context) error {
 	defer r.refreshMu.Unlock()
 
 	r.mu.RLock()
-	isFresh := time.Since(r.lastUpdate) < 1*time.Second
+	isFresh := r.leaderAddr != "" && time.Since(r.lastUpdate) < 1*time.Second
 	r.mu.RUnlock()
 	if isFresh {
 		return nil
