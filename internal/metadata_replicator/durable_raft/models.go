@@ -29,18 +29,30 @@ type StableStore interface {
 	GetState() (currentTerm uint64, votedFor string, err error)
 }
 
-// LogStore (WAL): Append-only log persistence
+// LogStore (WAL): Append-only log persistence.
 type LogStore interface {
-	// Stores a batch of logs. Must fsync before returning.
+	// StoreLogs persists a batch of entries to stable storage.
+	// Implementations MUST complete all of the following before returning nil:
+	//   1. Marshal entries and wrap in a walEnvelope with a CRC32 checksum.
+	//   2. Write the envelope bytes to a temporary file (.tmp suffix).
+	//   3. Call Sync() on the temporary file descriptor.
+	//   4. Close the temporary file descriptor.
+	//   5. Call os.Rename to atomically replace the final path.
+	//   6. Open the parent directory and call Sync() on it.
+	// A nil return is a durable append guarantee.
+	// Any error in steps 1-6 must be returned to the caller.
 	StoreLogs(entries []raft_replicator.LogEntry) error
 
-	// Retrieves a specific log by its Raft index
+	// GetLog retrieves the entry at the given Raft index.
+	// Returns ErrLogCompacted if the index has been compacted.
+	// Returns ErrLogNotFound if the index was never written.
 	GetLog(index uint64) (raft_replicator.LogEntry, error)
 
-	// Returns the metadata of the last log in the WAL
+	// LastIndexAndTerm returns the index and term of the last log entry.
+	// Returns (0, 0, nil) if the log is empty.
 	LastIndexAndTerm() (index uint64, term uint64, err error)
 
-	// Deletes logs up to the snapshot index (Log Compaction)
+	// DeleteRange compacts the log by deleting entries in [min, max] inclusive.
 	DeleteRange(min uint64, max uint64) error
 }
 
