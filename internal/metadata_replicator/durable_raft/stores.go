@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"math"
 	"os"
 	"path/filepath"
@@ -14,13 +15,24 @@ import (
 )
 
 var (
-	ErrLogNotFound  = errors.New("log entry not found")
-	ErrLogCompacted = errors.New("log entry compacted")
+	ErrLogNotFound   = errors.New("log entry not found")
+	ErrLogCompacted  = errors.New("log entry compacted")
+	ErrWALCorrupt    = errors.New("wal file failed checksum validation")
+	ErrStableCorrupt = errors.New("stable store file failed checksum validation")
 )
 
 type stableState struct {
 	Term     uint64 `json:"term"`
 	VotedFor string `json:"voted_for"`
+}
+
+// stableEnvelope is the on-disk container for the stable state file.
+// Payload is the raw JSON encoding of stableState.
+// CRC is crc32.ChecksumIEEE(Payload).
+// A mismatch between the stored CRC and a freshly computed checksum returns ErrStableCorrupt.
+type stableEnvelope struct {
+	CRC     uint32 `json:"crc"`
+	Payload []byte `json:"payload"`
 }
 
 type snapshotFile struct {
@@ -34,42 +46,75 @@ type walFile struct {
 	Logs           []raft_replicator.LogEntry `json:"logs"`
 }
 
+// walEnvelope is the on-disk container for the WAL file.
+// Payload is the raw JSON encoding of walFile.
+// CRC is crc32.ChecksumIEEE(Payload).
+// A mismatch between the stored CRC and a freshly computed checksum returns ErrWALCorrupt.
+type walEnvelope struct {
+	CRC     uint32 `json:"crc"`
+	Payload []byte `json:"payload"`
+}
+
 type FileStableStore struct {
 	path string
 	mu   sync.Mutex
 }
 
-func NewFileStableStore(path string) *FileStableStore {
+func NewFileStableStore(path string) (*FileStableStore, error) {
 	_ = os.MkdirAll(filepath.Dir(path), 0o755)
-	return &FileStableStore{path: path}
+	s := &FileStableStore{path: path}
+	// Eagerly validate: if a file exists at path, confirm it is CRC-valid
+	// before returning. A corrupt file here panics the node at startup via
+	// the caller in wire_grpc_etcd.go, which is the correct behaviour.
+	if _, _, err := s.GetState(); err != nil {
+		return nil, fmt.Errorf("stable store validation on open: %w", err)
+	}
+	return s, nil
 }
 
 func (s *FileStableStore) SetState(currentTerm uint64, votedFor string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	payload, err := json.Marshal(stableState{Term: currentTerm, VotedFor: votedFor})
+	inner, err := json.Marshal(stableState{Term: currentTerm, VotedFor: votedFor})
 	if err != nil {
 		return fmt.Errorf("marshal stable state: %w", err)
 	}
-	return writeFileAtomically(s.path, payload, 0o600)
+
+	outer, err := json.Marshal(stableEnvelope{
+		CRC:     crc32.ChecksumIEEE(inner),
+		Payload: inner,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal stable envelope: %w", err)
+	}
+
+	return writeFileAtomically(s.path, outer, 0o600)
 }
 
 func (s *FileStableStore) GetState() (uint64, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	payload, err := os.ReadFile(s.path)
+	raw, err := os.ReadFile(s.path)
 	if os.IsNotExist(err) {
 		return 0, "", nil
 	}
 	if err != nil {
-		return 0, "", err
+		return 0, "", fmt.Errorf("read stable file: %w", err)
+	}
+
+	var envelope stableEnvelope
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return 0, "", fmt.Errorf("%w: envelope unmarshal failed: %v", ErrStableCorrupt, err)
+	}
+	if crc32.ChecksumIEEE(envelope.Payload) != envelope.CRC {
+		return 0, "", fmt.Errorf("%w: crc mismatch in %s", ErrStableCorrupt, s.path)
 	}
 
 	var state stableState
-	if err := json.Unmarshal(payload, &state); err != nil {
-		return 0, "", fmt.Errorf("unmarshal stable state: %w", err)
+	if err := json.Unmarshal(envelope.Payload, &state); err != nil {
+		return 0, "", fmt.Errorf("%w: inner stable unmarshal failed: %v", ErrStableCorrupt, err)
 	}
 	return state.Term, state.VotedFor, nil
 }
@@ -138,17 +183,31 @@ func NewFileLogStore(path string) (*FileLogStore, error) {
 }
 
 func (s *FileLogStore) load() error {
-	payload, err := os.ReadFile(s.path)
+	raw, err := os.ReadFile(s.path)
 	if os.IsNotExist(err) {
+		// First boot: no WAL file yet. Correct and expected.
 		return nil
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("read wal file: %w", err)
+	}
+
+	// NOTE: WAL files written by code prior to this envelope format do not
+	// contain a "crc" or "payload" field. json.Unmarshal will succeed but
+	// leave both fields at their zero values, causing the CRC check below to
+	// fail. This returns ErrWALCorrupt. The accepted migration path for this
+	// research prototype is to wipe the data directory on upgrade.
+	var envelope walEnvelope
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return fmt.Errorf("%w: envelope unmarshal failed: %v", ErrWALCorrupt, err)
+	}
+	if crc32.ChecksumIEEE(envelope.Payload) != envelope.CRC {
+		return fmt.Errorf("%w: crc mismatch in %s", ErrWALCorrupt, s.path)
 	}
 
 	var wal walFile
-	if err := json.Unmarshal(payload, &wal); err != nil {
-		return fmt.Errorf("unmarshal wal: %w", err)
+	if err := json.Unmarshal(envelope.Payload, &wal); err != nil {
+		return fmt.Errorf("%w: inner wal unmarshal failed: %v", ErrWALCorrupt, err)
 	}
 
 	s.compactedUntil = wal.CompactedUntil
@@ -266,15 +325,24 @@ func (s *FileLogStore) persistLocked() error {
 		return entries[i].Index < entries[j].Index
 	})
 
-	payload, err := json.Marshal(walFile{
+	inner, err := json.Marshal(walFile{
 		CompactedUntil: s.compactedUntil,
 		CompactedTerm:  s.compactedTerm,
 		Logs:           entries,
 	})
 	if err != nil {
-		return fmt.Errorf("marshal wal: %w", err)
+		return fmt.Errorf("marshal wal inner: %w", err)
 	}
-	return writeFileAtomically(s.path, payload, 0o600)
+
+	outer, err := json.Marshal(walEnvelope{
+		CRC:     crc32.ChecksumIEEE(inner),
+		Payload: inner,
+	})
+	if err != nil {
+		return fmt.Errorf("marshal wal envelope: %w", err)
+	}
+
+	return writeFileAtomically(s.path, outer, 0o600)
 }
 
 func writeFileAtomically(path string, data []byte, mode os.FileMode) error {
@@ -308,11 +376,16 @@ func writeFileAtomically(path string, data []byte, mode os.FileMode) error {
 		return err
 	}
 
+	// Directory fsync is mandatory. A rename is only crash-safe once the
+	// parent directory entry is flushed to stable storage.
 	d, err := os.Open(dir)
 	if err != nil {
-		return nil
+		return fmt.Errorf("open dir for fsync after rename: %w", err)
 	}
 	defer d.Close()
-	_ = d.Sync()
+
+	if err := d.Sync(); err != nil {
+		return fmt.Errorf("fsync dir after rename: %w", err)
+	}
 	return nil
 }

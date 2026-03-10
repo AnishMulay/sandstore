@@ -90,7 +90,10 @@ func Build(opts Options) runnable {
 	if err != nil {
 		panic(err)
 	}
-	stableStore := durableraft.NewFileStableStore(opts.DataDir + "/raft_stable.json")
+	stableStore, err := durableraft.NewFileStableStore(opts.DataDir + "/raft_stable.json")
+	if err != nil {
+		panic(err)
+	}
 	snapshotStore := durableraft.NewFileSnapshotStore(opts.DataDir + "/raft_snapshot.bin")
 
 	metaRepl := durableraft.NewDurableRaftReplicator(opts.NodeID, clusterService, comm, ls, raftConfig, logStore, stableStore, snapshotStore, ms)
