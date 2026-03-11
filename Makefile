@@ -1,4 +1,4 @@
-KUBE_CONTEXT ?= minikube-laptop
+KUBE_CONTEXT ?= docker-desktop
 
 # Variables
 PROFILE ?= default-etcd
@@ -7,7 +7,10 @@ GOOS ?= linux
 GOARCH ?= amd64
 REGISTRY_URL ?=
 K8S_IMAGE ?= $(REGISTRY_URL)/sandstore-node:$(PROFILE)-latest
+K8S_LOCAL_IMAGE ?= sandstore-node:cluster-local
+K8S_TEST_IMAGE ?= sandstore-test:cluster-local
 K8S_MANIFEST_DIR ?= deploy/k8s
+K8S_TEST_NAMESPACE_PREFIX ?= sandstore-test
 DOCKER_COMPOSE_FILES := deploy/docker/docker-compose.yaml deploy/docker/docker-compose-durability.yaml deploy/docker/etcd/docker-compose.yaml
 CLEAN_PORTS := 2379 2380 9001 9002 9003 8080 8081 8082
 
@@ -85,6 +88,10 @@ durability-smoke:
 docker-build:
 	docker build --platform linux/$(ARCH) --build-arg TAGS="$(TAGS)" --build-arg GOOS=$(GOOS) --build-arg GOARCH=$(ARCH) -t sandstore-node:latest -f deploy/docker/Dockerfile .
 
+.PHONY: docker-build-test
+docker-build-test:
+	docker build --platform linux/$(ARCH) --target test-runner --build-arg TAGS="$(TAGS)" --build-arg GOOS=$(GOOS) --build-arg GOARCH=$(ARCH) -t $(K8S_TEST_IMAGE) -f deploy/docker/Dockerfile .
+
 # Kubernetes Flow 1: Image Build & Registry Push
 .PHONY: k8s-build
 k8s-build:
@@ -137,6 +144,7 @@ k8s-deploy: k8s-destroy
 	kubectl --context=$(KUBE_CONTEXT) apply -f $(K8S_MANIFEST_DIR)/job-bootstrap.yaml; \
 	kubectl --context=$(KUBE_CONTEXT) wait --for=condition=complete job/sandstore-bootstrap-config --timeout=60s; \
 	kubectl --context=$(KUBE_CONTEXT) apply -f $(K8S_MANIFEST_DIR)/statefulset-sandstore.yaml; \
+	kubectl --context=$(KUBE_CONTEXT) set image statefulset/sandstore sandstore=$(K8S_IMAGE); \
 	kubectl --context=$(KUBE_CONTEXT) apply -f $(K8S_MANIFEST_DIR)/service-nodeport.yaml
 
 # Kubernetes Flow 4: The Iteration Loop (Stateful Rolling Update)
@@ -145,11 +153,24 @@ k8s-update:
 	@set -eu; \
 	kubectl --context=$(KUBE_CONTEXT) get statefulset sandstore >/dev/null; \
 	$(MAKE) --no-print-directory k8s-build PROFILE="$(PROFILE)" REGISTRY_URL="$(REGISTRY_URL)" ARCH="$(ARCH)"; \
+	kubectl --context=$(KUBE_CONTEXT) set image statefulset/sandstore sandstore=$(K8S_IMAGE); \
 	kubectl --context=$(KUBE_CONTEXT) rollout restart statefulset/sandstore; \
 	kubectl --context=$(KUBE_CONTEXT) rollout status statefulset/sandstore --timeout=120s || { \
 		echo "Rollout failed or timed out. Inspect crash logs with: make k8s-logs-crash POD=<pod_name> KUBE_CONTEXT=$(KUBE_CONTEXT)"; \
 		exit 1; \
 	}
+
+.PHONY: test-cluster
+test-cluster:
+	KUBE_CONTEXT="$(KUBE_CONTEXT)" \
+	PROFILE="$(PROFILE)" \
+	ARCH="$(ARCH)" \
+	GOOS="$(GOOS)" \
+	GOARCH="$(GOARCH)" \
+	K8S_IMAGE="$(K8S_LOCAL_IMAGE)" \
+	K8S_TEST_IMAGE="$(K8S_TEST_IMAGE)" \
+	K8S_TEST_NAMESPACE_PREFIX="$(K8S_TEST_NAMESPACE_PREFIX)" \
+	./scripts/dev/test-cluster.sh
 
 # Kubernetes Flow 5: Observability & Post-Mortem Debugging
 .PHONY: k8s-logs

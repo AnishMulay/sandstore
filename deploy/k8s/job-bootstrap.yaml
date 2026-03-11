@@ -26,13 +26,13 @@ spec:
             - -ec
             - |
               export ETCDCTL_API=3
-              ENDPOINTS="http://${ETCD_ENDPOINTS}"
+              ENDPOINTS="$(printf '%s' "${ETCD_ENDPOINTS}" | sed 's#\([^,][^,]*\)#http://\1#g')"
 
               etcdctl --endpoints="${ENDPOINTS}" del --prefix /sandstore/config/nodes/
 
               etcdctl --endpoints="${ENDPOINTS}" put /sandstore/config/nodes/sandstore-0 \
-                '{"id":"sandstore-0","address":"sandstore-0.sandstore-headless.default.svc.cluster.local:8080","role":"voter"}'
+                '{"id":"sandstore-0","address":"sandstore-0.sandstore-headless:8080","role":"voter"}'
               etcdctl --endpoints="${ENDPOINTS}" put /sandstore/config/nodes/sandstore-1 \
-                '{"id":"sandstore-1","address":"sandstore-1.sandstore-headless.default.svc.cluster.local:8080","role":"voter"}'
+                '{"id":"sandstore-1","address":"sandstore-1.sandstore-headless:8080","role":"voter"}'
               etcdctl --endpoints="${ENDPOINTS}" put /sandstore/config/nodes/sandstore-2 \
-                '{"id":"sandstore-2","address":"sandstore-2.sandstore-headless.default.svc.cluster.local:8080","role":"voter"}'
+                '{"id":"sandstore-2","address":"sandstore-2.sandstore-headless:8080","role":"voter"}'

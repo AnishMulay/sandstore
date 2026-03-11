@@ -56,3 +56,6 @@ go.work.sum
 
 # Local runtime/test artifacts
 /run/
+
+.codex
+.planning

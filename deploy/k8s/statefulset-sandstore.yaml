@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: sandstore
-          image: anishm7030/sandstore-node:default-etcd-latest
+          image: sandstore-node:latest
           imagePullPolicy: IfNotPresent
           ports:
             - name: raft
@@ -40,7 +40,7 @@ spec:
             - name: NODE_ID
               value: "$(POD_NAME)"
             - name: LISTEN_ADDR
-              value: "$(POD_NAME).sandstore-headless.$(POD_NAMESPACE).svc.cluster.local:8080"
+              value: "$(POD_NAME).sandstore-headless:8080"
             - name: DATA_DIR
               value: /var/lib/sandstore/data
           readinessProbe:
