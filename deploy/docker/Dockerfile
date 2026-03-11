@@ -17,6 +17,7 @@ COPY . .
 RUN GOOS="${GOOS}" GOARCH="${GOARCH}" go build -tags="${TAGS}" -o /build/sandstore ./cmd/sandstore
 RUN GOOS="${GOOS}" GOARCH="${GOARCH}" go build -o /build/smoke ./clients/open_smoke
 RUN GOOS="${GOOS}" GOARCH="${GOARCH}" go build -o /build/durability_smoke ./clients/durability_smoke
+RUN GOOS="${GOOS}" GOARCH="${GOARCH}" go test -c -tags="${TAGS}" -o /build/cluster-tests ./integration/cluster
 
 FROM alpine:latest AS runner
 
@@ -27,3 +28,11 @@ COPY --from=builder /build/smoke /usr/local/bin/smoke
 COPY --from=builder /build/durability_smoke /usr/local/bin/durability_smoke
 
 ENTRYPOINT ["/usr/local/bin/sandstore"]
+
+FROM alpine:latest AS test-runner
+
+RUN apk add --no-cache bash ca-certificates kubectl
+
+COPY --from=builder /build/cluster-tests /usr/local/bin/cluster-tests
+
+ENTRYPOINT ["/usr/local/bin/cluster-tests"]
