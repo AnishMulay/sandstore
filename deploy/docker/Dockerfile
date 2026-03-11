@@ -31,9 +31,8 @@ ENTRYPOINT ["/usr/local/bin/sandstore"]
 
 FROM alpine:latest AS test-runner
 
-RUN apk add --no-cache bash ca-certificates
+RUN apk add --no-cache bash ca-certificates kubectl
 
 COPY --from=builder /build/cluster-tests /usr/local/bin/cluster-tests
-COPY --from=bitnami/kubectl:1.32.2 /opt/bitnami/kubectl/bin/kubectl /usr/local/bin/kubectl
 
 ENTRYPOINT ["/usr/local/bin/cluster-tests"]

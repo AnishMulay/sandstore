@@ -11,11 +11,13 @@ spec:
   selector:
     matchLabels:
       app: sandstore
+      sandstore-role: node
   template:
     metadata:
       labels:
         app: sandstore
         app.kubernetes.io/name: sandstore
+        sandstore-role: node
     spec:
       containers:
         - name: sandstore

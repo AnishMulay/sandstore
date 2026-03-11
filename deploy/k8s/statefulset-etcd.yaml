@@ -8,6 +8,7 @@ metadata:
 spec:
   serviceName: etcd-cluster
   replicas: 3
+  podManagementPolicy: Parallel
   selector:
     matchLabels:
       app: etcd
@@ -26,11 +27,11 @@ spec:
           args:
             - --name=$(POD_NAME)
             - --data-dir=/etcd-data
-            - --advertise-client-urls=http://$(POD_NAME).etcd-cluster:2379
+            - --advertise-client-urls=http://$(POD_NAME).etcd-cluster.$(POD_NAMESPACE).svc.cluster.local:2379
             - --listen-client-urls=http://0.0.0.0:2379
-            - --initial-advertise-peer-urls=http://$(POD_NAME).etcd-cluster:2380
+            - --initial-advertise-peer-urls=http://$(POD_NAME).etcd-cluster.$(POD_NAMESPACE).svc.cluster.local:2380
             - --listen-peer-urls=http://0.0.0.0:2380
-            - --initial-cluster=etcd-cluster-0=http://etcd-cluster-0.etcd-cluster:2380,etcd-cluster-1=http://etcd-cluster-1.etcd-cluster:2380,etcd-cluster-2=http://etcd-cluster-2.etcd-cluster:2380
+            - --initial-cluster=etcd-cluster-0=http://etcd-cluster-0.etcd-cluster.$(POD_NAMESPACE).svc.cluster.local:2380,etcd-cluster-1=http://etcd-cluster-1.etcd-cluster.$(POD_NAMESPACE).svc.cluster.local:2380,etcd-cluster-2=http://etcd-cluster-2.etcd-cluster.$(POD_NAMESPACE).svc.cluster.local:2380
             - --initial-cluster-state=new
           env:
             - name: POD_NAME
@@ -48,6 +49,15 @@ spec:
             - name: peer
               containerPort: 2380
               protocol: TCP
+          startupProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - ETCDCTL_API=3 etcdctl --endpoints=http://127.0.0.1:2379 endpoint health
+            failureThreshold: 60
+            periodSeconds: 5
+            timeoutSeconds: 5
           readinessProbe:
             exec:
               command:
@@ -56,6 +66,7 @@ spec:
                 - ETCDCTL_API=3 etcdctl --endpoints=http://127.0.0.1:2379 endpoint health
             initialDelaySeconds: 5
             periodSeconds: 5
+            timeoutSeconds: 5
           livenessProbe:
             exec:
               command:
@@ -64,6 +75,7 @@ spec:
                 - ETCDCTL_API=3 etcdctl --endpoints=http://127.0.0.1:2379 endpoint health
             initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 5
           volumeMounts:
             - name: etcd-data
               mountPath: /etcd-data

@@ -1,7 +1,6 @@
 package cluster
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -24,6 +23,7 @@ import (
 const (
 	defaultLeaderWaitTimeout = 2 * time.Minute
 	defaultRolloutTimeout    = 3 * time.Minute
+	sandstoreNodeSelector    = "app=sandstore,sandstore-role=node"
 )
 
 type suiteConfig struct {
@@ -359,8 +359,8 @@ func (k *kubectlClient) scaleStatefulSet(t *testing.T, cfg suiteConfig, replicas
 	if replicas == 0 {
 		deadline := time.Now().Add(defaultRolloutTimeout)
 		for time.Now().Before(deadline) {
-			out := k.mustRun(t, context.Background(), "get", "pods", "-l", "app=sandstore", "--no-headers")
-			if bytes.TrimSpace(out) == nil || len(bytes.TrimSpace(out)) == 0 {
+			out := k.mustRun(t, context.Background(), "get", "pods", "-l", sandstoreNodeSelector, "-o", "jsonpath={.items[*].metadata.name}")
+			if len(strings.Fields(strings.TrimSpace(string(out)))) == 0 {
 				return
 			}
 			time.Sleep(2 * time.Second)

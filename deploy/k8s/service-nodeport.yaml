@@ -9,6 +9,7 @@ spec:
   type: NodePort
   selector:
     app: sandstore
+    sandstore-role: node
   ports:
     - name: client
       protocol: TCP

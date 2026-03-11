@@ -148,6 +148,7 @@ func TestDurabilitySmoke(t *testing.T) {
 
 		kube.scaleStatefulSet(t, cfg, 2)
 		waitForLeader(t, cfg, defaultLeaderWaitTimeout)
+		client = newClient(t, cfg)
 
 		lastPath := createBurst(t, client, "snapshot-catchup", cfg.snapshotFileCount)
 
