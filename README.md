@@ -12,186 +12,167 @@
 ![Issues](https://img.shields.io/github/issues/AnishMulay/sandstore?style=flat-square)
 ![Contributors](https://img.shields.io/github/contributors/AnishMulay/sandstore?style=flat-square)
 
+[![Website](https://img.shields.io/badge/Website-sandstore--eta.vercel.app-black?style=flat-square&logo=vercel)](https://sandstore-eta.vercel.app/)
+
+<img width="300" height="300" alt="sandstore_logo" src="https://github.com/user-attachments/assets/509e0bb5-7fab-409f-ba59-a2b161b90923" />
+
+**A modular framework for building and experimenting with distributed storage architectures.**
+
+[sandstore-eta.vercel.app](https://sandstore-eta.vercel.app/)
+
 </div>
 
-<img width="1024" height="1024" alt="sandstore_logo" src="https://github.com/user-attachments/assets/509e0bb5-7fab-409f-ba59-a2b161b90923" />
+Sandstore lets you assemble a distributed storage system from well-defined, swappable components — choose your metadata engine, consensus mechanism, chunk storage, cluster membership, and transport — then deploy and test the result against a real multi-node cluster in minutes.
 
-**A modular distributed file storage system for learning and experimentation**
-
-Sandstore is a production-inspired distributed file storage system built in Go, designed as a hands-on learning playground for students and engineers exploring distributed systems concepts. Think of it as your personal sandbox for understanding how systems like Google File System (GFS) and Hadoop Distributed File System (HDFS) work under the hood.
+It started as a way to learn distributed systems internals by building them. It has grown into a platform for experimenting with how fundamental architectural decisions change the behavior of a storage system.
 
 ## Why Sandstore?
 
-Distributed systems can feel abstract and intimidating. Sandstore bridges that gap by providing:
+Most distributed storage systems bake their architecture in. The topology — where metadata lives, how replication works, how nodes discover each other — is a fixed decision made at design time.
 
-- **Real implementations** of core distributed systems concepts (consensus, replication, fault tolerance)
-- **Modular architecture** that lets you experiment with different components independently  
-- **Production-grade patterns** in a learner-friendly environment
-- **Hands-on experience** with Raft consensus, leader election, and log replication
-- **Safe experimentation** - break things, fix them, and learn without consequences
+Sandstore treats topology as a variable.
 
-Whether you're a student diving into distributed systems for the first time or an experienced engineer wanting to understand these concepts more deeply, Sandstore gives you a real system to tinker with.
+The system is built around two top-level orchestration interfaces: a **ControlPlaneOrchestrator** that owns metadata, placement, and consensus coordination, and a **DataPlaneOrchestrator** that owns chunk movement, replica fanout, and read failover. Everything beneath those interfaces is swappable. To build a new topology, you implement new versions of the components that matter for your design and wire them together. The server layer, client, and deploy tooling stay the same.
 
-## Features
+This makes Sandstore useful for:
 
-### Core Distributed Storage
-- **Chunked file storage** with configurable chunk sizes (default: 8MB)
-- **Automatic file splitting** and reassembly across multiple nodes
-- **Metadata management** for file locations and chunk mappings
-- **Multi-node cluster** support with health monitoring
+- **Students** who want to go beyond reading about distributed systems and actually run them
+- **Researchers** who want to experiment with how design decisions affect system behavior
+- **Engineers** who want a clean, readable reference implementation of production distributed storage patterns
 
-### Consensus & Replication
-- **Raft consensus algorithm** for metadata consistency
-- **Leader election** with automatic failover
-- **Log replication** across cluster nodes
-- **Chunk replication** for data durability
-- **Fault tolerance** with node failure detection
+## Current Architecture
 
-### Modular Services
-- **FileService** - High-level file operations (store, read, delete)
-- **ChunkService** - Low-level chunk storage and retrieval  
-- **MetadataService** - File metadata and chunk location tracking
-- **ClusterService** - Node discovery and health management
-- **Communication** - gRPC-based inter-node messaging
+The active topology today is a **hyperconverged node** — every node runs both the control and data plane, similar in spirit to CockroachDB. There are no separate metadata servers. Cluster membership is handled by etcd.
 
-### Developer Experience
-- **Multiple server configurations** (basic, replicated, Raft-enabled)
-- **Comprehensive logging** for debugging and learning
-- **Test scenarios** for failure simulation
-- **MCP integration** for enhanced tooling support
+Each node is assembled from:
+
+| Layer | Interface | Active Implementation |
+|---|---|---|
+| Cluster membership | `ClusterService` | etcd |
+| Transport | `Communicator` | gRPC |
+| Metadata storage | `MetadataService` | BoltDB |
+| Metadata consensus | `MetadataReplicator` | Durable Raft (WAL + CRC) |
+| Chunk storage | `ChunkService` | Local disk |
+| Control coordination | `ControlPlaneOrchestrator` | Raft-backed control plane |
+| Data coordination | `DataPlaneOrchestrator` | Raft-aware data plane |
+| Placement | `PlacementStrategy` | Sorted placement |
+| Routing | `EndpointResolver` | Static endpoint resolver |
+| Write coordination | `TransactionCoordinator` | Raft transaction coordinator |
+
+The server layer (`SimpleServer`) depends only on the orchestrator interfaces, not on any concrete implementation. This is the seam where new topologies plug in.
+
+The canonical entry point for understanding the system is `servers/node/wire_grpc_etcd.go`. It assembles every component in dependency order and shows exactly how the current topology is built.
 
 ## Quick Start
 
-### Server Options
+**Prerequisites:** Go 1.24+, Docker with Compose, Bash, free ports 2379, 2380, 9001–9003
 
-Sandstore now ships with a single configurable entry point (`cmd/sandstore`) that can start different server modes:
+**Start a 3-node local cluster:**
 
-- **Simple server** (single node, no replication):
-  ```bash
-  make simple
-  ```
-  This uses `scripts/dev/run-simple.sh` and keeps the server in the foreground so you can stop it with `Ctrl+C`.  
-  Optional overrides: `NODE_ID=<id> LISTEN_ADDR=:8090 DATA_DIR=./run/simple make simple`
+```bash
+git clone https://github.com/AnishMulay/sandstore
+cd sandstore
 
-- **Raft demo cluster** (5 nodes with consensus and replication):
-  ```bash
-  make cluster
-  ```
-  This runs `scripts/dev/run-5.sh`, launches five Raft nodes, and tails their logs to `run/logs/`. Stop the cluster with `Ctrl+C`.
+# Start etcd
+docker compose -f deploy/docker/etcd/docker-compose.yaml up -d
 
-If you prefer to run individual nodes manually, you can call `go run ./cmd/sandstore --server raft ...` directly (see below for flag details).
-
-### Basic Usage
-
-1. **Start a server** (choose your complexity level):
-   ```bash
-   # Single-node sandbox
-   make simple
-
-   # Multi-node Raft example
-   make cluster
-   ```
-
-2. **Store a file from another terminal:**
-   ```bash
-   make client
-   ```
-
-3. **Watch the magic happen:**
-   - Leader election occurs automatically when you run the Raft cluster
-   - Files get chunked and distributed across nodes
-   - Metadata is replicated via consensus
-   - Logs are written under `run/logs/` (cluster) or the configured `DATA_DIR` (simple server)
-
-### Example Client Code
-
-```go
-// Store a file
-storeRequest := communication.StoreFileRequest{
-    Path: "my-document.txt",
-    Data: []byte("Hello, distributed world!"),
-}
-
-// The system automatically:
-// 1. Chunks the file (if large enough)
-// 2. Replicates chunks across nodes  
-// 3. Updates metadata via Raft consensus
-// 4. Returns success once committed
+# Build, start 3 nodes, elect a leader, run smoke test
+./scripts/dev/run-smoke.sh
 ```
 
-## Architecture Overview
+This boots a full 3-node Sandstore cluster on localhost, waits for leader election, and runs an end-to-end open/read/write/fsync/remove smoke test against it. The cluster stays up after the script finishes for manual exploration.
 
-Sandstore follows a **layered, service-oriented architecture**:
+**Kubernetes (full integration suite):**
 
-### Service Layer
-- **File Service**: Handles high-level file operations, coordinates chunking
-- **Chunk Service**: Manages physical chunk storage on local disk
-- **Metadata Service**: Tracks file-to-chunk mappings and locations
-- **Cluster Service**: Maintains node membership and health status
+```bash
+make test-cluster
+```
 
-### Consensus Layer  
-- **Raft Implementation**: Ensures metadata consistency across nodes
-- **Leader Election**: Automatic leader selection and failover
-- **Log Replication**: Distributes state changes to all nodes
+Builds Docker images, deploys a 3-node cluster to Kubernetes, and runs leader election, open/read/write, restart durability, leader deletion recovery, and node rejoin tests. Cleans up the namespace on completion.
 
-### Communication Layer
-- **gRPC Protocol**: Type-safe, efficient inter-node communication
-- **Message Routing**: Handles request forwarding and response aggregation
-- **Health Checking**: Monitors node availability and network partitions
+**Other useful make targets:**
 
-### Storage Layer
-- **Local Disk Storage**: Chunks stored as individual files
-- **Configurable Paths**: Separate storage per node instance
-- **Atomic Operations**: Ensures data consistency during writes
+```bash
+make build            # Build the node binary
+make proto            # Regenerate protobuf/gRPC stubs
+make durability-smoke # Ephemeral Docker durability test (bring-up + test + teardown)
+make client           # Build the manual client binary
+```
+
+## Repository Layout
+
+```
+cmd/sandstore/         # Node binary entrypoint
+servers/node/          # Active topology wiring (start here)
+internal/
+  orchestrators/       # ControlPlaneOrchestrator, DataPlaneOrchestrator and their interfaces
+  metadata_service/    # MetadataService interface + BoltDB implementation
+  metadata_replicator/ # MetadataReplicator interface + Durable Raft implementation
+  chunk_service/       # ChunkService interface + local disk implementation
+  cluster_service/     # ClusterService interface + etcd implementation
+  communication/       # Communicator interface + gRPC implementation
+  server/              # Server interface + SimpleServer
+clients/
+  library/             # SDK, smart client, topology router (ConvergedRouter)
+  open_smoke/          # End-to-end smoke test client
+  durability_smoke/    # Failover/durability smoke client
+  mcp/                 # Model Context Protocol server (in progress)
+deploy/
+  docker/              # Docker Compose configs for local clusters
+  k8s/                 # Kubernetes manifests for production-like testing
+integration/cluster/   # Kubernetes integration test suite
+docs/                  # Design documents
+proto/                 # Protobuf source definitions
+```
+
+## Implementing a New Topology
+
+To build a new storage topology — say, a GFS-style architecture with a dedicated metadata server — you implement new versions of the interfaces relevant to your design:
+
+- **`PlacementStrategy`** — placement logic for your node roles
+- **`DataPlaneOrchestrator`** — your write/read semantics (e.g. primary/secondary instead of replicated-prepare + Raft-commit)
+- **`TransactionCoordinator`** — coordination logic matching your write path
+- Optionally: **`MetadataService`**, **`MetadataReplicator`** — if you want different metadata persistence or consensus behavior
+
+Then write a new wiring file (like `servers/node/wire_grpc_etcd.go`) that assembles your implementations and passes them to `SimpleServer`. No changes to the server layer, client, or deploy tooling required.
+
+The interface definitions live in `internal/orchestrators/interfaces.go`. Start there.
 
 ## Roadmap
 
-### Current Focus
-- [ ] Enhanced Raft implementation with log compaction
-- [ ] Improved failure detection and recovery
-- [ ] Performance benchmarking and optimization
-- [ ] Web-based cluster monitoring dashboard
+### Active
+- [x] Hyperconverged node topology (etcd + gRPC + durable Raft + BoltDB)
+- [x] Durable Raft WAL with CRC/envelope protection and corruption recovery
+- [x] Kubernetes integration test suite (leader election, durability, node rejoin)
+- [x] Smart client with topology-aware leader routing (ConvergedRouter)
+- [x] 2PC transactional chunk writes
 
-### Future Enhancements  
-- [ ] Erasure coding for efficient storage
-- [ ] Dynamic cluster membership changes
-- [ ] Cross-datacenter replication
-- [ ] Compression and deduplication
-- [ ] REST API alongside gRPC
+### In Progress
+- [ ] GFS-style separated metadata/data topology (second reference implementation)
+- [ ] MCP server aligned with current server message types
+- [ ] FUSE client (`clients/fuse/`)
 
-### Learning Resources
-- [ ] Interactive tutorials for each distributed systems concept
-- [ ] Failure scenario simulations
-- [ ] Performance analysis tools
-- [ ] Architecture deep-dive documentation
+### Planned
+- [ ] Additional PlacementStrategy implementations
+- [ ] Additional storage backends (object storage semantics)
+- [ ] Interactive demo
+- [ ] Log compaction and snapshot-based cluster recovery improvements
+- [ ] Web-based cluster monitoring
 
 ## Contributing
 
-We welcome contributions from learners and experts alike! Whether you're fixing bugs, adding features, improving documentation, or sharing learning resources, your contributions help make distributed systems more accessible.
+Contributions are welcome — new topology implementations especially so.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines on:
-- Setting up your development environment
-- Code style and testing requirements  
-- Submitting issues and pull requests
-- Joining our community discussions
+The best place to start is `servers/node/wire_grpc_etcd.go` to understand the current topology, then `internal/orchestrators/interfaces.go` to understand the extension points.
 
-## Learning Path
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on setting up your environment, code style, and submitting pull requests.
 
-New to distributed systems? Try this progression:
-
-1. **Start simple**: Run `make simple` to explore single-node behavior
-2. **Scale out**: Use `make cluster` (or customize `scripts/dev/run-5.sh`) for a full Raft experience
-3. **Simulate failures**: Kill nodes from the cluster and observe recovery
-4. **Extend the system**: Tweak the services in `servers/` and `cmd/sandstore`
+**Questions?**
+- [Open an issue](https://github.com/AnishMulay/sandstore/issues) for bugs or feature requests
+- [Start a discussion](https://github.com/AnishMulay/sandstore/discussions) for architecture questions or ideas
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Questions?
-
-- **Issues**: Found a bug or have a feature request? [Open an issue](https://github.com/AnishMulay/sandstore/issues)
-- **Discussions**: Want to chat about distributed systems? [Start a discussion](https://github.com/AnishMulay/sandstore/discussions)
-- **Learning**: Stuck on a concept? We're here to help - don't hesitate to ask!
+This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
 
 ---
