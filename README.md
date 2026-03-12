@@ -6,12 +6,11 @@
 ![License](https://img.shields.io/badge/License-MIT-blue?style=flat-square&logo=opensource)
 ![Language](https://img.shields.io/github/languages/top/AnishMulay/sandstore?style=flat-square&logo=go&color=00ADD8)
 ![Last Commit](https://img.shields.io/github/last-commit/AnishMulay/sandstore?style=flat-square)
-
 ![Commit Activity](https://img.shields.io/github/commit-activity/m/AnishMulay/sandstore?style=flat-square)
+
 ![Repo Size](https://img.shields.io/github/repo-size/AnishMulay/sandstore?style=flat-square)
 ![Issues](https://img.shields.io/github/issues/AnishMulay/sandstore?style=flat-square)
 ![Contributors](https://img.shields.io/github/contributors/AnishMulay/sandstore?style=flat-square)
-
 [![Website](https://img.shields.io/badge/Website-sandstore--eta.vercel.app-black?style=flat-square&logo=vercel)](https://sandstore-eta.vercel.app/)
 
 <img width="300" height="300" alt="sandstore_logo" src="https://github.com/user-attachments/assets/509e0bb5-7fab-409f-ba59-a2b161b90923" />
