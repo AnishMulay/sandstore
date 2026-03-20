@@ -6,11 +6,13 @@ import (
 	"net"
 	"reflect"
 	"sync"
+	"time"
 
 	communicationpb "github.com/AnishMulay/sandstore/gen/proto/communication"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	internalerrors "github.com/AnishMulay/sandstore/internal/communication/internal"
 	"github.com/AnishMulay/sandstore/internal/log_service"
+	"github.com/AnishMulay/sandstore/internal/metrics"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -19,10 +21,11 @@ import (
 const maxGRPCMessageSize = 32 * 1024 * 1024
 
 type GRPCCommunicator struct {
-	listenAddress string
-	handler       communication.MessageHandler
-	grpcServer    *grpc.Server
-	ls            log_service.LogService
+	listenAddress  string
+	handler        communication.MessageHandler
+	grpcServer     *grpc.Server
+	ls             log_service.LogService
+	metricsService metrics.MetricsService
 
 	clientLock   sync.RWMutex
 	clients      map[string]communicationpb.MessageServiceClient
@@ -31,12 +34,18 @@ type GRPCCommunicator struct {
 	stopMutex    sync.RWMutex
 }
 
-func NewGRPCCommunicator(addr string, ls log_service.LogService) *GRPCCommunicator {
+func NewGRPCCommunicator(addr string, ls log_service.LogService, metricsService ...metrics.MetricsService) *GRPCCommunicator {
+	var service metrics.MetricsService
+	if len(metricsService) > 0 {
+		service = metricsService[0]
+	}
+
 	c := &GRPCCommunicator{
-		listenAddress: addr,
-		ls:            ls,
-		clients:       make(map[string]communicationpb.MessageServiceClient),
-		payloadTypes:  make(map[string]reflect.Type),
+		listenAddress:  addr,
+		ls:             ls,
+		metricsService: service,
+		clients:        make(map[string]communicationpb.MessageServiceClient),
+		payloadTypes:   make(map[string]reflect.Type),
 	}
 
 	// Register default payload types
@@ -65,6 +74,18 @@ func (c *GRPCCommunicator) RegisterPayloadType(messageType string, payloadType r
 }
 
 func (c *GRPCCommunicator) Start(handler communication.MessageHandler) error {
+	start := time.Now()
+	defer func() {
+		if c == nil || c.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		c.metricsService.Observe(metrics.GRPCCommunicatorStartLatency, elapsed, metrics.MetricTags{
+			Operation: "start",
+			Service:   "GRPCCommunicator",
+		})
+	}()
+
 	c.ls.Info(log_service.LogEvent{
 		Message:  "Starting GRPC communicator",
 		Metadata: map[string]any{"address": c.listenAddress},
@@ -103,6 +124,18 @@ func (c *GRPCCommunicator) Start(handler communication.MessageHandler) error {
 }
 
 func (c *GRPCCommunicator) Stop() error {
+	start := time.Now()
+	defer func() {
+		if c == nil || c.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		c.metricsService.Observe(metrics.GRPCCommunicatorStopLatency, elapsed, metrics.MetricTags{
+			Operation: "stop",
+			Service:   "GRPCCommunicator",
+		})
+	}()
+
 	c.stopMutex.Lock()
 	defer c.stopMutex.Unlock()
 
@@ -133,6 +166,18 @@ func (c *GRPCCommunicator) Stop() error {
 }
 
 func (c *GRPCCommunicator) Send(ctx context.Context, to string, msg communication.Message) (*communication.Response, error) {
+	start := time.Now()
+	defer func() {
+		if c == nil || c.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		c.metricsService.Observe(metrics.GRPCCommunicatorSendLatency, elapsed, metrics.MetricTags{
+			Operation: "send",
+			Service:   "GRPCCommunicator",
+		})
+	}()
+
 	c.ls.Debug(log_service.LogEvent{
 		Message:  "Sending GRPC message",
 		Metadata: map[string]any{"to": to, "type": msg.Type, "from": msg.From},

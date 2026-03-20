@@ -10,8 +10,10 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/AnishMulay/sandstore/internal/metadata_replicator/raft_replicator"
+	"github.com/AnishMulay/sandstore/internal/metrics"
 )
 
 var (
@@ -56,13 +58,18 @@ type walEnvelope struct {
 }
 
 type FileStableStore struct {
-	path string
-	mu   sync.Mutex
+	path           string
+	metricsService metrics.MetricsService
+	mu             sync.Mutex
 }
 
-func NewFileStableStore(path string) (*FileStableStore, error) {
+func NewFileStableStore(path string, metricsService ...metrics.MetricsService) (*FileStableStore, error) {
 	_ = os.MkdirAll(filepath.Dir(path), 0o755)
-	s := &FileStableStore{path: path}
+	var service metrics.MetricsService
+	if len(metricsService) > 0 {
+		service = metricsService[0]
+	}
+	s := &FileStableStore{path: path, metricsService: service}
 	// Eagerly validate: if a file exists at path, confirm it is CRC-valid
 	// before returning. A corrupt file here panics the node at startup via
 	// the caller in wire_grpc_etcd.go, which is the correct behaviour.
@@ -73,6 +80,18 @@ func NewFileStableStore(path string) (*FileStableStore, error) {
 }
 
 func (s *FileStableStore) SetState(currentTerm uint64, votedFor string) error {
+	start := time.Now()
+	defer func() {
+		if s == nil || s.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		s.metricsService.Observe(metrics.FileStableStoreSetStateLatency, elapsed, metrics.MetricTags{
+			Operation: "set_state",
+			Service:   "FileStableStore",
+		})
+	}()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -93,6 +112,18 @@ func (s *FileStableStore) SetState(currentTerm uint64, votedFor string) error {
 }
 
 func (s *FileStableStore) GetState() (uint64, string, error) {
+	start := time.Now()
+	defer func() {
+		if s == nil || s.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		s.metricsService.Observe(metrics.FileStableStoreGetStateLatency, elapsed, metrics.MetricTags{
+			Operation: "get_state",
+			Service:   "FileStableStore",
+		})
+	}()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -120,16 +151,33 @@ func (s *FileStableStore) GetState() (uint64, string, error) {
 }
 
 type FileSnapshotStore struct {
-	path string
-	mu   sync.Mutex
+	path           string
+	metricsService metrics.MetricsService
+	mu             sync.Mutex
 }
 
-func NewFileSnapshotStore(path string) *FileSnapshotStore {
+func NewFileSnapshotStore(path string, metricsService ...metrics.MetricsService) *FileSnapshotStore {
 	_ = os.MkdirAll(filepath.Dir(path), 0o755)
-	return &FileSnapshotStore{path: path}
+	var service metrics.MetricsService
+	if len(metricsService) > 0 {
+		service = metricsService[0]
+	}
+	return &FileSnapshotStore{path: path, metricsService: service}
 }
 
 func (s *FileSnapshotStore) SaveSnapshot(meta SnapshotMeta, data []byte) error {
+	start := time.Now()
+	defer func() {
+		if s == nil || s.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		s.metricsService.Observe(metrics.FileSnapshotStoreSaveLatency, elapsed, metrics.MetricTags{
+			Operation: "save",
+			Service:   "FileSnapshotStore",
+		})
+	}()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -141,6 +189,18 @@ func (s *FileSnapshotStore) SaveSnapshot(meta SnapshotMeta, data []byte) error {
 }
 
 func (s *FileSnapshotStore) LoadSnapshot() (SnapshotMeta, []byte, error) {
+	start := time.Now()
+	defer func() {
+		if s == nil || s.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		s.metricsService.Observe(metrics.FileSnapshotStoreLoadLatency, elapsed, metrics.MetricTags{
+			Operation: "load",
+			Service:   "FileSnapshotStore",
+		})
+	}()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -162,6 +222,7 @@ func (s *FileSnapshotStore) LoadSnapshot() (SnapshotMeta, []byte, error) {
 type FileLogStore struct {
 	path string
 
+	metricsService metrics.MetricsService
 	mu             sync.Mutex
 	logs           map[uint64]raft_replicator.LogEntry
 	last           uint64
@@ -169,12 +230,13 @@ type FileLogStore struct {
 	compactedTerm  uint64
 }
 
-func NewFileLogStore(path string) (*FileLogStore, error) {
+func NewFileLogStore(path string, metricsService metrics.MetricsService) (*FileLogStore, error) {
 	_ = os.MkdirAll(filepath.Dir(path), 0o755)
 
 	s := &FileLogStore{
-		path: path,
-		logs: make(map[uint64]raft_replicator.LogEntry),
+		path:           path,
+		metricsService: metricsService,
+		logs:           make(map[uint64]raft_replicator.LogEntry),
 	}
 	if err := s.load(); err != nil {
 		return nil, err
@@ -226,6 +288,18 @@ func (s *FileLogStore) load() error {
 }
 
 func (s *FileLogStore) StoreLogs(entries []raft_replicator.LogEntry) error {
+	start := time.Now()
+	defer func() {
+		if s == nil || s.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		s.metricsService.Observe(metrics.FileLogStoreStoreLogsLatency, elapsed, metrics.MetricTags{
+			Operation: "store_logs",
+			Service:   "FileLogStore",
+		})
+	}()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -244,6 +318,18 @@ func (s *FileLogStore) StoreLogs(entries []raft_replicator.LogEntry) error {
 }
 
 func (s *FileLogStore) GetLog(index uint64) (raft_replicator.LogEntry, error) {
+	start := time.Now()
+	defer func() {
+		if s == nil || s.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		s.metricsService.Observe(metrics.FileLogStoreGetLogLatency, elapsed, metrics.MetricTags{
+			Operation: "get_log",
+			Service:   "FileLogStore",
+		})
+	}()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -258,6 +344,18 @@ func (s *FileLogStore) GetLog(index uint64) (raft_replicator.LogEntry, error) {
 }
 
 func (s *FileLogStore) LastIndexAndTerm() (uint64, uint64, error) {
+	start := time.Now()
+	defer func() {
+		if s == nil || s.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		s.metricsService.Observe(metrics.FileLogStoreLastIndexAndTermLatency, elapsed, metrics.MetricTags{
+			Operation: "last_index_and_term",
+			Service:   "FileLogStore",
+		})
+	}()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -275,6 +373,18 @@ func (s *FileLogStore) LastIndexAndTerm() (uint64, uint64, error) {
 }
 
 func (s *FileLogStore) DeleteRange(min, max uint64) error {
+	start := time.Now()
+	defer func() {
+		if s == nil || s.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		s.metricsService.Observe(metrics.FileLogStoreDeleteRangeLatency, elapsed, metrics.MetricTags{
+			Operation: "delete_range",
+			Service:   "FileLogStore",
+		})
+	}()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

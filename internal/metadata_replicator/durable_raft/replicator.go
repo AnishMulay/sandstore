@@ -16,6 +16,7 @@ import (
 	pmr "github.com/AnishMulay/sandstore/internal/metadata_replicator"
 	"github.com/AnishMulay/sandstore/internal/metadata_replicator/raft_replicator"
 	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
+	"github.com/AnishMulay/sandstore/internal/metrics"
 	ps "github.com/AnishMulay/sandstore/internal/server"
 )
 
@@ -28,6 +29,7 @@ type DurableRaftReplicator struct {
 	clusterService cluster_service.ClusterService
 	comm           communication.Communicator
 	ls             log_service.LogService
+	metricsService metrics.MetricsService
 	applier        pmr.ApplyFunc
 
 	config        RaftConfig
@@ -67,6 +69,7 @@ func NewDurableRaftReplicator(
 	logStore LogStore,
 	stableStore StableStore,
 	snapshotStore SnapshotStore,
+	metricsService metrics.MetricsService,
 	stateMachine pms.SnapshotableStateMachine,
 ) *DurableRaftReplicator {
 	return &DurableRaftReplicator{
@@ -74,6 +77,7 @@ func NewDurableRaftReplicator(
 		clusterService: cs,
 		comm:           comm,
 		ls:             ls,
+		metricsService: metricsService,
 		config:         cfg,
 		logStore:       logStore,
 		stableStore:    stableStore,
@@ -143,6 +147,18 @@ func (r *DurableRaftReplicator) Stop() error {
 }
 
 func (r *DurableRaftReplicator) Replicate(ctx context.Context, data []byte) error {
+	start := time.Now()
+	defer func() {
+		if r == nil || r.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		r.metricsService.Observe(metrics.RaftReplicatorReplicateLatency, elapsed, metrics.MetricTags{
+			Operation: "replicate",
+			Service:   "DurableRaftReplicator",
+		})
+	}()
+
 	r.mu.Lock()
 	if r.state != raft_replicator.Leader {
 		leaderID := r.leaderID
@@ -371,6 +387,18 @@ type snapshotWork struct {
 }
 
 func (r *DurableRaftReplicator) broadcastAppendEntries() {
+	start := time.Now()
+	defer func() {
+		if r == nil || r.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		r.metricsService.Observe(metrics.RaftReplicatorBroadcastAppendEntriesLatency, elapsed, metrics.MetricTags{
+			Operation: "broadcast_append_entries",
+			Service:   "DurableRaftReplicator",
+		})
+	}()
+
 	r.mu.Lock()
 	if r.state != raft_replicator.Leader {
 		r.mu.Unlock()
@@ -483,6 +511,18 @@ func (r *DurableRaftReplicator) broadcastAppendEntries() {
 }
 
 func (r *DurableRaftReplicator) replicateAppendEntries(w appendWork) {
+	start := time.Now()
+	defer func() {
+		if r == nil || r.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		r.metricsService.Observe(metrics.RaftReplicatorReplicateAppendEntriesLatency, elapsed, metrics.MetricTags{
+			Operation: "replicate_append_entries",
+			Service:   "DurableRaftReplicator",
+		})
+	}()
+
 	entriesBytes, err := json.Marshal(w.entries)
 	if err != nil {
 		return
@@ -552,6 +592,18 @@ func (r *DurableRaftReplicator) replicateAppendEntries(w appendWork) {
 }
 
 func (r *DurableRaftReplicator) replicateSnapshot(w snapshotWork) {
+	start := time.Now()
+	defer func() {
+		if r == nil || r.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		r.metricsService.Observe(metrics.RaftReplicatorReplicateSnapshotLatency, elapsed, metrics.MetricTags{
+			Operation: "replicate_snapshot",
+			Service:   "DurableRaftReplicator",
+		})
+	}()
+
 	msg := communication.Message{
 		From:    r.comm.Address(),
 		Type:    ps.MsgRaftInstallSnapshot,
@@ -625,6 +677,18 @@ func (r *DurableRaftReplicator) advanceCommitIndexLocked() {
 }
 
 func (r *DurableRaftReplicator) applyLogsLocked() {
+	start := time.Now()
+	defer func() {
+		if r == nil || r.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		r.metricsService.Observe(metrics.RaftReplicatorApplyLogsLockedLatency, elapsed, metrics.MetricTags{
+			Operation: "apply_logs_locked",
+			Service:   "DurableRaftReplicator",
+		})
+	}()
+
 	for r.lastApplied < r.commitIndex {
 		nextIndex := r.lastApplied + 1
 		if nextIndex <= r.lastIncludedIndex {
@@ -655,6 +719,18 @@ func (r *DurableRaftReplicator) applyLogsLocked() {
 }
 
 func (r *DurableRaftReplicator) HandleAppendEntries(ctx context.Context, req communication.AppendEntriesRequest) (*raft_replicator.AppendEntriesReply, error) {
+	start := time.Now()
+	defer func() {
+		if r == nil || r.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		r.metricsService.Observe(metrics.RaftReplicatorHandleAppendEntriesLatency, elapsed, metrics.MetricTags{
+			Operation: "handle_append_entries",
+			Service:   "DurableRaftReplicator",
+		})
+	}()
+
 	_ = ctx
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -761,6 +837,18 @@ func (r *DurableRaftReplicator) HandleAppendEntries(ctx context.Context, req com
 }
 
 func (r *DurableRaftReplicator) HandleRequestVote(ctx context.Context, req raft_replicator.RequestVoteArgs) (*raft_replicator.RequestVoteReply, error) {
+	start := time.Now()
+	defer func() {
+		if r == nil || r.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		r.metricsService.Observe(metrics.RaftReplicatorHandleRequestVoteLatency, elapsed, metrics.MetricTags{
+			Operation: "handle_request_vote",
+			Service:   "DurableRaftReplicator",
+		})
+	}()
+
 	_ = ctx
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -792,6 +880,18 @@ func (r *DurableRaftReplicator) HandleRequestVote(ctx context.Context, req raft_
 }
 
 func (r *DurableRaftReplicator) HandleInstallSnapshot(ctx context.Context, req communication.InstallSnapshotRequest) (*raft_replicator.InstallSnapshotReply, error) {
+	start := time.Now()
+	defer func() {
+		if r == nil || r.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		r.metricsService.Observe(metrics.RaftReplicatorHandleInstallSnapshotLatency, elapsed, metrics.MetricTags{
+			Operation: "handle_install_snapshot",
+			Service:   "DurableRaftReplicator",
+		})
+	}()
+
 	_ = ctx
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -861,6 +961,18 @@ func (r *DurableRaftReplicator) HandleInstallSnapshot(ctx context.Context, req c
 }
 
 func (r *DurableRaftReplicator) checkCompaction() {
+	start := time.Now()
+	defer func() {
+		if r == nil || r.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		r.metricsService.Observe(metrics.RaftReplicatorCheckCompactionLatency, elapsed, metrics.MetricTags{
+			Operation: "check_compaction",
+			Service:   "DurableRaftReplicator",
+		})
+	}()
+
 	if r.config.SnapshotThresholdLogs == 0 {
 		return
 	}

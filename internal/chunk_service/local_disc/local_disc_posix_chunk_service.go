@@ -15,6 +15,7 @@ import (
 	"github.com/AnishMulay/sandstore/internal/chunk_replicator"
 	"github.com/AnishMulay/sandstore/internal/log_service"
 	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
+	"github.com/AnishMulay/sandstore/internal/metrics"
 )
 
 var (
@@ -40,6 +41,7 @@ type LocalDiscChunkService struct {
 	replicationFactor int
 	replicator        chunk_replicator.ChunkReplicator
 	ms                pms.MetadataService
+	metricsService    metrics.MetricsService
 
 	indexLock     sync.Mutex
 	finalizeLock  sync.Mutex
@@ -49,14 +51,16 @@ type LocalDiscChunkService struct {
 func NewLocalDiscChunkService(
 	baseDir string,
 	ls log_service.LogService,
+	metricsService metrics.MetricsService,
 ) *LocalDiscChunkService {
 	if err := os.MkdirAll(baseDir, os.ModePerm); err != nil {
 		panic(err)
 	}
 	return &LocalDiscChunkService{
-		baseDir:       baseDir,
-		ls:            ls,
-		preparedIndex: make(map[string]PreparedIndexEntry),
+		baseDir:        baseDir,
+		ls:             ls,
+		metricsService: metricsService,
+		preparedIndex:  make(map[string]PreparedIndexEntry),
 	}
 }
 
@@ -102,6 +106,18 @@ func (cs *LocalDiscChunkService) SetMetadataService(ms pms.MetadataService) {
 }
 
 func (cs *LocalDiscChunkService) PrepareChunk(ctx context.Context, txnID string, chunkID string, data []byte, expectedChecksum string) error {
+	start := time.Now()
+	defer func() {
+		if cs == nil || cs.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		cs.metricsService.Observe(metrics.ChunkServicePrepareChunkLatency, elapsed, metrics.MetricTags{
+			Operation: "prepare_chunk",
+			Service:   "LocalDiscChunkService",
+		})
+	}()
+
 	_ = ctx
 
 	tempFileName := fmt.Sprintf("%s_%s.tmp", chunkID, txnID)
@@ -136,6 +152,18 @@ func (cs *LocalDiscChunkService) PrepareChunk(ctx context.Context, txnID string,
 }
 
 func (cs *LocalDiscChunkService) CommitChunk(ctx context.Context, txnID string, chunkID string) error {
+	start := time.Now()
+	defer func() {
+		if cs == nil || cs.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		cs.metricsService.Observe(metrics.ChunkServiceCommitChunkLatency, elapsed, metrics.MetricTags{
+			Operation: "commit_chunk",
+			Service:   "LocalDiscChunkService",
+		})
+	}()
+
 	_ = ctx
 	cs.finalizeLock.Lock()
 	defer cs.finalizeLock.Unlock()
@@ -166,6 +194,18 @@ func (cs *LocalDiscChunkService) CommitChunk(ctx context.Context, txnID string, 
 }
 
 func (cs *LocalDiscChunkService) AbortChunk(ctx context.Context, txnID string, chunkID string) error {
+	start := time.Now()
+	defer func() {
+		if cs == nil || cs.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		cs.metricsService.Observe(metrics.ChunkServiceAbortChunkLatency, elapsed, metrics.MetricTags{
+			Operation: "abort_chunk",
+			Service:   "LocalDiscChunkService",
+		})
+	}()
+
 	_ = ctx
 	cs.finalizeLock.Lock()
 	defer cs.finalizeLock.Unlock()
@@ -191,6 +231,18 @@ func (cs *LocalDiscChunkService) AbortChunk(ctx context.Context, txnID string, c
 }
 
 func (cs *LocalDiscChunkService) ReadChunk(ctx context.Context, chunkID string) ([]byte, error) {
+	start := time.Now()
+	defer func() {
+		if cs == nil || cs.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		cs.metricsService.Observe(metrics.ChunkServiceReadChunkLatency, elapsed, metrics.MetricTags{
+			Operation: "read_chunk",
+			Service:   "LocalDiscChunkService",
+		})
+	}()
+
 	finalFilePath := cs.finalChunkPath(chunkID)
 
 	if data, err := os.ReadFile(finalFilePath); err == nil {
@@ -237,6 +289,18 @@ func (cs *LocalDiscChunkService) ReadChunk(ctx context.Context, chunkID string) 
 }
 
 func (cs *LocalDiscChunkService) DeleteChunkLocal(ctx context.Context, chunkID string) error {
+	start := time.Now()
+	defer func() {
+		if cs == nil || cs.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		cs.metricsService.Observe(metrics.ChunkServiceDeleteChunkLocalLatency, elapsed, metrics.MetricTags{
+			Operation: "delete_chunk_local",
+			Service:   "LocalDiscChunkService",
+		})
+	}()
+
 	_ = ctx
 	path := cs.finalChunkPath(chunkID)
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {

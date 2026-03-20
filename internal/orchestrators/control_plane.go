@@ -7,8 +7,9 @@ import (
 
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/domain"
-	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
 	raft "github.com/AnishMulay/sandstore/internal/metadata_replicator/raft_replicator"
+	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
+	"github.com/AnishMulay/sandstore/internal/metrics"
 	"github.com/google/uuid"
 )
 
@@ -25,6 +26,7 @@ type controlPlaneOrchestrator struct {
 	placementStrategy PlacementStrategy
 	txnCoordinator    TransactionCoordinator
 	consensusHandler  ConsensusMessageHandler
+	metricsService    metrics.MetricsService
 	chunkSize         int64
 	replicaCount      int
 }
@@ -36,6 +38,7 @@ func NewControlPlaneOrchestrator(
 	placementStrategy PlacementStrategy,
 	txnCoordinator TransactionCoordinator,
 	consensusHandler ConsensusMessageHandler,
+	metricsService metrics.MetricsService,
 	chunkSize int64,
 	replicaCount int,
 ) *controlPlaneOrchestrator {
@@ -51,6 +54,7 @@ func NewControlPlaneOrchestrator(
 		placementStrategy: placementStrategy,
 		txnCoordinator:    txnCoordinator,
 		consensusHandler:  consensusHandler,
+		metricsService:    metricsService,
 		chunkSize:         chunkSize,
 		replicaCount:      replicaCount,
 	}
@@ -77,6 +81,18 @@ func (c *controlPlaneOrchestrator) Stop() error {
 }
 
 func (c *controlPlaneOrchestrator) PrepareFileWrite(ctx context.Context, inodeID string, offset int64, length int64) (*domain.WriteContext, error) {
+	start := time.Now()
+	defer func() {
+		if c == nil || c.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		c.metricsService.Observe(metrics.ControlPlanePrepareFileWriteLatency, elapsed, metrics.MetricTags{
+			Operation: "prepare_file_write",
+			Service:   "controlPlaneOrchestrator",
+		})
+	}()
+
 	if length < 0 {
 		return nil, ErrInvalidLength
 	}
@@ -132,6 +148,18 @@ func (c *controlPlaneOrchestrator) CommitFileWrite(
 	isNewChunk bool,
 	targets []domain.ChunkLocation,
 ) error {
+	start := time.Now()
+	defer func() {
+		if c == nil || c.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		c.metricsService.Observe(metrics.ControlPlaneCommitFileWriteLatency, elapsed, metrics.MetricTags{
+			Operation: "commit_file_write",
+			Service:   "controlPlaneOrchestrator",
+		})
+	}()
+
 	handle := c.txnCoordinator.NewTransaction(txnID)
 
 	inode, err := c.metadataService.GetInode(ctx, inodeID)
@@ -169,11 +197,35 @@ func (c *controlPlaneOrchestrator) CommitFileWrite(
 }
 
 func (c *controlPlaneOrchestrator) AbortFileWrite(ctx context.Context, txnID string, chunkID string, targets []domain.ChunkLocation) error {
+	start := time.Now()
+	defer func() {
+		if c == nil || c.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		c.metricsService.Observe(metrics.ControlPlaneAbortFileWriteLatency, elapsed, metrics.MetricTags{
+			Operation: "abort_file_write",
+			Service:   "controlPlaneOrchestrator",
+		})
+	}()
+
 	handle := c.txnCoordinator.NewTransaction(txnID)
 	return handle.Abort(ctx, chunkID, targets)
 }
 
 func (c *controlPlaneOrchestrator) PrepareFileRead(ctx context.Context, inodeID string, offset int64) (*domain.ReadContext, error) {
+	start := time.Now()
+	defer func() {
+		if c == nil || c.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		c.metricsService.Observe(metrics.ControlPlanePrepareFileReadLatency, elapsed, metrics.MetricTags{
+			Operation: "prepare_file_read",
+			Service:   "controlPlaneOrchestrator",
+		})
+	}()
+
 	inode, err := c.metadataService.GetInode(ctx, inodeID)
 	if err != nil {
 		return nil, err
@@ -196,62 +248,242 @@ func (c *controlPlaneOrchestrator) PrepareFileRead(ctx context.Context, inodeID 
 }
 
 func (c *controlPlaneOrchestrator) GetAttr(ctx context.Context, inodeID string) (*pms.Attributes, error) {
+	start := time.Now()
+	defer func() {
+		if c == nil || c.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		c.metricsService.Observe(metrics.ControlPlaneGetAttrLatency, elapsed, metrics.MetricTags{
+			Operation: "get_attr",
+			Service:   "controlPlaneOrchestrator",
+		})
+	}()
+
 	return c.metadataService.GetAttributes(ctx, inodeID)
 }
 
 func (c *controlPlaneOrchestrator) SetAttr(ctx context.Context, inodeID string, mode *uint32, uid, gid *uint32, atime, mtime *int64) (*pms.Attributes, error) {
+	start := time.Now()
+	defer func() {
+		if c == nil || c.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		c.metricsService.Observe(metrics.ControlPlaneSetAttrLatency, elapsed, metrics.MetricTags{
+			Operation: "set_attr",
+			Service:   "controlPlaneOrchestrator",
+		})
+	}()
+
 	return c.metadataService.SetAttributes(ctx, inodeID, mode, uid, gid, atime, mtime)
 }
 
 func (c *controlPlaneOrchestrator) LookupPath(ctx context.Context, path string) (string, error) {
+	start := time.Now()
+	defer func() {
+		if c == nil || c.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		c.metricsService.Observe(metrics.ControlPlaneLookupPathLatency, elapsed, metrics.MetricTags{
+			Operation: "lookup_path",
+			Service:   "controlPlaneOrchestrator",
+		})
+	}()
+
 	return c.metadataService.LookupPath(ctx, path)
 }
 
 func (c *controlPlaneOrchestrator) Lookup(ctx context.Context, parentInodeID string, name string) (string, error) {
+	start := time.Now()
+	defer func() {
+		if c == nil || c.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		c.metricsService.Observe(metrics.ControlPlaneLookupLatency, elapsed, metrics.MetricTags{
+			Operation: "lookup",
+			Service:   "controlPlaneOrchestrator",
+		})
+	}()
+
 	return c.metadataService.Lookup(ctx, parentInodeID, name)
 }
 
 func (c *controlPlaneOrchestrator) Access(ctx context.Context, inodeID string, uid, gid uint32, accessMask uint32) error {
+	start := time.Now()
+	defer func() {
+		if c == nil || c.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		c.metricsService.Observe(metrics.ControlPlaneAccessLatency, elapsed, metrics.MetricTags{
+			Operation: "access",
+			Service:   "controlPlaneOrchestrator",
+		})
+	}()
+
 	return c.metadataService.Access(ctx, inodeID, uid, gid, accessMask)
 }
 
 func (c *controlPlaneOrchestrator) Create(ctx context.Context, parentInodeID string, name string, mode uint32, uid, gid uint32) (*pms.Inode, error) {
+	start := time.Now()
+	defer func() {
+		if c == nil || c.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		c.metricsService.Observe(metrics.ControlPlaneCreateLatency, elapsed, metrics.MetricTags{
+			Operation: "create",
+			Service:   "controlPlaneOrchestrator",
+		})
+	}()
+
 	return c.metadataService.Create(ctx, parentInodeID, name, mode, uid, gid)
 }
 
 func (c *controlPlaneOrchestrator) Mkdir(ctx context.Context, parentInodeID string, name string, mode uint32, uid, gid uint32) (*pms.Inode, error) {
+	start := time.Now()
+	defer func() {
+		if c == nil || c.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		c.metricsService.Observe(metrics.ControlPlaneMkdirLatency, elapsed, metrics.MetricTags{
+			Operation: "mkdir",
+			Service:   "controlPlaneOrchestrator",
+		})
+	}()
+
 	return c.metadataService.Mkdir(ctx, parentInodeID, name, mode, uid, gid)
 }
 
 func (c *controlPlaneOrchestrator) Remove(ctx context.Context, parentInodeID string, name string) error {
+	start := time.Now()
+	defer func() {
+		if c == nil || c.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		c.metricsService.Observe(metrics.ControlPlaneRemoveLatency, elapsed, metrics.MetricTags{
+			Operation: "remove",
+			Service:   "controlPlaneOrchestrator",
+		})
+	}()
+
 	return c.metadataService.Remove(ctx, parentInodeID, name)
 }
 
 func (c *controlPlaneOrchestrator) Rmdir(ctx context.Context, parentInodeID string, name string) error {
+	start := time.Now()
+	defer func() {
+		if c == nil || c.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		c.metricsService.Observe(metrics.ControlPlaneRmdirLatency, elapsed, metrics.MetricTags{
+			Operation: "rmdir",
+			Service:   "controlPlaneOrchestrator",
+		})
+	}()
+
 	return c.metadataService.Rmdir(ctx, parentInodeID, name)
 }
 
 func (c *controlPlaneOrchestrator) Rename(ctx context.Context, srcParentID, srcName, dstParentID, dstName string) error {
+	start := time.Now()
+	defer func() {
+		if c == nil || c.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		c.metricsService.Observe(metrics.ControlPlaneRenameLatency, elapsed, metrics.MetricTags{
+			Operation: "rename",
+			Service:   "controlPlaneOrchestrator",
+		})
+	}()
+
 	return c.metadataService.Rename(ctx, srcParentID, srcName, dstParentID, dstName)
 }
 
 func (c *controlPlaneOrchestrator) ReadDir(ctx context.Context, inodeID string, cookie int, maxEntries int) ([]pms.DirEntry, int, bool, error) {
+	start := time.Now()
+	defer func() {
+		if c == nil || c.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		c.metricsService.Observe(metrics.ControlPlaneReadDirLatency, elapsed, metrics.MetricTags{
+			Operation: "read_dir",
+			Service:   "controlPlaneOrchestrator",
+		})
+	}()
+
 	return c.metadataService.ReadDir(ctx, inodeID, cookie, maxEntries)
 }
 
 func (c *controlPlaneOrchestrator) ReadDirPlus(ctx context.Context, inodeID string, cookie int, maxEntries int) ([]pms.DirEntryPlus, int, bool, error) {
+	start := time.Now()
+	defer func() {
+		if c == nil || c.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		c.metricsService.Observe(metrics.ControlPlaneReadDirPlusLatency, elapsed, metrics.MetricTags{
+			Operation: "read_dir_plus",
+			Service:   "controlPlaneOrchestrator",
+		})
+	}()
+
 	return c.metadataService.ReadDirPlus(ctx, inodeID, cookie, maxEntries)
 }
 
 func (c *controlPlaneOrchestrator) GetFsStat(ctx context.Context) (*pms.FileSystemStats, error) {
+	start := time.Now()
+	defer func() {
+		if c == nil || c.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		c.metricsService.Observe(metrics.ControlPlaneGetFsStatLatency, elapsed, metrics.MetricTags{
+			Operation: "get_fs_stat",
+			Service:   "controlPlaneOrchestrator",
+		})
+	}()
+
 	return c.metadataService.GetFsStat(ctx)
 }
 
 func (c *controlPlaneOrchestrator) GetFsInfo(ctx context.Context) (*pms.FileSystemInfo, error) {
+	start := time.Now()
+	defer func() {
+		if c == nil || c.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		c.metricsService.Observe(metrics.ControlPlaneGetFsInfoLatency, elapsed, metrics.MetricTags{
+			Operation: "get_fs_info",
+			Service:   "controlPlaneOrchestrator",
+		})
+	}()
+
 	return c.metadataService.GetFsInfo(ctx)
 }
 
 func (c *controlPlaneOrchestrator) HandleConsensusRequestVote(ctx context.Context, req raft.RequestVoteArgs) (*raft.RequestVoteReply, error) {
+	start := time.Now()
+	defer func() {
+		if c == nil || c.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		c.metricsService.Observe(metrics.ControlPlaneHandleConsensusRequestVoteLatency, elapsed, metrics.MetricTags{
+			Operation: "handle_consensus_request_vote",
+			Service:   "controlPlaneOrchestrator",
+		})
+	}()
+
 	if c.consensusHandler == nil {
 		return nil, errors.New("consensus handler not configured")
 	}
@@ -260,6 +492,18 @@ func (c *controlPlaneOrchestrator) HandleConsensusRequestVote(ctx context.Contex
 }
 
 func (c *controlPlaneOrchestrator) HandleConsensusAppendEntries(ctx context.Context, req communication.AppendEntriesRequest) (*raft.AppendEntriesReply, error) {
+	start := time.Now()
+	defer func() {
+		if c == nil || c.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		c.metricsService.Observe(metrics.ControlPlaneHandleConsensusAppendEntriesLatency, elapsed, metrics.MetricTags{
+			Operation: "handle_consensus_append_entries",
+			Service:   "controlPlaneOrchestrator",
+		})
+	}()
+
 	if c.consensusHandler == nil {
 		return nil, errors.New("consensus handler not configured")
 	}
@@ -268,6 +512,18 @@ func (c *controlPlaneOrchestrator) HandleConsensusAppendEntries(ctx context.Cont
 }
 
 func (c *controlPlaneOrchestrator) HandleConsensusInstallSnapshot(ctx context.Context, req communication.InstallSnapshotRequest) (*raft.InstallSnapshotReply, error) {
+	start := time.Now()
+	defer func() {
+		if c == nil || c.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		c.metricsService.Observe(metrics.ControlPlaneHandleConsensusInstallSnapshotLatency, elapsed, metrics.MetricTags{
+			Operation: "handle_consensus_install_snapshot",
+			Service:   "controlPlaneOrchestrator",
+		})
+	}()
+
 	if c.consensusHandler == nil {
 		return nil, errors.New("consensus handler not configured")
 	}

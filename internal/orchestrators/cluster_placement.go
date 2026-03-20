@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/AnishMulay/sandstore/internal/cluster_service"
 	"github.com/AnishMulay/sandstore/internal/domain"
+	"github.com/AnishMulay/sandstore/internal/metrics"
 )
 
 const defaultReplicaCount = 3
@@ -14,11 +16,12 @@ const defaultReplicaCount = 3
 type LegacySortedPlacementStrategy struct {
 	clusterService cluster_service.ClusterService
 	replicaCount   int
+	metricsService metrics.MetricsService
 }
 
 var _ PlacementStrategy = (*LegacySortedPlacementStrategy)(nil)
 
-func NewLegacySortedPlacementStrategy(clusterService cluster_service.ClusterService, replicaCount int) *LegacySortedPlacementStrategy {
+func NewLegacySortedPlacementStrategy(clusterService cluster_service.ClusterService, replicaCount int, metricsService metrics.MetricsService) *LegacySortedPlacementStrategy {
 	if replicaCount <= 0 {
 		replicaCount = defaultReplicaCount
 	}
@@ -26,10 +29,23 @@ func NewLegacySortedPlacementStrategy(clusterService cluster_service.ClusterServ
 	return &LegacySortedPlacementStrategy{
 		clusterService: clusterService,
 		replicaCount:   replicaCount,
+		metricsService: metricsService,
 	}
 }
 
 func (s *LegacySortedPlacementStrategy) SelectTargets(ctx context.Context, chunkID string, replicaCount int) ([]domain.ChunkLocation, error) {
+	start := time.Now()
+	defer func() {
+		if s == nil || s.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		s.metricsService.Observe(metrics.PlacementStrategySelectTargetsLatency, elapsed, metrics.MetricTags{
+			Operation: "select_targets",
+			Service:   "LegacySortedPlacementStrategy",
+		})
+	}()
+
 	_ = ctx
 	_ = chunkID
 

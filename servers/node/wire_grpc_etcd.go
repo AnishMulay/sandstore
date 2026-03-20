@@ -16,6 +16,7 @@ import (
 	chunkservice "github.com/AnishMulay/sandstore/internal/chunk_service/local_disc"
 	durableraft "github.com/AnishMulay/sandstore/internal/metadata_replicator/durable_raft"
 	metadataservice "github.com/AnishMulay/sandstore/internal/metadata_service/bolt"
+	metrics "github.com/AnishMulay/sandstore/internal/metrics/prometheus"
 	"github.com/AnishMulay/sandstore/internal/orchestrators"
 	simpleserver "github.com/AnishMulay/sandstore/internal/server/simple"
 )
@@ -59,11 +60,15 @@ func Build(opts Options) runnable {
 	logDir := opts.DataDir + "/logs"
 	ls := locallog.NewLocalDiscLogService(logDir, opts.NodeID, logservice.InfoLevel)
 
+	// 2. Metrics
+	metricsService := metrics.NewPrometheusMetricsService(":2112", opts.NodeID)
+	go metricsService.Start()
+
 	// 2. Communication
-	comm := grpccomm.NewGRPCCommunicator(opts.ListenAddr, ls)
+	comm := grpccomm.NewGRPCCommunicator(opts.ListenAddr, ls, metricsService)
 
 	// 3. Cluster Service (The Phonebook)
-	clusterService := clustercetcd.NewEtcdClusterService(etcdEndpoints, ls)
+	clusterService := clustercetcd.NewEtcdClusterService(etcdEndpoints, ls, metricsService)
 	if err := clusterService.Start(context.Background()); err != nil {
 		panic(err)
 	}
@@ -74,8 +79,7 @@ func Build(opts Options) runnable {
 		panic(err)
 	}
 
-	// 5. Core Services (The Logic Layer)
-	ms, err := metadataservice.NewBoltMetadataService(opts.DataDir + "/state.db")
+	ms, err := metadataservice.NewBoltMetadataService(opts.DataDir+"/state.db", metricsService)
 	if err != nil {
 		panic(err)
 	}
@@ -86,35 +90,35 @@ func Build(opts Options) runnable {
 		MaxBatchWaitTime:      time.Duration(envInt("RAFT_MAX_BATCH_WAIT_MS", 10)) * time.Millisecond,
 		SnapshotThresholdLogs: uint64(envInt("RAFT_SNAPSHOT_THRESHOLD_LOGS", 1000)),
 	}
-	logStore, err := durableraft.NewFileLogStore(opts.DataDir + "/raft_wal.json")
+	logStore, err := durableraft.NewFileLogStore(opts.DataDir+"/raft_wal.json", metricsService)
 	if err != nil {
 		panic(err)
 	}
-	stableStore, err := durableraft.NewFileStableStore(opts.DataDir + "/raft_stable.json")
+	stableStore, err := durableraft.NewFileStableStore(opts.DataDir+"/raft_stable.json", metricsService)
 	if err != nil {
 		panic(err)
 	}
-	snapshotStore := durableraft.NewFileSnapshotStore(opts.DataDir + "/raft_snapshot.bin")
+	snapshotStore := durableraft.NewFileSnapshotStore(opts.DataDir+"/raft_snapshot.bin", metricsService)
 
-	metaRepl := durableraft.NewDurableRaftReplicator(opts.NodeID, clusterService, comm, ls, raftConfig, logStore, stableStore, snapshotStore, ms)
+	metaRepl := durableraft.NewDurableRaftReplicator(opts.NodeID, clusterService, comm, ls, raftConfig, logStore, stableStore, snapshotStore, metricsService, ms)
 
 	ms.SetReplicator(metaRepl)
 	chunkDir := opts.DataDir + "/chunks/" + opts.NodeID
 
 	// cs now implements the 2PC interface (Prepare, Commit, Abort)
-	cs := chunkservice.NewLocalDiscChunkService(chunkDir, ls)
+	cs := chunkservice.NewLocalDiscChunkService(chunkDir, ls, metricsService)
 
 	chunkSize := int64(8 * 1024 * 1024) // 8MB default
 	replicaCount := 3
 
-	placementStrategy := orchestrators.NewLegacySortedPlacementStrategy(clusterService, replicaCount)
+	placementStrategy := orchestrators.NewLegacySortedPlacementStrategy(clusterService, replicaCount, metricsService)
 	endpointResolver := orchestrators.NewStaticEndpointResolver(clusterService)
-	dpo := orchestrators.NewRaftDataPlaneOrchestrator(comm, endpointResolver, chunkSize, cs)
-	txnCoordinator := orchestrators.NewRaftTransactionCoordinator(comm, metaRepl)
-	cpo := orchestrators.NewControlPlaneOrchestrator(ms, placementStrategy, txnCoordinator, metaRepl, chunkSize, replicaCount)
+	dpo := orchestrators.NewRaftDataPlaneOrchestrator(comm, endpointResolver, chunkSize, cs, metricsService)
+	txnCoordinator := orchestrators.NewRaftTransactionCoordinator(comm, metaRepl, metricsService)
+	cpo := orchestrators.NewControlPlaneOrchestrator(ms, placementStrategy, txnCoordinator, metaRepl, metricsService, chunkSize, replicaCount)
 
 	// 6. Server (The Gateway)
-	srv := simpleserver.NewSimpleServer(comm, cpo, dpo, ls, metaRepl)
+	srv := simpleserver.NewSimpleServer(comm, cpo, dpo, ls, metaRepl, metricsService)
 
 	return &singleNodeServer{
 		server:         srv,
