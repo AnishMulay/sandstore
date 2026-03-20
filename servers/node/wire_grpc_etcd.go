@@ -76,7 +76,7 @@ func Build(opts Options) runnable {
 	}
 
 	// 5. Core Services (The Logic Layer)
-	metricsService := metrics.NewPrometheusMetricsService(":2112")
+	metricsService := metrics.NewPrometheusMetricsService(":2112", opts.NodeID)
 	go metricsService.Start()
 
 	ms, err := metadataservice.NewBoltMetadataService(opts.DataDir+"/state.db", metricsService)

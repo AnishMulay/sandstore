@@ -3,6 +3,7 @@ package metrics
 type MetricTags struct {
 	Operation  string
 	Service    string
+	Node       string
 	Additional map[string]string
 }
 

@@ -11,23 +11,24 @@ import (
 
 type PrometheusMetricsService struct {
 	port       string
+	nodeName   string
 	histograms map[metrics.ObservationName]*prometheusclient.HistogramVec
 }
 
-func NewPrometheusMetricsService(port string) *PrometheusMetricsService {
+func NewPrometheusMetricsService(port string, nodeName string) *PrometheusMetricsService {
 	latencyHistogram := promauto.NewHistogramVec(
 		prometheusclient.HistogramOpts{
 			Name: "sandstore_metadata_service_latency_seconds",
 			Help: "Histogram of latency for Sandstore metadata service operations",
 		},
-		[]string{"operation", "service"},
+		[]string{"operation", "service", "node"},
 	)
 	simpleServerLatencyHistogram := promauto.NewHistogramVec(
 		prometheusclient.HistogramOpts{
 			Name: "sandstore_simple_server_latency_seconds",
 			Help: "Histogram of latency for Sandstore SimpleServer operations",
 		},
-		[]string{"operation", "service"},
+		[]string{"operation", "service", "node"},
 	)
 
 	histograms := map[metrics.ObservationName]*prometheusclient.HistogramVec{
@@ -37,6 +38,7 @@ func NewPrometheusMetricsService(port string) *PrometheusMetricsService {
 
 	return &PrometheusMetricsService{
 		port:       port,
+		nodeName:   nodeName,
 		histograms: histograms,
 	}
 }
@@ -55,7 +57,7 @@ func (p *PrometheusMetricsService) Observe(name metrics.ObservationName, value f
 		return
 	}
 
-	histogram.WithLabelValues(tags.Operation, tags.Service).Observe(value)
+	histogram.WithLabelValues(tags.Operation, tags.Service, p.nodeName).Observe(value)
 }
 
 func (p *PrometheusMetricsService) Gauge(name metrics.GaugeName, value float64, tags metrics.MetricTags) {

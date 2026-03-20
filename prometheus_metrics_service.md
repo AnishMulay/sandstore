@@ -18,6 +18,7 @@ You are only permitted to create or modify the files listed in Section 7 under *
 - Do not add error returns to any `MetricsService` method. Silent drop is the defined behavior throughout.
 - The `Start()` method on `PrometheusMetricsService` is called by the server constructor. It must never be called internally by the struct itself.
 - Every new service instrumented must follow the per-service histogram naming convention: `sandstore_<service_snake_case>_latency_seconds`. Do not create shared histograms. Do not deviate from this naming convention under any circumstances.
+- Do not set the `Node` field in `MetricTags` at call sites. `Node` is injected automatically by `PrometheusMetricsService` via its `nodeName` field.
 
 ## 4. Execution Rules
 
@@ -49,6 +50,7 @@ Implement one step at a time and wait for user confirmation before proceeding to
 type MetricTags struct {
     Operation  string
     Service    string
+    Node       string
     Additional map[string]string
 }
 
@@ -64,6 +66,7 @@ type MetricsService interface {
 ```
 
 Each service gets its own `HistogramVec` registered in `NewPrometheusMetricsService`. Naming convention: `sandstore_<service_snake_case>_latency_seconds`. No shared histograms. One `ObservationName` constant per service in its metrics constants file.
+`PrometheusMetricsService` automatically injects the node name into the `node` label via its `nodeName` field. Call sites do not set `Node` manually.
 
 ```go
 // metrics/metadata.go
@@ -106,20 +109,20 @@ This feature is the first step in a broader observability stack for Sandstore. I
 ### Server Construction
 
 ```go
-func NewPrometheusMetricsService(port string) *PrometheusMetricsService {
+func NewPrometheusMetricsService(port string, nodeName string) *PrometheusMetricsService {
     metadataServiceLatencyHistogram := promauto.NewHistogramVec(
         prometheus.HistogramOpts{
             Name: "sandstore_metadata_service_latency_seconds",
             Help: "Histogram of latency for Sandstore metadata service operations",
         },
-        []string{"operation", "service"},
+        []string{"operation", "service", "node"},
     )
     simpleServerLatencyHistogram := promauto.NewHistogramVec(
         prometheus.HistogramOpts{
             Name: "sandstore_simple_server_latency_seconds",
             Help: "Histogram of latency for Sandstore SimpleServer operations",
         },
-        []string{"operation", "service"},
+        []string{"operation", "service", "node"},
     )
     histograms := map[ObservationName]*prometheus.HistogramVec{
         MetadataOperationLatency:         metadataServiceLatencyHistogram,
@@ -129,6 +132,7 @@ func NewPrometheusMetricsService(port string) *PrometheusMetricsService {
     }
     return &PrometheusMetricsService{
         port:       port,
+        nodeName:   nodeName,
         histograms: histograms,
     }
 }
@@ -174,8 +178,8 @@ func (p *PrometheusMetricsService) Observe(name ObservationName, value float64, 
     if !exists {
         return // silent drop — unregistered metric name
     }
-    // label order must match registration order: {"operation", "service"}
-    histogram.WithLabelValues(tags.Operation, tags.Service).Observe(value)
+    // label order must match registration order: {"operation", "service", "node"}
+    histogram.WithLabelValues(tags.Operation, tags.Service, p.nodeName).Observe(value)
 }
 ```
 
