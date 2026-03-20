@@ -78,6 +78,8 @@ apply_manifests() {
 
   log "Deploying Prometheus..."
   kubectl --context="${KUBE_CONTEXT}" -n "${K8S_NAMESPACE}" apply \
+    -f "${ROOT}/${K8S_MANIFEST_DIR}/prometheus-rbac.yaml" >/dev/null
+  kubectl --context="${KUBE_CONTEXT}" -n "${K8S_NAMESPACE}" apply \
     -f "${ROOT}/${K8S_MANIFEST_DIR}/prometheus-configmap.yaml" \
     -f "${ROOT}/${K8S_MANIFEST_DIR}/deployment-prometheus.yaml" \
     -f "${ROOT}/${K8S_MANIFEST_DIR}/service-prometheus.yaml" >/dev/null

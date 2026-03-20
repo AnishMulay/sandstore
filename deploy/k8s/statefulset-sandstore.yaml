@@ -27,6 +27,9 @@ spec:
             - name: raft
               containerPort: 8080
               protocol: TCP
+            - name: metrics
+              containerPort: 2112
+              protocol: TCP
           envFrom:
             - configMapRef:
                 name: sandstore-config
