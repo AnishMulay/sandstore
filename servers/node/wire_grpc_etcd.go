@@ -16,6 +16,7 @@ import (
 	chunkservice "github.com/AnishMulay/sandstore/internal/chunk_service/local_disc"
 	durableraft "github.com/AnishMulay/sandstore/internal/metadata_replicator/durable_raft"
 	metadataservice "github.com/AnishMulay/sandstore/internal/metadata_service/bolt"
+	metrics "github.com/AnishMulay/sandstore/internal/metrics/prometheus"
 	"github.com/AnishMulay/sandstore/internal/orchestrators"
 	simpleserver "github.com/AnishMulay/sandstore/internal/server/simple"
 )
@@ -75,7 +76,10 @@ func Build(opts Options) runnable {
 	}
 
 	// 5. Core Services (The Logic Layer)
-	ms, err := metadataservice.NewBoltMetadataService(opts.DataDir + "/state.db")
+	metricsService := metrics.NewPrometheusMetricsService(":2112")
+	go metricsService.Start()
+
+	ms, err := metadataservice.NewBoltMetadataService(opts.DataDir+"/state.db", metricsService)
 	if err != nil {
 		panic(err)
 	}
