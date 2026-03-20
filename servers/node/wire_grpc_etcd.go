@@ -106,7 +106,7 @@ func Build(opts Options) runnable {
 	chunkDir := opts.DataDir + "/chunks/" + opts.NodeID
 
 	// cs now implements the 2PC interface (Prepare, Commit, Abort)
-	cs := chunkservice.NewLocalDiscChunkService(chunkDir, ls)
+	cs := chunkservice.NewLocalDiscChunkService(chunkDir, ls, metricsService)
 
 	chunkSize := int64(8 * 1024 * 1024) // 8MB default
 	replicaCount := 3

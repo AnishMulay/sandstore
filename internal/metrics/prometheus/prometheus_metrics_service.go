@@ -51,6 +51,13 @@ func NewPrometheusMetricsService(port string, nodeName string) *PrometheusMetric
 		},
 		[]string{"operation", "service", "node"},
 	)
+	chunkServiceLatencyHistogram := promauto.NewHistogramVec(
+		prometheusclient.HistogramOpts{
+			Name: "sandstore_chunk_service_latency_seconds",
+			Help: "Histogram of latency for Sandstore chunk service operations",
+		},
+		[]string{"operation", "service", "node"},
+	)
 
 	histograms := map[metrics.ObservationName]*prometheusclient.HistogramVec{
 		metrics.MetadataOperationLatency:                          latencyHistogram,
@@ -93,6 +100,11 @@ func NewPrometheusMetricsService(port string, nodeName string) *PrometheusMetric
 		metrics.RaftDataPlaneHandleReadChunkLatency:               raftDataPlaneLatencyHistogram,
 		metrics.RaftDataPlaneHandleDeleteChunkLatency:             raftDataPlaneLatencyHistogram,
 		metrics.RaftDataPlaneHandleLegacyChunkWriteLatency:        raftDataPlaneLatencyHistogram,
+		metrics.ChunkServicePrepareChunkLatency:                   chunkServiceLatencyHistogram,
+		metrics.ChunkServiceCommitChunkLatency:                    chunkServiceLatencyHistogram,
+		metrics.ChunkServiceAbortChunkLatency:                     chunkServiceLatencyHistogram,
+		metrics.ChunkServiceReadChunkLatency:                      chunkServiceLatencyHistogram,
+		metrics.ChunkServiceDeleteChunkLocalLatency:               chunkServiceLatencyHistogram,
 	}
 
 	return &PrometheusMetricsService{
