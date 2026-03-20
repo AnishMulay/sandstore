@@ -11,6 +11,7 @@ import (
 	pcs "github.com/AnishMulay/sandstore/internal/chunk_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/domain"
+	"github.com/AnishMulay/sandstore/internal/metrics"
 )
 
 type RaftDataPlaneOrchestrator struct {
@@ -18,40 +19,114 @@ type RaftDataPlaneOrchestrator struct {
 	endpointResolver EndpointResolver
 	chunkSize        int64
 	cs               pcs.ChunkService
+	metricsService   metrics.MetricsService
 }
 
 var _ DataPlaneOrchestrator = (*RaftDataPlaneOrchestrator)(nil)
 
-func NewRaftDataPlaneOrchestrator(comm communication.Communicator, endpointResolver EndpointResolver, chunkSize int64, cs pcs.ChunkService) *RaftDataPlaneOrchestrator {
+func NewRaftDataPlaneOrchestrator(comm communication.Communicator, endpointResolver EndpointResolver, chunkSize int64, cs pcs.ChunkService, metricsService metrics.MetricsService) *RaftDataPlaneOrchestrator {
 	return &RaftDataPlaneOrchestrator{
 		comm:             comm,
 		endpointResolver: endpointResolver,
 		chunkSize:        chunkSize,
 		cs:               cs,
+		metricsService:   metricsService,
 	}
 }
 
 func (d *RaftDataPlaneOrchestrator) HandlePrepareChunk(ctx context.Context, txnID string, chunkID string, data []byte, checksum string) error {
+	start := time.Now()
+	defer func() {
+		if d == nil || d.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		d.metricsService.Observe(metrics.RaftDataPlaneHandlePrepareChunkLatency, elapsed, metrics.MetricTags{
+			Operation: "handle_prepare_chunk",
+			Service:   "RaftDataPlaneOrchestrator",
+		})
+	}()
+
 	return d.cs.PrepareChunk(ctx, txnID, chunkID, data, checksum)
 }
 
 func (d *RaftDataPlaneOrchestrator) HandleCommitChunk(ctx context.Context, txnID string, chunkID string) error {
+	start := time.Now()
+	defer func() {
+		if d == nil || d.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		d.metricsService.Observe(metrics.RaftDataPlaneHandleCommitChunkLatency, elapsed, metrics.MetricTags{
+			Operation: "handle_commit_chunk",
+			Service:   "RaftDataPlaneOrchestrator",
+		})
+	}()
+
 	return d.cs.CommitChunk(ctx, txnID, chunkID)
 }
 
 func (d *RaftDataPlaneOrchestrator) HandleAbortChunk(ctx context.Context, txnID string, chunkID string) error {
+	start := time.Now()
+	defer func() {
+		if d == nil || d.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		d.metricsService.Observe(metrics.RaftDataPlaneHandleAbortChunkLatency, elapsed, metrics.MetricTags{
+			Operation: "handle_abort_chunk",
+			Service:   "RaftDataPlaneOrchestrator",
+		})
+	}()
+
 	return d.cs.AbortChunk(ctx, txnID, chunkID)
 }
 
 func (d *RaftDataPlaneOrchestrator) HandleReadChunk(ctx context.Context, chunkID string) ([]byte, error) {
+	start := time.Now()
+	defer func() {
+		if d == nil || d.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		d.metricsService.Observe(metrics.RaftDataPlaneHandleReadChunkLatency, elapsed, metrics.MetricTags{
+			Operation: "handle_read_chunk",
+			Service:   "RaftDataPlaneOrchestrator",
+		})
+	}()
+
 	return d.cs.ReadChunk(ctx, chunkID)
 }
 
 func (d *RaftDataPlaneOrchestrator) HandleDeleteChunk(ctx context.Context, chunkID string) error {
+	start := time.Now()
+	defer func() {
+		if d == nil || d.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		d.metricsService.Observe(metrics.RaftDataPlaneHandleDeleteChunkLatency, elapsed, metrics.MetricTags{
+			Operation: "handle_delete_chunk",
+			Service:   "RaftDataPlaneOrchestrator",
+		})
+	}()
+
 	return d.cs.DeleteChunkLocal(ctx, chunkID)
 }
 
 func (d *RaftDataPlaneOrchestrator) HandleLegacyChunkWrite(ctx context.Context, chunkID string, data []byte) error {
+	start := time.Now()
+	defer func() {
+		if d == nil || d.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		d.metricsService.Observe(metrics.RaftDataPlaneHandleLegacyChunkWriteLatency, elapsed, metrics.MetricTags{
+			Operation: "handle_legacy_chunk_write",
+			Service:   "RaftDataPlaneOrchestrator",
+		})
+	}()
+
 	txnID := "legacy-" + chunkID + "-" + time.Now().Format("20060102150405.000000000")
 	checksum := d.calculateChecksum(data)
 	err := d.cs.PrepareChunk(ctx, txnID, chunkID, data, checksum)
@@ -70,6 +145,18 @@ func (d *RaftDataPlaneOrchestrator) ExecuteWrite(
 	targets []domain.ChunkLocation,
 	isNewChunk bool,
 ) error {
+	start := time.Now()
+	defer func() {
+		if d == nil || d.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		d.metricsService.Observe(metrics.RaftDataPlaneExecuteWriteLatency, elapsed, metrics.MetricTags{
+			Operation: "execute_write",
+			Service:   "RaftDataPlaneOrchestrator",
+		})
+	}()
+
 	finalData, err := d.prepareWritePayload(ctx, chunkID, offset, data, targets, isNewChunk)
 	if err != nil {
 		return err
@@ -135,6 +222,18 @@ func (d *RaftDataPlaneOrchestrator) ExecuteRead(
 	chunkID string,
 	targets []domain.ChunkLocation,
 ) ([]byte, error) {
+	start := time.Now()
+	defer func() {
+		if d == nil || d.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		d.metricsService.Observe(metrics.RaftDataPlaneExecuteReadLatency, elapsed, metrics.MetricTags{
+			Operation: "execute_read",
+			Service:   "RaftDataPlaneOrchestrator",
+		})
+	}()
+
 	for _, target := range targets {
 		data, err := d.sendReadRPC(ctx, target, chunkID)
 		if err == nil {
