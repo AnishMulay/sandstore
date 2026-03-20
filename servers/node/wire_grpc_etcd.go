@@ -100,7 +100,7 @@ func Build(opts Options) runnable {
 	}
 	snapshotStore := durableraft.NewFileSnapshotStore(opts.DataDir + "/raft_snapshot.bin")
 
-	metaRepl := durableraft.NewDurableRaftReplicator(opts.NodeID, clusterService, comm, ls, raftConfig, logStore, stableStore, snapshotStore, ms)
+	metaRepl := durableraft.NewDurableRaftReplicator(opts.NodeID, clusterService, comm, ls, raftConfig, logStore, stableStore, snapshotStore, metricsService, ms)
 
 	ms.SetReplicator(metaRepl)
 	chunkDir := opts.DataDir + "/chunks/" + opts.NodeID

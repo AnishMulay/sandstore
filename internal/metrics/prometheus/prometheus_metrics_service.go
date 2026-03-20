@@ -37,6 +37,13 @@ func NewPrometheusMetricsService(port string, nodeName string) *PrometheusMetric
 		},
 		[]string{"operation", "service", "node"},
 	)
+	raftReplicatorLatencyHistogram := promauto.NewHistogramVec(
+		prometheusclient.HistogramOpts{
+			Name: "sandstore_raft_replicator_latency_seconds",
+			Help: "Histogram of latency for Sandstore raft replicator operations",
+		},
+		[]string{"operation", "service", "node"},
+	)
 
 	histograms := map[metrics.ObservationName]*prometheusclient.HistogramVec{
 		metrics.MetadataOperationLatency:                          latencyHistogram,
@@ -62,6 +69,15 @@ func NewPrometheusMetricsService(port string, nodeName string) *PrometheusMetric
 		metrics.ControlPlaneHandleConsensusRequestVoteLatency:     controlPlaneLatencyHistogram,
 		metrics.ControlPlaneHandleConsensusAppendEntriesLatency:   controlPlaneLatencyHistogram,
 		metrics.ControlPlaneHandleConsensusInstallSnapshotLatency: controlPlaneLatencyHistogram,
+		metrics.RaftReplicatorReplicateLatency:                    raftReplicatorLatencyHistogram,
+		metrics.RaftReplicatorHandleAppendEntriesLatency:          raftReplicatorLatencyHistogram,
+		metrics.RaftReplicatorHandleRequestVoteLatency:            raftReplicatorLatencyHistogram,
+		metrics.RaftReplicatorHandleInstallSnapshotLatency:        raftReplicatorLatencyHistogram,
+		metrics.RaftReplicatorBroadcastAppendEntriesLatency:       raftReplicatorLatencyHistogram,
+		metrics.RaftReplicatorReplicateAppendEntriesLatency:       raftReplicatorLatencyHistogram,
+		metrics.RaftReplicatorReplicateSnapshotLatency:            raftReplicatorLatencyHistogram,
+		metrics.RaftReplicatorApplyLogsLockedLatency:              raftReplicatorLatencyHistogram,
+		metrics.RaftReplicatorCheckCompactionLatency:              raftReplicatorLatencyHistogram,
 	}
 
 	return &PrometheusMetricsService{
