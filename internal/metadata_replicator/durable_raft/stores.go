@@ -58,13 +58,18 @@ type walEnvelope struct {
 }
 
 type FileStableStore struct {
-	path string
-	mu   sync.Mutex
+	path           string
+	metricsService metrics.MetricsService
+	mu             sync.Mutex
 }
 
-func NewFileStableStore(path string) (*FileStableStore, error) {
+func NewFileStableStore(path string, metricsService ...metrics.MetricsService) (*FileStableStore, error) {
 	_ = os.MkdirAll(filepath.Dir(path), 0o755)
-	s := &FileStableStore{path: path}
+	var service metrics.MetricsService
+	if len(metricsService) > 0 {
+		service = metricsService[0]
+	}
+	s := &FileStableStore{path: path, metricsService: service}
 	// Eagerly validate: if a file exists at path, confirm it is CRC-valid
 	// before returning. A corrupt file here panics the node at startup via
 	// the caller in wire_grpc_etcd.go, which is the correct behaviour.
@@ -75,6 +80,18 @@ func NewFileStableStore(path string) (*FileStableStore, error) {
 }
 
 func (s *FileStableStore) SetState(currentTerm uint64, votedFor string) error {
+	start := time.Now()
+	defer func() {
+		if s == nil || s.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		s.metricsService.Observe(metrics.FileStableStoreSetStateLatency, elapsed, metrics.MetricTags{
+			Operation: "set_state",
+			Service:   "FileStableStore",
+		})
+	}()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -95,6 +112,18 @@ func (s *FileStableStore) SetState(currentTerm uint64, votedFor string) error {
 }
 
 func (s *FileStableStore) GetState() (uint64, string, error) {
+	start := time.Now()
+	defer func() {
+		if s == nil || s.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		s.metricsService.Observe(metrics.FileStableStoreGetStateLatency, elapsed, metrics.MetricTags{
+			Operation: "get_state",
+			Service:   "FileStableStore",
+		})
+	}()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -122,16 +151,33 @@ func (s *FileStableStore) GetState() (uint64, string, error) {
 }
 
 type FileSnapshotStore struct {
-	path string
-	mu   sync.Mutex
+	path           string
+	metricsService metrics.MetricsService
+	mu             sync.Mutex
 }
 
-func NewFileSnapshotStore(path string) *FileSnapshotStore {
+func NewFileSnapshotStore(path string, metricsService ...metrics.MetricsService) *FileSnapshotStore {
 	_ = os.MkdirAll(filepath.Dir(path), 0o755)
-	return &FileSnapshotStore{path: path}
+	var service metrics.MetricsService
+	if len(metricsService) > 0 {
+		service = metricsService[0]
+	}
+	return &FileSnapshotStore{path: path, metricsService: service}
 }
 
 func (s *FileSnapshotStore) SaveSnapshot(meta SnapshotMeta, data []byte) error {
+	start := time.Now()
+	defer func() {
+		if s == nil || s.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		s.metricsService.Observe(metrics.FileSnapshotStoreSaveLatency, elapsed, metrics.MetricTags{
+			Operation: "save",
+			Service:   "FileSnapshotStore",
+		})
+	}()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -143,6 +189,18 @@ func (s *FileSnapshotStore) SaveSnapshot(meta SnapshotMeta, data []byte) error {
 }
 
 func (s *FileSnapshotStore) LoadSnapshot() (SnapshotMeta, []byte, error) {
+	start := time.Now()
+	defer func() {
+		if s == nil || s.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		s.metricsService.Observe(metrics.FileSnapshotStoreLoadLatency, elapsed, metrics.MetricTags{
+			Operation: "load",
+			Service:   "FileSnapshotStore",
+		})
+	}()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

@@ -93,6 +93,20 @@ func NewPrometheusMetricsService(port string, nodeName string) *PrometheusMetric
 		},
 		[]string{"operation", "service", "node"},
 	)
+	fileSnapshotStoreLatencyHistogram := promauto.NewHistogramVec(
+		prometheusclient.HistogramOpts{
+			Name: "sandstore_file_snapshot_store_latency_seconds",
+			Help: "Histogram of latency for Sandstore file snapshot store operations",
+		},
+		[]string{"operation", "service", "node"},
+	)
+	fileStableStoreLatencyHistogram := promauto.NewHistogramVec(
+		prometheusclient.HistogramOpts{
+			Name: "sandstore_file_stable_store_latency_seconds",
+			Help: "Histogram of latency for Sandstore file stable store operations",
+		},
+		[]string{"operation", "service", "node"},
+	)
 
 	histograms := map[metrics.ObservationName]*prometheusclient.HistogramVec{
 		metrics.MetadataOperationLatency:                          latencyHistogram,
@@ -159,6 +173,10 @@ func NewPrometheusMetricsService(port string, nodeName string) *PrometheusMetric
 		metrics.EtcdClusterServiceSyncStateLatency:                etcdClusterServiceLatencyHistogram,
 		metrics.EtcdClusterServiceWatchLatency:                    etcdClusterServiceLatencyHistogram,
 		metrics.PlacementStrategySelectTargetsLatency:             placementStrategyLatencyHistogram,
+		metrics.FileSnapshotStoreSaveLatency:                      fileSnapshotStoreLatencyHistogram,
+		metrics.FileSnapshotStoreLoadLatency:                      fileSnapshotStoreLatencyHistogram,
+		metrics.FileStableStoreSetStateLatency:                    fileStableStoreLatencyHistogram,
+		metrics.FileStableStoreGetStateLatency:                    fileStableStoreLatencyHistogram,
 	}
 
 	return &PrometheusMetricsService{
