@@ -90,7 +90,7 @@ func Build(opts Options) runnable {
 		MaxBatchWaitTime:      time.Duration(envInt("RAFT_MAX_BATCH_WAIT_MS", 10)) * time.Millisecond,
 		SnapshotThresholdLogs: uint64(envInt("RAFT_SNAPSHOT_THRESHOLD_LOGS", 1000)),
 	}
-	logStore, err := durableraft.NewFileLogStore(opts.DataDir + "/raft_wal.json")
+	logStore, err := durableraft.NewFileLogStore(opts.DataDir+"/raft_wal.json", metricsService)
 	if err != nil {
 		panic(err)
 	}

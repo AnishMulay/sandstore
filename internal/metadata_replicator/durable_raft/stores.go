@@ -10,8 +10,10 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/AnishMulay/sandstore/internal/metadata_replicator/raft_replicator"
+	"github.com/AnishMulay/sandstore/internal/metrics"
 )
 
 var (
@@ -162,6 +164,7 @@ func (s *FileSnapshotStore) LoadSnapshot() (SnapshotMeta, []byte, error) {
 type FileLogStore struct {
 	path string
 
+	metricsService metrics.MetricsService
 	mu             sync.Mutex
 	logs           map[uint64]raft_replicator.LogEntry
 	last           uint64
@@ -169,12 +172,13 @@ type FileLogStore struct {
 	compactedTerm  uint64
 }
 
-func NewFileLogStore(path string) (*FileLogStore, error) {
+func NewFileLogStore(path string, metricsService metrics.MetricsService) (*FileLogStore, error) {
 	_ = os.MkdirAll(filepath.Dir(path), 0o755)
 
 	s := &FileLogStore{
-		path: path,
-		logs: make(map[uint64]raft_replicator.LogEntry),
+		path:           path,
+		metricsService: metricsService,
+		logs:           make(map[uint64]raft_replicator.LogEntry),
 	}
 	if err := s.load(); err != nil {
 		return nil, err
@@ -226,6 +230,18 @@ func (s *FileLogStore) load() error {
 }
 
 func (s *FileLogStore) StoreLogs(entries []raft_replicator.LogEntry) error {
+	start := time.Now()
+	defer func() {
+		if s == nil || s.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		s.metricsService.Observe(metrics.FileLogStoreStoreLogsLatency, elapsed, metrics.MetricTags{
+			Operation: "store_logs",
+			Service:   "FileLogStore",
+		})
+	}()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -244,6 +260,18 @@ func (s *FileLogStore) StoreLogs(entries []raft_replicator.LogEntry) error {
 }
 
 func (s *FileLogStore) GetLog(index uint64) (raft_replicator.LogEntry, error) {
+	start := time.Now()
+	defer func() {
+		if s == nil || s.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		s.metricsService.Observe(metrics.FileLogStoreGetLogLatency, elapsed, metrics.MetricTags{
+			Operation: "get_log",
+			Service:   "FileLogStore",
+		})
+	}()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -258,6 +286,18 @@ func (s *FileLogStore) GetLog(index uint64) (raft_replicator.LogEntry, error) {
 }
 
 func (s *FileLogStore) LastIndexAndTerm() (uint64, uint64, error) {
+	start := time.Now()
+	defer func() {
+		if s == nil || s.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		s.metricsService.Observe(metrics.FileLogStoreLastIndexAndTermLatency, elapsed, metrics.MetricTags{
+			Operation: "last_index_and_term",
+			Service:   "FileLogStore",
+		})
+	}()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -275,6 +315,18 @@ func (s *FileLogStore) LastIndexAndTerm() (uint64, uint64, error) {
 }
 
 func (s *FileLogStore) DeleteRange(min, max uint64) error {
+	start := time.Now()
+	defer func() {
+		if s == nil || s.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		s.metricsService.Observe(metrics.FileLogStoreDeleteRangeLatency, elapsed, metrics.MetricTags{
+			Operation: "delete_range",
+			Service:   "FileLogStore",
+		})
+	}()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
