@@ -30,10 +30,38 @@ func NewPrometheusMetricsService(port string, nodeName string) *PrometheusMetric
 		},
 		[]string{"operation", "service", "node"},
 	)
+	controlPlaneLatencyHistogram := promauto.NewHistogramVec(
+		prometheusclient.HistogramOpts{
+			Name: "sandstore_control_plane_latency_seconds",
+			Help: "Histogram of latency for Sandstore control plane operations",
+		},
+		[]string{"operation", "service", "node"},
+	)
 
 	histograms := map[metrics.ObservationName]*prometheusclient.HistogramVec{
-		metrics.MetadataOperationLatency:         latencyHistogram,
-		metrics.SimpleServerHandleMessageLatency: simpleServerLatencyHistogram,
+		metrics.MetadataOperationLatency:                          latencyHistogram,
+		metrics.SimpleServerHandleMessageLatency:                  simpleServerLatencyHistogram,
+		metrics.ControlPlanePrepareFileWriteLatency:               controlPlaneLatencyHistogram,
+		metrics.ControlPlaneCommitFileWriteLatency:                controlPlaneLatencyHistogram,
+		metrics.ControlPlaneAbortFileWriteLatency:                 controlPlaneLatencyHistogram,
+		metrics.ControlPlanePrepareFileReadLatency:                controlPlaneLatencyHistogram,
+		metrics.ControlPlaneGetAttrLatency:                        controlPlaneLatencyHistogram,
+		metrics.ControlPlaneSetAttrLatency:                        controlPlaneLatencyHistogram,
+		metrics.ControlPlaneLookupLatency:                         controlPlaneLatencyHistogram,
+		metrics.ControlPlaneLookupPathLatency:                     controlPlaneLatencyHistogram,
+		metrics.ControlPlaneAccessLatency:                         controlPlaneLatencyHistogram,
+		metrics.ControlPlaneCreateLatency:                         controlPlaneLatencyHistogram,
+		metrics.ControlPlaneMkdirLatency:                          controlPlaneLatencyHistogram,
+		metrics.ControlPlaneRemoveLatency:                         controlPlaneLatencyHistogram,
+		metrics.ControlPlaneRmdirLatency:                          controlPlaneLatencyHistogram,
+		metrics.ControlPlaneRenameLatency:                         controlPlaneLatencyHistogram,
+		metrics.ControlPlaneReadDirLatency:                        controlPlaneLatencyHistogram,
+		metrics.ControlPlaneReadDirPlusLatency:                    controlPlaneLatencyHistogram,
+		metrics.ControlPlaneGetFsStatLatency:                      controlPlaneLatencyHistogram,
+		metrics.ControlPlaneGetFsInfoLatency:                      controlPlaneLatencyHistogram,
+		metrics.ControlPlaneHandleConsensusRequestVoteLatency:     controlPlaneLatencyHistogram,
+		metrics.ControlPlaneHandleConsensusAppendEntriesLatency:   controlPlaneLatencyHistogram,
+		metrics.ControlPlaneHandleConsensusInstallSnapshotLatency: controlPlaneLatencyHistogram,
 	}
 
 	return &PrometheusMetricsService{

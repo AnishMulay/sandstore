@@ -1,0 +1,25 @@
+package metrics
+
+const (
+	ControlPlanePrepareFileWriteLatency               ObservationName = "control_plane_prepare_file_write"
+	ControlPlaneCommitFileWriteLatency                ObservationName = "control_plane_commit_file_write"
+	ControlPlaneAbortFileWriteLatency                 ObservationName = "control_plane_abort_file_write"
+	ControlPlanePrepareFileReadLatency                ObservationName = "control_plane_prepare_file_read"
+	ControlPlaneGetAttrLatency                        ObservationName = "control_plane_get_attr"
+	ControlPlaneSetAttrLatency                        ObservationName = "control_plane_set_attr"
+	ControlPlaneLookupLatency                         ObservationName = "control_plane_lookup"
+	ControlPlaneLookupPathLatency                     ObservationName = "control_plane_lookup_path"
+	ControlPlaneAccessLatency                         ObservationName = "control_plane_access"
+	ControlPlaneCreateLatency                         ObservationName = "control_plane_create"
+	ControlPlaneMkdirLatency                          ObservationName = "control_plane_mkdir"
+	ControlPlaneRemoveLatency                         ObservationName = "control_plane_remove"
+	ControlPlaneRmdirLatency                          ObservationName = "control_plane_rmdir"
+	ControlPlaneRenameLatency                         ObservationName = "control_plane_rename"
+	ControlPlaneReadDirLatency                        ObservationName = "control_plane_read_dir"
+	ControlPlaneReadDirPlusLatency                    ObservationName = "control_plane_read_dir_plus"
+	ControlPlaneGetFsStatLatency                      ObservationName = "control_plane_get_fs_stat"
+	ControlPlaneGetFsInfoLatency                      ObservationName = "control_plane_get_fs_info"
+	ControlPlaneHandleConsensusRequestVoteLatency     ObservationName = "control_plane_handle_consensus_request_vote"
+	ControlPlaneHandleConsensusAppendEntriesLatency   ObservationName = "control_plane_handle_consensus_append_entries"
+	ControlPlaneHandleConsensusInstallSnapshotLatency ObservationName = "control_plane_handle_consensus_install_snapshot"
+)

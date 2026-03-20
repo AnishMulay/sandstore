@@ -115,7 +115,7 @@ func Build(opts Options) runnable {
 	endpointResolver := orchestrators.NewStaticEndpointResolver(clusterService)
 	dpo := orchestrators.NewRaftDataPlaneOrchestrator(comm, endpointResolver, chunkSize, cs)
 	txnCoordinator := orchestrators.NewRaftTransactionCoordinator(comm, metaRepl)
-	cpo := orchestrators.NewControlPlaneOrchestrator(ms, placementStrategy, txnCoordinator, metaRepl, chunkSize, replicaCount)
+	cpo := orchestrators.NewControlPlaneOrchestrator(ms, placementStrategy, txnCoordinator, metaRepl, metricsService, chunkSize, replicaCount)
 
 	// 6. Server (The Gateway)
 	srv := simpleserver.NewSimpleServer(comm, cpo, dpo, ls, metaRepl, metricsService)
