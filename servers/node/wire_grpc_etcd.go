@@ -60,8 +60,12 @@ func Build(opts Options) runnable {
 	logDir := opts.DataDir + "/logs"
 	ls := locallog.NewLocalDiscLogService(logDir, opts.NodeID, logservice.InfoLevel)
 
+	// 2. Metrics
+	metricsService := metrics.NewPrometheusMetricsService(":2112", opts.NodeID)
+	go metricsService.Start()
+
 	// 2. Communication
-	comm := grpccomm.NewGRPCCommunicator(opts.ListenAddr, ls)
+	comm := grpccomm.NewGRPCCommunicator(opts.ListenAddr, ls, metricsService)
 
 	// 3. Cluster Service (The Phonebook)
 	clusterService := clustercetcd.NewEtcdClusterService(etcdEndpoints, ls)
@@ -74,10 +78,6 @@ func Build(opts Options) runnable {
 	}); err != nil {
 		panic(err)
 	}
-
-	// 5. Core Services (The Logic Layer)
-	metricsService := metrics.NewPrometheusMetricsService(":2112", opts.NodeID)
-	go metricsService.Start()
 
 	ms, err := metadataservice.NewBoltMetadataService(opts.DataDir+"/state.db", metricsService)
 	if err != nil {

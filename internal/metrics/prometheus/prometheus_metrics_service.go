@@ -72,6 +72,13 @@ func NewPrometheusMetricsService(port string, nodeName string) *PrometheusMetric
 		},
 		[]string{"operation", "service", "node"},
 	)
+	grpcCommunicatorLatencyHistogram := promauto.NewHistogramVec(
+		prometheusclient.HistogramOpts{
+			Name: "sandstore_grpc_communicator_latency_seconds",
+			Help: "Histogram of latency for Sandstore grpc communicator operations",
+		},
+		[]string{"operation", "service", "node"},
+	)
 
 	histograms := map[metrics.ObservationName]*prometheusclient.HistogramVec{
 		metrics.MetadataOperationLatency:                          latencyHistogram,
@@ -128,6 +135,9 @@ func NewPrometheusMetricsService(port string, nodeName string) *PrometheusMetric
 		metrics.RaftTxCoordinatorAbortLatency:                     raftTxCoordinatorLatencyHistogram,
 		metrics.RaftTxCoordinatorBroadcastCommitAsyncLatency:      raftTxCoordinatorLatencyHistogram,
 		metrics.RaftTxCoordinatorBroadcastAbortAsyncLatency:       raftTxCoordinatorLatencyHistogram,
+		metrics.GRPCCommunicatorSendLatency:                       grpcCommunicatorLatencyHistogram,
+		metrics.GRPCCommunicatorStartLatency:                      grpcCommunicatorLatencyHistogram,
+		metrics.GRPCCommunicatorStopLatency:                       grpcCommunicatorLatencyHistogram,
 	}
 
 	return &PrometheusMetricsService{
