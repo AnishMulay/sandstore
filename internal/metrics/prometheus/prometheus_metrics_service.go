@@ -86,6 +86,13 @@ func NewPrometheusMetricsService(port string, nodeName string) *PrometheusMetric
 		},
 		[]string{"operation", "service", "node"},
 	)
+	placementStrategyLatencyHistogram := promauto.NewHistogramVec(
+		prometheusclient.HistogramOpts{
+			Name: "sandstore_placement_strategy_latency_seconds",
+			Help: "Histogram of latency for Sandstore placement strategy operations",
+		},
+		[]string{"operation", "service", "node"},
+	)
 
 	histograms := map[metrics.ObservationName]*prometheusclient.HistogramVec{
 		metrics.MetadataOperationLatency:                          latencyHistogram,
@@ -151,6 +158,7 @@ func NewPrometheusMetricsService(port string, nodeName string) *PrometheusMetric
 		metrics.EtcdClusterServiceGetAllNodesLatency:              etcdClusterServiceLatencyHistogram,
 		metrics.EtcdClusterServiceSyncStateLatency:                etcdClusterServiceLatencyHistogram,
 		metrics.EtcdClusterServiceWatchLatency:                    etcdClusterServiceLatencyHistogram,
+		metrics.PlacementStrategySelectTargetsLatency:             placementStrategyLatencyHistogram,
 	}
 
 	return &PrometheusMetricsService{

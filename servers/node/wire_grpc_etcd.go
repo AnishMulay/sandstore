@@ -111,7 +111,7 @@ func Build(opts Options) runnable {
 	chunkSize := int64(8 * 1024 * 1024) // 8MB default
 	replicaCount := 3
 
-	placementStrategy := orchestrators.NewLegacySortedPlacementStrategy(clusterService, replicaCount)
+	placementStrategy := orchestrators.NewLegacySortedPlacementStrategy(clusterService, replicaCount, metricsService)
 	endpointResolver := orchestrators.NewStaticEndpointResolver(clusterService)
 	dpo := orchestrators.NewRaftDataPlaneOrchestrator(comm, endpointResolver, chunkSize, cs, metricsService)
 	txnCoordinator := orchestrators.NewRaftTransactionCoordinator(comm, metaRepl, metricsService)
