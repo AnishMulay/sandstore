@@ -330,7 +330,7 @@ func (s *BoltMetadataService) ApplyCreate(op pms.MetadataOperation, consistentIn
 	defer func() {
 		elapsed := time.Since(start).Seconds()
 		tags := metrics.MetricTags{
-			Operation:  string(pms.OpCreate),
+			Operation:  "apply_create",
 			Service:    "BoltMetadataService",
 			Additional: nil,
 		}
@@ -433,7 +433,7 @@ func (s *BoltMetadataService) ApplyRename(op pms.MetadataOperation, consistentIn
 	defer func() {
 		elapsed := time.Since(start).Seconds()
 		tags := metrics.MetricTags{
-			Operation:  string(pms.OpRename),
+			Operation:  "apply_rename",
 			Service:    "BoltMetadataService",
 			Additional: nil,
 		}
@@ -545,7 +545,7 @@ func (s *BoltMetadataService) ApplyRemove(op pms.MetadataOperation, consistentIn
 	defer func() {
 		elapsed := time.Since(start).Seconds()
 		tags := metrics.MetricTags{
-			Operation:  string(pms.OpRemove),
+			Operation:  "apply_remove",
 			Service:    "BoltMetadataService",
 			Additional: nil,
 		}
@@ -635,7 +635,7 @@ func (s *BoltMetadataService) ApplySetAttr(op pms.MetadataOperation, consistentI
 	defer func() {
 		elapsed := time.Since(start).Seconds()
 		tags := metrics.MetricTags{
-			Operation:  string(pms.OpSetAttr),
+			Operation:  "apply_set_attr",
 			Service:    "BoltMetadataService",
 			Additional: nil,
 		}
@@ -705,7 +705,7 @@ func (s *BoltMetadataService) ApplyUpdateInode(op pms.MetadataOperation, consist
 	defer func() {
 		elapsed := time.Since(start).Seconds()
 		tags := metrics.MetricTags{
-			Operation:  string(pms.OpUpdateInode),
+			Operation:  "apply_update_inode",
 			Service:    "BoltMetadataService",
 			Additional: nil,
 		}
