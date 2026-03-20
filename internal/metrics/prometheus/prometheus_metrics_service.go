@@ -65,6 +65,13 @@ func NewPrometheusMetricsService(port string, nodeName string) *PrometheusMetric
 		},
 		[]string{"operation", "service", "node"},
 	)
+	raftTxCoordinatorLatencyHistogram := promauto.NewHistogramVec(
+		prometheusclient.HistogramOpts{
+			Name: "sandstore_raft_tx_coordinator_latency_seconds",
+			Help: "Histogram of latency for Sandstore raft transaction coordinator operations",
+		},
+		[]string{"operation", "service", "node"},
+	)
 
 	histograms := map[metrics.ObservationName]*prometheusclient.HistogramVec{
 		metrics.MetadataOperationLatency:                          latencyHistogram,
@@ -116,6 +123,11 @@ func NewPrometheusMetricsService(port string, nodeName string) *PrometheusMetric
 		metrics.FileLogStoreGetLogLatency:                         fileLogStoreLatencyHistogram,
 		metrics.FileLogStoreLastIndexAndTermLatency:               fileLogStoreLatencyHistogram,
 		metrics.FileLogStoreDeleteRangeLatency:                    fileLogStoreLatencyHistogram,
+		metrics.RaftTxCoordinatorInitLatency:                      raftTxCoordinatorLatencyHistogram,
+		metrics.RaftTxCoordinatorCommitLatency:                    raftTxCoordinatorLatencyHistogram,
+		metrics.RaftTxCoordinatorAbortLatency:                     raftTxCoordinatorLatencyHistogram,
+		metrics.RaftTxCoordinatorBroadcastCommitAsyncLatency:      raftTxCoordinatorLatencyHistogram,
+		metrics.RaftTxCoordinatorBroadcastAbortAsyncLatency:       raftTxCoordinatorLatencyHistogram,
 	}
 
 	return &PrometheusMetricsService{

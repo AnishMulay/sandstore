@@ -11,39 +11,56 @@ import (
 	pmr "github.com/AnishMulay/sandstore/internal/metadata_replicator"
 	rr "github.com/AnishMulay/sandstore/internal/metadata_replicator/raft_replicator"
 	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
+	"github.com/AnishMulay/sandstore/internal/metrics"
 )
 
 type RaftTransactionCoordinator struct {
-	comm       communication.Communicator
-	replicator pmr.MetadataReplicator
+	comm           communication.Communicator
+	replicator     pmr.MetadataReplicator
+	metricsService metrics.MetricsService
 }
 
 var _ TransactionCoordinator = (*RaftTransactionCoordinator)(nil)
 
-func NewRaftTransactionCoordinator(comm communication.Communicator, replicator pmr.MetadataReplicator) *RaftTransactionCoordinator {
+func NewRaftTransactionCoordinator(comm communication.Communicator, replicator pmr.MetadataReplicator, metricsService metrics.MetricsService) *RaftTransactionCoordinator {
 	return &RaftTransactionCoordinator{
-		comm:       comm,
-		replicator: replicator,
+		comm:           comm,
+		replicator:     replicator,
+		metricsService: metricsService,
 	}
 }
 
 func (c *RaftTransactionCoordinator) NewTransaction(txnID string) TxHandle {
 	return &RaftTxHandle{
-		txnID:      txnID,
-		comm:       c.comm,
-		replicator: c.replicator,
+		txnID:          txnID,
+		comm:           c.comm,
+		replicator:     c.replicator,
+		metricsService: c.metricsService,
 	}
 }
 
 type RaftTxHandle struct {
-	txnID      string
-	comm       communication.Communicator
-	replicator pmr.MetadataReplicator
+	txnID          string
+	comm           communication.Communicator
+	replicator     pmr.MetadataReplicator
+	metricsService metrics.MetricsService
 }
 
 var _ TxHandle = (*RaftTxHandle)(nil)
 
 func (h *RaftTxHandle) Init(ctx context.Context, chunkID string, participants []domain.ChunkLocation) error {
+	start := time.Now()
+	defer func() {
+		if h == nil || h.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		h.metricsService.Observe(metrics.RaftTxCoordinatorInitLatency, elapsed, metrics.MetricTags{
+			Operation: "init",
+			Service:   "RaftTransactionCoordinator",
+		})
+	}()
+
 	_ = ctx
 	_ = chunkID
 	_ = participants
@@ -51,6 +68,18 @@ func (h *RaftTxHandle) Init(ctx context.Context, chunkID string, participants []
 }
 
 func (h *RaftTxHandle) Commit(ctx context.Context, chunkID string, metaUpdate *pms.MetadataOperation, participants []domain.ChunkLocation) error {
+	start := time.Now()
+	defer func() {
+		if h == nil || h.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		h.metricsService.Observe(metrics.RaftTxCoordinatorCommitLatency, elapsed, metrics.MetricTags{
+			Operation: "commit",
+			Service:   "RaftTransactionCoordinator",
+		})
+	}()
+
 	envelope := rr.RaftCommandEnvelope{
 		Type: rr.PayloadChunkIntent,
 		ChunkIntent: &rr.ChunkIntentOperation{
@@ -77,6 +106,18 @@ func (h *RaftTxHandle) Commit(ctx context.Context, chunkID string, metaUpdate *p
 }
 
 func (h *RaftTxHandle) Abort(ctx context.Context, chunkID string, participants []domain.ChunkLocation) error {
+	start := time.Now()
+	defer func() {
+		if h == nil || h.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		h.metricsService.Observe(metrics.RaftTxCoordinatorAbortLatency, elapsed, metrics.MetricTags{
+			Operation: "abort",
+			Service:   "RaftTransactionCoordinator",
+		})
+	}()
+
 	_ = ctx
 
 	h.broadcastAbortAsync(h.txnID, chunkID, participants)
@@ -84,6 +125,18 @@ func (h *RaftTxHandle) Abort(ctx context.Context, chunkID string, participants [
 }
 
 func (h *RaftTxHandle) broadcastCommitAsync(txnID string, chunkID string, participants []domain.ChunkLocation) {
+	start := time.Now()
+	defer func() {
+		if h == nil || h.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		h.metricsService.Observe(metrics.RaftTxCoordinatorBroadcastCommitAsyncLatency, elapsed, metrics.MetricTags{
+			Operation: "broadcast_commit_async",
+			Service:   "RaftTransactionCoordinator",
+		})
+	}()
+
 	for _, participant := range participants {
 		go func(participant domain.ChunkLocation) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -103,6 +156,18 @@ func (h *RaftTxHandle) broadcastCommitAsync(txnID string, chunkID string, partic
 }
 
 func (h *RaftTxHandle) broadcastAbortAsync(txnID string, chunkID string, participants []domain.ChunkLocation) {
+	start := time.Now()
+	defer func() {
+		if h == nil || h.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		h.metricsService.Observe(metrics.RaftTxCoordinatorBroadcastAbortAsyncLatency, elapsed, metrics.MetricTags{
+			Operation: "broadcast_abort_async",
+			Service:   "RaftTransactionCoordinator",
+		})
+	}()
+
 	for _, participant := range participants {
 		go func(participant domain.ChunkLocation) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
