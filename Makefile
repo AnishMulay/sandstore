@@ -172,6 +172,68 @@ test-cluster:
 	K8S_TEST_NAMESPACE_PREFIX="$(K8S_TEST_NAMESPACE_PREFIX)" \
 	./scripts/dev/test-cluster.sh
 
+.PHONY: cluster-up
+cluster-up:
+	KUBE_CONTEXT="$(KUBE_CONTEXT)" \
+	PROFILE="$(PROFILE)" \
+	ARCH="$(ARCH)" \
+	GOOS="$(GOOS)" \
+	GOARCH="$(GOARCH)" \
+	K8S_IMAGE="$(K8S_LOCAL_IMAGE)" \
+	K8S_TEST_IMAGE="$(K8S_TEST_IMAGE)" \
+	K8S_TEST_NAMESPACE_PREFIX="$(K8S_TEST_NAMESPACE_PREFIX)" \
+	K8S_NAMESPACE="$${K8S_NAMESPACE:-$(K8S_TEST_NAMESPACE_PREFIX)}" \
+	./scripts/dev/cluster-up.sh
+
+.PHONY: cluster-down
+cluster-down:
+	KUBE_CONTEXT="$(KUBE_CONTEXT)" \
+	K8S_TEST_NAMESPACE_PREFIX="$(K8S_TEST_NAMESPACE_PREFIX)" \
+	K8S_NAMESPACE="$${K8S_NAMESPACE:-$(K8S_TEST_NAMESPACE_PREFIX)}" \
+	./scripts/dev/cluster-down.sh
+
+.PHONY: smoke-test
+smoke-test:
+	@set -eu; \
+	K8S_NAMESPACE="$${K8S_NAMESPACE:-$(K8S_TEST_NAMESPACE_PREFIX)}"; \
+	K8S_IMAGE="$${K8S_IMAGE:-$(K8S_LOCAL_IMAGE)}"; \
+	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" delete job sandstore-open-smoke --ignore-not-found=true >/dev/null 2>&1 || true; \
+	printf '%s\n' \
+	  'apiVersion: batch/v1' \
+	  'kind: Job' \
+	  'metadata:' \
+	  '  name: sandstore-open-smoke' \
+	  '  labels:' \
+	  '    app: sandstore' \
+	  '    app.kubernetes.io/name: sandstore' \
+	  'spec:' \
+	  '  backoffLimit: 0' \
+	  '  template:' \
+	  '    metadata:' \
+	  '      labels:' \
+	  '        app: sandstore' \
+	  '        app.kubernetes.io/name: sandstore' \
+	  '    spec:' \
+	  '      restartPolicy: Never' \
+	  '      containers:' \
+	  '        - name: sandstore-open-smoke' \
+	  '          image: '"$$K8S_IMAGE" \
+	  '          imagePullPolicy: IfNotPresent' \
+	  '          command:' \
+	  '            - /usr/local/bin/smoke' \
+	  '          env:' \
+	  '            - name: SANDSTORE_SEEDS' \
+	  '              value: sandstore-0.sandstore-headless:8080,sandstore-1.sandstore-headless:8080,sandstore-2.sandstore-headless:8080' \
+	  | kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" apply -f - >/dev/null; \
+	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" wait --for=condition=complete job/sandstore-open-smoke --timeout=900s; \
+	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" logs job/sandstore-open-smoke --all-containers=true
+
+.PHONY: port-forward-prometheus
+port-forward-prometheus:
+	@set -eu; \
+	K8S_NAMESPACE="$${K8S_NAMESPACE:-$(K8S_TEST_NAMESPACE_PREFIX)}"; \
+	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" port-forward service/prometheus 9090:9090
+
 # Kubernetes Flow 5: Observability & Post-Mortem Debugging
 .PHONY: k8s-logs
 k8s-logs:
