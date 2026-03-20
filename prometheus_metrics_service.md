@@ -1,3 +1,27 @@
+# Section 0: AI Directive & Coding Guidelines
+
+This section is addressed to the coding AI implementing this feature. These directives are mandatory.
+
+## 1. The Golden Rule
+
+This SDDD markdown file is the absolute single source of truth for this feature. You do not invent logic, structs, interfaces, behaviors, or wiring that are not defined here. If any requirement, type, or implementation detail is unclear, you stop and ask before proceeding.
+
+## 2. Authorized File List
+
+You are only permitted to create or modify the files listed in Section 7 under **Authorized File List**. You do not touch any other file under any circumstances. If you believe a change is necessary in a file not on that list, you stop and ask before proceeding.
+
+## 3. Rules of Engagement for This Feature
+
+- The `MetricsService` interface must not depend on or import any Prometheus-specific types.
+- Do not invent new metric constants. Only use the constants defined in the metrics package files.
+- Do not modify the metadata service interface itself. Only the `BoltMetadataService` implementation may be changed.
+- Do not add error returns to any `MetricsService` method. Silent drop is the defined behavior throughout.
+- The `Start()` method on `PrometheusMetricsService` is called by the server constructor. It must never be called internally by the struct itself.
+
+## 4. Execution Rules
+
+Implement one step at a time and wait for user confirmation before proceeding to the next step. Do not batch multiple changes in a single response.
+
 # MetricsService Interface and Prometheus Implementation
 
 # Goals and Non-Goals
