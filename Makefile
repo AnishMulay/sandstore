@@ -293,6 +293,11 @@ clean-runtime:
 
 .PHONY: clean-artifacts
 clean-artifacts:
+	@for cache_dir in ./.gomodcache ./.gomodcache-local; do \
+		if [ -e "$$cache_dir" ]; then \
+			chmod -R u+w "$$cache_dir" 2>/dev/null || true; \
+		fi; \
+	done
 	rm -rf ./bin ./run ./logs ./chunks ./.gocache ./.gomodcache ./.gocache-local ./.gomodcache-local
 	rm -f $(SANDSTORE_BINARY) $(CLIENT_BINARY) $(MCP_BINARY) $(OPEN_SMOKE_BINARY) $(DURABILITY_SMOKE_BINARY) $(LEGACY_CLIENT_BINARY) $(LEGACY_MCP_BINARY) $(LEGACY_OPEN_SMOKE_BINARY) $(LEGACY_DURABILITY_SMOKE_BINARY) config.yaml
 
