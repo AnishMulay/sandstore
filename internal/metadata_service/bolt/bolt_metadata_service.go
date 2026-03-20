@@ -20,6 +20,7 @@ import (
 	rr "github.com/AnishMulay/sandstore/internal/metadata_replicator/raft_replicator"
 	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
 	inmemoryms "github.com/AnishMulay/sandstore/internal/metadata_service/inmemory"
+	"github.com/AnishMulay/sandstore/internal/metrics"
 	"github.com/google/uuid"
 	"go.etcd.io/bbolt"
 )
@@ -50,12 +51,13 @@ var requiredBuckets = [][]byte{
 var inodeIDCounter atomic.Uint64
 
 type BoltMetadataService struct {
-	db         *bbolt.DB
-	filePath   string
-	replicator pmr.MetadataReplicator
+	db             *bbolt.DB
+	filePath       string
+	replicator     pmr.MetadataReplicator
+	metricsService metrics.MetricsService
 }
 
-func NewBoltMetadataService(filePath string) (*BoltMetadataService, error) {
+func NewBoltMetadataService(filePath string, metricsService metrics.MetricsService) (*BoltMetadataService, error) {
 	if filePath == "" {
 		return nil, fmt.Errorf("bolt metadata service path cannot be empty")
 	}
@@ -73,8 +75,9 @@ func NewBoltMetadataService(filePath string) (*BoltMetadataService, error) {
 	}
 
 	svc := &BoltMetadataService{
-		db:       db,
-		filePath: filePath,
+		db:             db,
+		filePath:       filePath,
+		metricsService: metricsService,
 	}
 
 	if err := db.Update(func(tx *bbolt.Tx) error {
@@ -323,6 +326,19 @@ func (s *BoltMetadataService) nextConsistentIndex() (uint64, error) {
 }
 
 func (s *BoltMetadataService) ApplyCreate(op pms.MetadataOperation, consistentIndex uint64) error {
+	start := time.Now()
+	defer func() {
+		elapsed := time.Since(start).Seconds()
+		tags := metrics.MetricTags{
+			Operation:  string(pms.OpCreate),
+			Service:    "BoltMetadataService",
+			Additional: nil,
+		}
+		if s != nil && s.metricsService != nil {
+			s.metricsService.Observe(metrics.MetadataOperationLatency, elapsed, tags)
+		}
+	}()
+
 	if s == nil || s.db == nil {
 		return fmt.Errorf("bolt metadata service is not initialized")
 	}
@@ -337,7 +353,7 @@ func (s *BoltMetadataService) ApplyCreate(op pms.MetadataOperation, consistentIn
 		return fmt.Errorf("encode child inode id %q: %w", op.InodeID, err)
 	}
 
-	return s.db.Update(func(tx *bbolt.Tx) error {
+	err = s.db.Update(func(tx *bbolt.Tx) error {
 		inodes := tx.Bucket(inodesBucket)
 		dentries := tx.Bucket(dentriesBucket)
 		metadataState := tx.Bucket(metadataStateBucket)
@@ -409,9 +425,23 @@ func (s *BoltMetadataService) ApplyCreate(op pms.MetadataOperation, consistentIn
 
 		return nil
 	})
+	return err
 }
 
 func (s *BoltMetadataService) ApplyRename(op pms.MetadataOperation, consistentIndex uint64) error {
+	start := time.Now()
+	defer func() {
+		elapsed := time.Since(start).Seconds()
+		tags := metrics.MetricTags{
+			Operation:  string(pms.OpRename),
+			Service:    "BoltMetadataService",
+			Additional: nil,
+		}
+		if s != nil && s.metricsService != nil {
+			s.metricsService.Observe(metrics.MetadataOperationLatency, elapsed, tags)
+		}
+	}()
+
 	if s == nil || s.db == nil {
 		return fmt.Errorf("bolt metadata service is not initialized")
 	}
@@ -429,7 +459,7 @@ func (s *BoltMetadataService) ApplyRename(op pms.MetadataOperation, consistentIn
 	srcDentryKey := encodeDentryKey(srcParentKey, op.Name)
 	dstDentryKey := encodeDentryKey(dstParentKey, op.DstName)
 
-	return s.db.Update(func(tx *bbolt.Tx) error {
+	err = s.db.Update(func(tx *bbolt.Tx) error {
 		inodes := tx.Bucket(inodesBucket)
 		dentries := tx.Bucket(dentriesBucket)
 		metadataState := tx.Bucket(metadataStateBucket)
@@ -507,9 +537,23 @@ func (s *BoltMetadataService) ApplyRename(op pms.MetadataOperation, consistentIn
 
 		return nil
 	})
+	return err
 }
 
 func (s *BoltMetadataService) ApplyRemove(op pms.MetadataOperation, consistentIndex uint64) error {
+	start := time.Now()
+	defer func() {
+		elapsed := time.Since(start).Seconds()
+		tags := metrics.MetricTags{
+			Operation:  string(pms.OpRemove),
+			Service:    "BoltMetadataService",
+			Additional: nil,
+		}
+		if s != nil && s.metricsService != nil {
+			s.metricsService.Observe(metrics.MetadataOperationLatency, elapsed, tags)
+		}
+	}()
+
 	if s == nil || s.db == nil {
 		return fmt.Errorf("bolt metadata service is not initialized")
 	}
@@ -521,7 +565,7 @@ func (s *BoltMetadataService) ApplyRemove(op pms.MetadataOperation, consistentIn
 
 	dentryKey := encodeDentryKey(parentKey, op.Name)
 
-	return s.db.Update(func(tx *bbolt.Tx) error {
+	err = s.db.Update(func(tx *bbolt.Tx) error {
 		inodes := tx.Bucket(inodesBucket)
 		dentries := tx.Bucket(dentriesBucket)
 		metadataState := tx.Bucket(metadataStateBucket)
@@ -583,9 +627,23 @@ func (s *BoltMetadataService) ApplyRemove(op pms.MetadataOperation, consistentIn
 
 		return nil
 	})
+	return err
 }
 
 func (s *BoltMetadataService) ApplySetAttr(op pms.MetadataOperation, consistentIndex uint64) error {
+	start := time.Now()
+	defer func() {
+		elapsed := time.Since(start).Seconds()
+		tags := metrics.MetricTags{
+			Operation:  string(pms.OpSetAttr),
+			Service:    "BoltMetadataService",
+			Additional: nil,
+		}
+		if s != nil && s.metricsService != nil {
+			s.metricsService.Observe(metrics.MetadataOperationLatency, elapsed, tags)
+		}
+	}()
+
 	if s == nil || s.db == nil {
 		return fmt.Errorf("bolt metadata service is not initialized")
 	}
@@ -595,7 +653,7 @@ func (s *BoltMetadataService) ApplySetAttr(op pms.MetadataOperation, consistentI
 		return fmt.Errorf("encode inode id %q: %w", op.InodeID, err)
 	}
 
-	return s.db.Update(func(tx *bbolt.Tx) error {
+	err = s.db.Update(func(tx *bbolt.Tx) error {
 		inodes := tx.Bucket(inodesBucket)
 		metadataState := tx.Bucket(metadataStateBucket)
 		if inodes == nil || metadataState == nil {
@@ -639,9 +697,23 @@ func (s *BoltMetadataService) ApplySetAttr(op pms.MetadataOperation, consistentI
 
 		return nil
 	})
+	return err
 }
 
 func (s *BoltMetadataService) ApplyUpdateInode(op pms.MetadataOperation, consistentIndex uint64) error {
+	start := time.Now()
+	defer func() {
+		elapsed := time.Since(start).Seconds()
+		tags := metrics.MetricTags{
+			Operation:  string(pms.OpUpdateInode),
+			Service:    "BoltMetadataService",
+			Additional: nil,
+		}
+		if s != nil && s.metricsService != nil {
+			s.metricsService.Observe(metrics.MetadataOperationLatency, elapsed, tags)
+		}
+	}()
+
 	if s == nil || s.db == nil {
 		return fmt.Errorf("bolt metadata service is not initialized")
 	}
@@ -651,7 +723,7 @@ func (s *BoltMetadataService) ApplyUpdateInode(op pms.MetadataOperation, consist
 		return fmt.Errorf("encode inode id %q: %w", op.InodeID, err)
 	}
 
-	return s.db.Update(func(tx *bbolt.Tx) error {
+	err = s.db.Update(func(tx *bbolt.Tx) error {
 		inodes := tx.Bucket(inodesBucket)
 		chunkMap := tx.Bucket(chunkMapBucket)
 		metadataState := tx.Bucket(metadataStateBucket)
@@ -693,6 +765,7 @@ func (s *BoltMetadataService) ApplyUpdateInode(op pms.MetadataOperation, consist
 
 		return nil
 	})
+	return err
 }
 
 func (s *BoltMetadataService) ReadDir(ctx context.Context, inodeID string, cookie int, maxEntries int) ([]pms.DirEntry, int, bool, error) {
