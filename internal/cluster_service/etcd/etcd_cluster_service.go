@@ -9,6 +9,7 @@ import (
 
 	cluster "github.com/AnishMulay/sandstore/internal/cluster_service"
 	"github.com/AnishMulay/sandstore/internal/log_service"
+	"github.com/AnishMulay/sandstore/internal/metrics"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
@@ -21,10 +22,11 @@ const (
 )
 
 type EtcdClusterService struct {
-	mu        sync.RWMutex
-	client    *clientv3.Client
-	endpoints []string
-	ls        log_service.LogService
+	mu             sync.RWMutex
+	client         *clientv3.Client
+	endpoints      []string
+	ls             log_service.LogService
+	metricsService metrics.MetricsService
 
 	// Local identity
 	selfNode cluster.ClusterNode
@@ -42,17 +44,30 @@ type EtcdClusterService struct {
 	wg     sync.WaitGroup
 }
 
-func NewEtcdClusterService(endpoints []string, ls log_service.LogService) *EtcdClusterService {
+func NewEtcdClusterService(endpoints []string, ls log_service.LogService, metricsService metrics.MetricsService) *EtcdClusterService {
 	return &EtcdClusterService{
-		endpoints:     endpoints,
-		ls:            ls,
-		configCache:   make(map[string]cluster.ClusterNode),
-		livenessCache: make(map[string]cluster.NodeLiveness),
-		stopCh:        make(chan struct{}),
+		endpoints:      endpoints,
+		ls:             ls,
+		metricsService: metricsService,
+		configCache:    make(map[string]cluster.ClusterNode),
+		livenessCache:  make(map[string]cluster.NodeLiveness),
+		stopCh:         make(chan struct{}),
 	}
 }
 
 func (s *EtcdClusterService) Start(ctx context.Context) error {
+	start := time.Now()
+	defer func() {
+		if s == nil || s.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		s.metricsService.Observe(metrics.EtcdClusterServiceStartLatency, elapsed, metrics.MetricTags{
+			Operation: "start",
+			Service:   "EtcdClusterService",
+		})
+	}()
+
 	s.ls.Info(log_service.LogEvent{Message: "Starting EtcdClusterService", Metadata: map[string]any{"endpoints": s.endpoints}})
 
 	cli, err := clientv3.New(clientv3.Config{
@@ -93,6 +108,18 @@ func (s *EtcdClusterService) Stop(ctx context.Context) error {
 }
 
 func (s *EtcdClusterService) RegisterNode(node cluster.ClusterNode) error {
+	start := time.Now()
+	defer func() {
+		if s == nil || s.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		s.metricsService.Observe(metrics.EtcdClusterServiceRegisterNodeLatency, elapsed, metrics.MetricTags{
+			Operation: "register_node",
+			Service:   "EtcdClusterService",
+		})
+	}()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -157,6 +184,18 @@ func (s *EtcdClusterService) heartbeatLoop() {
 }
 
 func (s *EtcdClusterService) syncState(ctx context.Context) error {
+	start := time.Now()
+	defer func() {
+		if s == nil || s.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		s.metricsService.Observe(metrics.EtcdClusterServiceSyncStateLatency, elapsed, metrics.MetricTags{
+			Operation: "sync_state",
+			Service:   "EtcdClusterService",
+		})
+	}()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -246,12 +285,36 @@ func (s *EtcdClusterService) notifyWatchers() {
 }
 
 func (s *EtcdClusterService) Watch(callback func()) {
+	start := time.Now()
+	defer func() {
+		if s == nil || s.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		s.metricsService.Observe(metrics.EtcdClusterServiceWatchLatency, elapsed, metrics.MetricTags{
+			Operation: "watch",
+			Service:   "EtcdClusterService",
+		})
+	}()
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.watchCallbacks = append(s.watchCallbacks, callback)
 }
 
 func (s *EtcdClusterService) GetHealthyNodes() ([]cluster.Node, error) {
+	start := time.Now()
+	defer func() {
+		if s == nil || s.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		s.metricsService.Observe(metrics.EtcdClusterServiceGetHealthyNodesLatency, elapsed, metrics.MetricTags{
+			Operation: "get_healthy_nodes",
+			Service:   "EtcdClusterService",
+		})
+	}()
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -274,6 +337,18 @@ func (s *EtcdClusterService) GetHealthyNodes() ([]cluster.Node, error) {
 }
 
 func (s *EtcdClusterService) GetAllNodes() ([]cluster.Node, error) {
+	start := time.Now()
+	defer func() {
+		if s == nil || s.metricsService == nil {
+			return
+		}
+		elapsed := time.Since(start).Seconds()
+		s.metricsService.Observe(metrics.EtcdClusterServiceGetAllNodesLatency, elapsed, metrics.MetricTags{
+			Operation: "get_all_nodes",
+			Service:   "EtcdClusterService",
+		})
+	}()
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 

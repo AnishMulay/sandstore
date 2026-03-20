@@ -79,6 +79,13 @@ func NewPrometheusMetricsService(port string, nodeName string) *PrometheusMetric
 		},
 		[]string{"operation", "service", "node"},
 	)
+	etcdClusterServiceLatencyHistogram := promauto.NewHistogramVec(
+		prometheusclient.HistogramOpts{
+			Name: "sandstore_etcd_cluster_service_latency_seconds",
+			Help: "Histogram of latency for Sandstore etcd cluster service operations",
+		},
+		[]string{"operation", "service", "node"},
+	)
 
 	histograms := map[metrics.ObservationName]*prometheusclient.HistogramVec{
 		metrics.MetadataOperationLatency:                          latencyHistogram,
@@ -138,6 +145,12 @@ func NewPrometheusMetricsService(port string, nodeName string) *PrometheusMetric
 		metrics.GRPCCommunicatorSendLatency:                       grpcCommunicatorLatencyHistogram,
 		metrics.GRPCCommunicatorStartLatency:                      grpcCommunicatorLatencyHistogram,
 		metrics.GRPCCommunicatorStopLatency:                       grpcCommunicatorLatencyHistogram,
+		metrics.EtcdClusterServiceStartLatency:                    etcdClusterServiceLatencyHistogram,
+		metrics.EtcdClusterServiceRegisterNodeLatency:             etcdClusterServiceLatencyHistogram,
+		metrics.EtcdClusterServiceGetHealthyNodesLatency:          etcdClusterServiceLatencyHistogram,
+		metrics.EtcdClusterServiceGetAllNodesLatency:              etcdClusterServiceLatencyHistogram,
+		metrics.EtcdClusterServiceSyncStateLatency:                etcdClusterServiceLatencyHistogram,
+		metrics.EtcdClusterServiceWatchLatency:                    etcdClusterServiceLatencyHistogram,
 	}
 
 	return &PrometheusMetricsService{

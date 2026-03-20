@@ -68,7 +68,7 @@ func Build(opts Options) runnable {
 	comm := grpccomm.NewGRPCCommunicator(opts.ListenAddr, ls, metricsService)
 
 	// 3. Cluster Service (The Phonebook)
-	clusterService := clustercetcd.NewEtcdClusterService(etcdEndpoints, ls)
+	clusterService := clustercetcd.NewEtcdClusterService(etcdEndpoints, ls, metricsService)
 	if err := clusterService.Start(context.Background()); err != nil {
 		panic(err)
 	}
