@@ -246,6 +246,7 @@ port-forward-prometheus:
 # Usage:
 #   make port-forward-nodes                         # auto-detect LAN IP from k8s node
 #   make port-forward-nodes EXTERNAL_IP=10.0.0.5   # override with explicit IP
+#   make port-forward-nodes EXTERNAL_IP=127.0.0.1  # same-machine testing on local laptop
 #   Then from MacBook: make bench SEEDS=<printed-ip>:9080,<printed-ip>:9081,<printed-ip>:9082 CONCURRENCY=1
 .PHONY: port-forward-nodes
 port-forward-nodes:
@@ -265,9 +266,9 @@ port-forward-nodes:
 		echo "Auto-detected node IP: $$DETECTED_IP"; \
 	fi; \
 	\
-	echo "Patching sandstore-config ConfigMap with EXTERNAL_BASE_PORT=9080..."; \
+	echo "Patching sandstore-config ConfigMap with ADVERTISE_HOST=$$DETECTED_IP and EXTERNAL_BASE_PORT=9080..."; \
 	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" patch configmap sandstore-config \
-		--type merge -p '{"data":{"EXTERNAL_BASE_PORT":"9080"}}'; \
+		--type merge -p "{\"data\":{\"ADVERTISE_HOST\":\"$$DETECTED_IP\",\"EXTERNAL_BASE_PORT\":\"9080\"}}"; \
 	\
 	echo "Triggering rolling restart of sandstore StatefulSet..."; \
 	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" rollout restart statefulset/sandstore; \
@@ -365,3 +366,6 @@ clean-artifacts:
 # clean: full local reset (containers + generated artifacts + runtime data)
 .PHONY: clean
 clean: clean-runtime clean-artifacts
+	rm -f ./bin/bench
+	rm -f ./bench
+	rm -rf ./run ./results

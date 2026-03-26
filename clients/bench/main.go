@@ -48,7 +48,7 @@ type BenchmarkResult struct {
 func openFiles(client *sandlib.SandstoreClient, concurrency int, prefix string, flags int) ([]int, error) {
 	fds := make([]int, concurrency)
 	for i := 0; i < concurrency; i++ {
-		fd, err := client.Open(fmt.Sprintf("%s_worker_%d", prefix, i), flags)
+		fd, err := client.Open(fmt.Sprintf("/%s_worker_%d", prefix, i), flags)
 		if err != nil {
 			return nil, err
 		}
@@ -214,10 +214,14 @@ func main() {
 				start := time.Now()
 				_, err := client.Write(fd, buf)
 				latency := time.Since(start).Nanoseconds()
-				results <- Sample{
+				select {
+				case results <- Sample{
 					WorkerID:           workerID,
 					Operation:          "write",
 					LatencyNanoseconds: latency,
+				}:
+				case <-ctx.Done():
+					return
 				}
 				_ = err
 			}

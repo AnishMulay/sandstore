@@ -55,10 +55,10 @@ func envInt(name string, fallback int) int {
 }
 
 // externalTopology wraps a TopologyProvider and translates the leader address
-// from an internal DNS name to HOST_IP:EXTERNAL_BASE_PORT+ordinal when both
-// HOST_IP and EXTERNAL_BASE_PORT env vars are set.
-// When either is absent the inner provider's address is returned unchanged,
-// preserving existing smoke-test behavior (DEP-03 / ADDR-03).
+// from an internal DNS name to ADVERTISE_HOST:EXTERNAL_BASE_PORT+ordinal when
+// both env vars are set. When ADVERTISE_HOST is absent it falls back to
+// HOST_IP. When either host or port is absent the inner provider's address is
+// returned unchanged, preserving existing smoke-test behavior.
 type externalTopology struct {
 	inner interface{ GetLeaderAddress() string }
 }
@@ -68,7 +68,10 @@ func (e *externalTopology) GetLeaderAddress() string {
 	if addr == "" {
 		return addr
 	}
-	hostIP := strings.TrimSpace(os.Getenv("HOST_IP"))
+	hostIP := strings.TrimSpace(os.Getenv("ADVERTISE_HOST"))
+	if hostIP == "" {
+		hostIP = strings.TrimSpace(os.Getenv("HOST_IP"))
+	}
 	basePortStr := strings.TrimSpace(os.Getenv("EXTERNAL_BASE_PORT"))
 	if hostIP == "" || basePortStr == "" {
 		return addr
@@ -155,7 +158,10 @@ func Build(opts Options) runnable {
 
 	// 6. Server (The Gateway)
 	var topology simpleserver.TopologyProvider = metaRepl
-	hostIP := strings.TrimSpace(os.Getenv("HOST_IP"))
+	hostIP := strings.TrimSpace(os.Getenv("ADVERTISE_HOST"))
+	if hostIP == "" {
+		hostIP = strings.TrimSpace(os.Getenv("HOST_IP"))
+	}
 	extBasePort := strings.TrimSpace(os.Getenv("EXTERNAL_BASE_PORT"))
 	if hostIP != "" && extBasePort != "" {
 		topology = &externalTopology{inner: metaRepl}
