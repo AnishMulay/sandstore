@@ -339,4 +339,49 @@ func main() {
 	close(statResults)
 	aggregate(statResults, "stat", cfg, csvWriter)
 	fmt.Println("stat benchmark complete")
+
+	createResults := make(chan Sample, int(cfg.Concurrency)*1000)
+	createCtx, createCancel := context.WithTimeout(
+		context.Background(),
+		time.Duration(cfg.DurationSeconds)*time.Second,
+	)
+	defer createCancel()
+
+	var createWg sync.WaitGroup
+	for i := 0; i < int(cfg.Concurrency); i++ {
+		createWg.Add(1)
+		go func(workerID int) {
+			defer createWg.Done()
+			iteration := 0
+			for {
+				select {
+				case <-createCtx.Done():
+					return
+				default:
+				}
+
+				start := time.Now()
+				fd, err := client.Open(fmt.Sprintf("/bench_create_worker_%d_%d", workerID, iteration), os.O_CREATE|os.O_WRONLY)
+				latency := time.Since(start).Nanoseconds()
+				if err == nil {
+					_ = client.Close(fd)
+				}
+				iteration++
+				select {
+				case createResults <- Sample{
+					WorkerID:           workerID,
+					Operation:          "create",
+					LatencyNanoseconds: latency,
+				}:
+				case <-createCtx.Done():
+					return
+				}
+			}
+		}(i)
+	}
+
+	createWg.Wait()
+	close(createResults)
+	aggregate(createResults, "create", cfg, csvWriter)
+	fmt.Println("create benchmark complete")
 }
