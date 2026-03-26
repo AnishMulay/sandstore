@@ -384,4 +384,46 @@ func main() {
 	close(createResults)
 	aggregate(createResults, "create", cfg, csvWriter)
 	fmt.Println("create benchmark complete")
+
+	listResults := make(chan Sample, int(cfg.Concurrency)*1000)
+	listCtx, listCancel := context.WithTimeout(
+		context.Background(),
+		time.Duration(cfg.DurationSeconds)*time.Second,
+	)
+	defer listCancel()
+
+	var listWg sync.WaitGroup
+	for i := 0; i < int(cfg.Concurrency); i++ {
+		listWg.Add(1)
+		go func(workerID int) {
+			defer listWg.Done()
+			for {
+				select {
+				case <-listCtx.Done():
+					return
+				default:
+				}
+
+				start := time.Now()
+				_, err := client.ListDir("/")
+				latency := time.Since(start).Nanoseconds()
+				_ = err
+				select {
+				case listResults <- Sample{
+					WorkerID:           workerID,
+					Operation:          "listdir",
+					LatencyNanoseconds: latency,
+				}:
+				case <-listCtx.Done():
+					return
+				}
+			}
+		}(i)
+	}
+
+	listWg.Wait()
+	close(listResults)
+	aggregate(listResults, "listdir", cfg, csvWriter)
+	fmt.Println("listdir benchmark complete")
+	fmt.Println("all benchmarks complete")
 }
