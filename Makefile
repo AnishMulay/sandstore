@@ -31,6 +31,8 @@ LEGACY_CLIENT_BINARY=client
 LEGACY_MCP_BINARY=mcp
 LEGACY_OPEN_SMOKE_BINARY=open_smoke
 LEGACY_DURABILITY_SMOKE_BINARY=durability_smoke
+DURATION ?= 60
+BLOCK_SIZE ?= 4096
 
 # Generate protobuf files
 .PHONY: proto
@@ -65,6 +67,12 @@ client:
 	@mkdir -p $(dir $(CLIENT_BINARY))
 	go build -o $(CLIENT_BINARY) ./clients/client
 	./$(CLIENT_BINARY)
+
+.PHONY: bench
+bench:
+	go build -o bin/bench ./clients/bench
+	./bin/bench --seeds=$(SEEDS) --concurrency=$(CONCURRENCY) \
+		--duration=$(DURATION) --block-size=$(BLOCK_SIZE)
 
 # Run Go tests
 .PHONY: test
