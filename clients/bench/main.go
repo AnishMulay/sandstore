@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"flag"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -234,4 +235,61 @@ func main() {
 	aggregate(results, "write", cfg, csvWriter)
 
 	fmt.Println("write benchmark complete")
+
+	readFds, err := openFiles(client, int(cfg.Concurrency), "bench_write", os.O_RDONLY)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	readResults := make(chan Sample, int(cfg.Concurrency)*1000)
+
+	readCtx, readCancel := context.WithTimeout(
+		context.Background(),
+		time.Duration(cfg.DurationSeconds)*time.Second,
+	)
+	defer readCancel()
+
+	var readWg sync.WaitGroup
+	for i := 0; i < int(cfg.Concurrency); i++ {
+		readWg.Add(1)
+		go func(workerID int, fd int) {
+			defer readWg.Done()
+			for {
+				select {
+				case <-readCtx.Done():
+					return
+				default:
+				}
+
+				start := time.Now()
+				_, err := client.Read(fd, int(cfg.BlockSizeBytes))
+				latency := time.Since(start).Nanoseconds()
+				select {
+				case readResults <- Sample{
+					WorkerID:           workerID,
+					Operation:          "read",
+					LatencyNanoseconds: latency,
+				}:
+				case <-readCtx.Done():
+					return
+				}
+				if err == io.EOF {
+					client.Close(fd)
+					fd, err = client.Open(
+						fmt.Sprintf("/bench_write_worker_%d", workerID),
+						os.O_RDONLY,
+					)
+					if err != nil {
+						return
+					}
+				}
+			}
+		}(i, readFds[i])
+	}
+
+	readWg.Wait()
+	close(readResults)
+	aggregate(readResults, "read", cfg, csvWriter)
+	fmt.Println("read benchmark complete")
 }
