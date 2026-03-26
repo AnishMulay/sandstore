@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -51,6 +52,41 @@ func envInt(name string, fallback int) int {
 		return fallback
 	}
 	return v
+}
+
+// externalTopology wraps a TopologyProvider and translates the leader address
+// from an internal DNS name to HOST_IP:EXTERNAL_BASE_PORT+ordinal when both
+// HOST_IP and EXTERNAL_BASE_PORT env vars are set.
+// When either is absent the inner provider's address is returned unchanged,
+// preserving existing smoke-test behavior (DEP-03 / ADDR-03).
+type externalTopology struct {
+	inner interface{ GetLeaderAddress() string }
+}
+
+func (e *externalTopology) GetLeaderAddress() string {
+	addr := e.inner.GetLeaderAddress()
+	if addr == "" {
+		return addr
+	}
+	hostIP := strings.TrimSpace(os.Getenv("HOST_IP"))
+	basePortStr := strings.TrimSpace(os.Getenv("EXTERNAL_BASE_PORT"))
+	if hostIP == "" || basePortStr == "" {
+		return addr
+	}
+	basePort, err := strconv.Atoi(basePortStr)
+	if err != nil || basePort <= 0 {
+		return addr
+	}
+	// Extract ordinal from NODE_ID suffix, e.g. "sandstore-2" → 2.
+	// If the suffix is not a valid integer, ordinal defaults to 0.
+	ordinal := 0
+	nodeID := strings.TrimSpace(os.Getenv("NODE_ID"))
+	if idx := strings.LastIndex(nodeID, "-"); idx >= 0 {
+		if n, err2 := strconv.Atoi(nodeID[idx+1:]); err2 == nil && n >= 0 {
+			ordinal = n
+		}
+	}
+	return fmt.Sprintf("%s:%d", hostIP, basePort+ordinal)
 }
 
 func Build(opts Options) runnable {
@@ -118,7 +154,13 @@ func Build(opts Options) runnable {
 	cpo := orchestrators.NewControlPlaneOrchestrator(ms, placementStrategy, txnCoordinator, metaRepl, metricsService, chunkSize, replicaCount)
 
 	// 6. Server (The Gateway)
-	srv := simpleserver.NewSimpleServer(comm, cpo, dpo, ls, metaRepl, metricsService)
+	var topology simpleserver.TopologyProvider = metaRepl
+	hostIP := strings.TrimSpace(os.Getenv("HOST_IP"))
+	extBasePort := strings.TrimSpace(os.Getenv("EXTERNAL_BASE_PORT"))
+	if hostIP != "" && extBasePort != "" {
+		topology = &externalTopology{inner: metaRepl}
+	}
+	srv := simpleserver.NewSimpleServer(comm, cpo, dpo, ls, topology, metricsService)
 
 	return &singleNodeServer{
 		server:         srv,
