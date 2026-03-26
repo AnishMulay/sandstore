@@ -292,4 +292,51 @@ func main() {
 	close(readResults)
 	aggregate(readResults, "read", cfg, csvWriter)
 	fmt.Println("read benchmark complete")
+
+	_, err = openFiles(client, int(cfg.Concurrency), "bench_stat", os.O_CREATE|os.O_WRONLY)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+
+	statResults := make(chan Sample, int(cfg.Concurrency)*1000)
+	statCtx, statCancel := context.WithTimeout(
+		context.Background(),
+		time.Duration(cfg.DurationSeconds)*time.Second,
+	)
+	defer statCancel()
+
+	var statWg sync.WaitGroup
+	for i := 0; i < int(cfg.Concurrency); i++ {
+		statWg.Add(1)
+		go func(workerID int) {
+			defer statWg.Done()
+			for {
+				select {
+				case <-statCtx.Done():
+					return
+				default:
+				}
+
+				start := time.Now()
+				_, err := client.Stat(fmt.Sprintf("/bench_stat_worker_%d", workerID))
+				latency := time.Since(start).Nanoseconds()
+				_ = err
+				select {
+				case statResults <- Sample{
+					WorkerID:           workerID,
+					Operation:          "stat",
+					LatencyNanoseconds: latency,
+				}:
+				case <-statCtx.Done():
+					return
+				}
+			}
+		}(i)
+	}
+
+	statWg.Wait()
+	close(statResults)
+	aggregate(statResults, "stat", cfg, csvWriter)
+	fmt.Println("stat benchmark complete")
 }
