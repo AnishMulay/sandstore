@@ -7,6 +7,33 @@ BIN="$ROOT/bin/sandstore"
 CLIENT="$ROOT/bin/client"
 RUN="$ROOT/run/cluster"
 
+require_etcd() {
+  local etcd_up=1
+  if command -v nc >/dev/null 2>&1; then
+    if nc -z localhost 2379 >/dev/null 2>&1; then
+      etcd_up=0
+    fi
+  else
+    if (exec 3<>/dev/tcp/localhost/2379) >/dev/null 2>&1; then
+      exec 3<&-
+      exec 3>&-
+      etcd_up=0
+    fi
+  fi
+
+  if [[ $etcd_up -ne 0 ]]; then
+    echo "etcd is not reachable on localhost:2379"
+    echo "Start it first, for example: docker compose -f deploy/docker/etcd/docker-compose.yaml up -d"
+    exit 1
+  fi
+}
+
+echo "Starting Hyperconverged Topology (local) — requires etcd on localhost:2379"
+echo "To start etcd: make etcd-up"
+echo ""
+
+require_etcd
+
 # Cleanup data from previous runs
 rm -rf "$RUN"
 mkdir -p "$RUN"

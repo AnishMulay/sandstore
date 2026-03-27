@@ -20,7 +20,11 @@ No contribution is too small - from fixing typos to implementing major features,
 
 ### Development Environment Setup
 
-1. **Follow the installation guide**: Complete the setup in [INSTALL.md](INSTALL.md)
+1. **Set up your local environment**: Follow the Quick Start in [README.md](README.md), then verify it with:
+   ```bash
+   make etcd-up
+   make smoke-local TOPOLOGY=hyperconverged
+   ```
 
 2. **Fork the repository** on GitHub
 
@@ -37,7 +41,8 @@ No contribution is too small - from fixing typos to implementing major features,
 
 5. **Verify your setup**:
    ```bash
-   make test-server
+   make test
+   make smoke-local TOPOLOGY=hyperconverged
    ```
 
 ### Development Workflow
@@ -52,7 +57,7 @@ No contribution is too small - from fixing typos to implementing major features,
 3. **Test your changes**:
    ```bash
    make test
-   make test-server
+   make smoke-local TOPOLOGY=hyperconverged
    ```
 
 4. **Commit your changes** (see commit guidelines below)
@@ -247,7 +252,7 @@ Fixes #456
 2. **Run all tests**:
    ```bash
    make test
-   make test-server
+   make smoke-local TOPOLOGY=hyperconverged
    ```
 
 3. **Check code formatting**:
@@ -305,7 +310,7 @@ Use the bug report template and include:
 - **Steps to reproduce**: Minimal example that demonstrates the issue
 - **Expected behavior**: What should happen
 - **Actual behavior**: What actually happens
-- **Logs**: Relevant log output from `logs/*/sandstore.log`
+- **Logs**: Relevant log output from `run/cluster/*/stdout.log` or `run/cluster/*/logs/*.log`
 
 ### Feature Requests
 

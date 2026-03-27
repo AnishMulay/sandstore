@@ -68,7 +68,7 @@ func percentileMs(sorted []int64, p float64) float64 {
 	return float64(sorted[index]) / 1e6
 }
 
-func aggregate(results <-chan Sample, operation string, cfg BenchmarkConfig, w *csv.Writer) {
+func aggregate(results <-chan Sample, operation string, cfg BenchmarkConfig, w *csv.Writer) BenchmarkResult {
 	latencies := make([]int64, 0)
 	for sample := range results {
 		latencies = append(latencies, sample.LatencyNanoseconds)
@@ -105,6 +105,24 @@ func aggregate(results <-chan Sample, operation string, cfg BenchmarkConfig, w *
 		strconv.FormatInt(result.ErrorCount, 10),
 	})
 	w.Flush()
+
+	return result
+}
+
+func printSummary(results []BenchmarkResult, csvPath string) {
+	fmt.Printf("\nOperation   | P50 (ms) | P95 (ms) | P99 (ms) | Total Ops\n")
+	fmt.Printf("------------|----------|----------|----------|----------\n")
+	for _, result := range results {
+		fmt.Printf(
+			"%-11s | %8.2f | %8.2f | %8.2f | %9d\n",
+			result.Operation,
+			result.P50Ms,
+			result.P95Ms,
+			result.P99Ms,
+			result.TotalOps,
+		)
+	}
+	fmt.Printf("\nFull results written to: %s\n", csvPath)
 }
 
 func main() {
@@ -157,8 +175,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	outputPath := filepath.Join("results", "bench", fmt.Sprintf("%s.csv", time.Now().Format(time.RFC3339)))
-	outputFile, err := os.OpenFile(outputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	csvPath := filepath.Join("results", "bench", fmt.Sprintf("%s.csv", time.Now().Format(time.RFC3339)))
+	outputFile, err := os.OpenFile(csvPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -199,6 +217,7 @@ func main() {
 	defer cancel()
 
 	buf := generateBytes(cfg.BlockSizeBytes)
+	summaryResults := make([]BenchmarkResult, 0, 5)
 
 	var wg sync.WaitGroup
 	for i := 0; i < int(cfg.Concurrency); i++ {
@@ -232,7 +251,7 @@ func main() {
 	wg.Wait()
 	close(results)
 
-	aggregate(results, "write", cfg, csvWriter)
+	summaryResults = append(summaryResults, aggregate(results, "write", cfg, csvWriter))
 
 	fmt.Println("write benchmark complete")
 
@@ -290,7 +309,7 @@ func main() {
 
 	readWg.Wait()
 	close(readResults)
-	aggregate(readResults, "read", cfg, csvWriter)
+	summaryResults = append(summaryResults, aggregate(readResults, "read", cfg, csvWriter))
 	fmt.Println("read benchmark complete")
 
 	_, err = openFiles(client, int(cfg.Concurrency), "bench_stat", os.O_CREATE|os.O_WRONLY)
@@ -337,7 +356,7 @@ func main() {
 
 	statWg.Wait()
 	close(statResults)
-	aggregate(statResults, "stat", cfg, csvWriter)
+	summaryResults = append(summaryResults, aggregate(statResults, "stat", cfg, csvWriter))
 	fmt.Println("stat benchmark complete")
 
 	createResults := make(chan Sample, int(cfg.Concurrency)*1000)
@@ -382,7 +401,7 @@ func main() {
 
 	createWg.Wait()
 	close(createResults)
-	aggregate(createResults, "create", cfg, csvWriter)
+	summaryResults = append(summaryResults, aggregate(createResults, "create", cfg, csvWriter))
 	fmt.Println("create benchmark complete")
 
 	listResults := make(chan Sample, int(cfg.Concurrency)*1000)
@@ -423,7 +442,8 @@ func main() {
 
 	listWg.Wait()
 	close(listResults)
-	aggregate(listResults, "listdir", cfg, csvWriter)
+	summaryResults = append(summaryResults, aggregate(listResults, "listdir", cfg, csvWriter))
 	fmt.Println("listdir benchmark complete")
 	fmt.Println("all benchmarks complete")
+	printSummary(summaryResults, csvPath)
 }

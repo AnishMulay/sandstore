@@ -53,6 +53,9 @@ help:
 	@echo "  cluster-down     Tear down the cluster for a topology"
 	@echo "                   Usage: make cluster-down TOPOLOGY=hyperconverged"
 	@echo ""
+	@echo "  etcd-up          Start local etcd (required for local development)"
+	@echo "  etcd-down        Stop local etcd"
+	@echo ""
 	@echo "  smoke-test       Run smoke tests for a topology"
 	@echo "                   Usage: make smoke-test TOPOLOGY=hyperconverged"
 	@echo ""
@@ -64,6 +67,11 @@ help:
 	@echo ""
 	@echo "  cluster          Run a local cluster for a topology"
 	@echo "                   Usage: make cluster TOPOLOGY=hyperconverged"
+	@echo ""
+	@echo "  bench            Run latency benchmark against a running local cluster"
+	@echo "                   Usage: make bench SEEDS=127.0.0.1:9001,127.0.0.1:9002,127.0.0.1:9003 CONCURRENCY=4"
+	@echo "                   Results written to results/bench/<timestamp>.csv"
+	@echo ""
 
 # Generate protobuf files
 .PHONY: proto
@@ -234,6 +242,14 @@ cluster-down:
 	K8S_TEST_NAMESPACE_PREFIX="$(K8S_TEST_NAMESPACE_PREFIX)" \
 	K8S_NAMESPACE="$${K8S_NAMESPACE:-$(K8S_TEST_NAMESPACE_PREFIX)}" \
 	./scripts/topologies/$(TOPOLOGY)/cluster-down.sh
+
+.PHONY: etcd-up
+etcd-up:
+	docker compose -f deploy/docker/etcd/docker-compose.yaml up -d
+
+.PHONY: etcd-down
+etcd-down:
+	docker compose -f deploy/docker/etcd/docker-compose.yaml down
 
 .PHONY: smoke-test
 smoke-test:

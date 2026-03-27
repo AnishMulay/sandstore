@@ -64,38 +64,48 @@ The canonical entry point for understanding the system is `servers/node/topology
 
 ## Quick Start
 
-**Prerequisites:** Go 1.24+, Docker with Compose, Bash, free ports 2379, 2380, 9001–9003
+**Prerequisites:**
+- Go 1.24+
+- Docker with Compose
+- Bash
+- Free ports: 2379, 2380 (etcd), 9001-9003 (sandstore nodes)
 
-**Start a 3-node local cluster:**
-
+### Local development (no Kubernetes required)
 ```bash
 git clone https://github.com/AnishMulay/sandstore
 cd sandstore
 
 # Start etcd
-docker compose -f deploy/docker/etcd/docker-compose.yaml up -d
+make etcd-up
 
-# Build, start 3 nodes, elect a leader, run smoke test
-./scripts/dev/run-smoke.sh
+# Build, start 3 nodes, elect a leader, run smoke test, and tear down
+make smoke-local TOPOLOGY=hyperconverged
 ```
 
-This boots a full 3-node Sandstore cluster on localhost, waits for leader election, and runs an end-to-end open/read/write/fsync/remove smoke test against it. The cluster stays up after the script finishes for manual exploration.
+The smoke test builds all required binaries, starts a 3-node cluster on localhost, waits for leader election, runs an end-to-end open/read/write/fsync/remove test, then shuts down the nodes. etcd keeps running for subsequent runs.
 
-**Kubernetes (full integration suite):**
-
+To run a persistent local cluster for manual exploration:
 ```bash
-make test-cluster
+make cluster TOPOLOGY=hyperconverged
 ```
 
-Builds Docker images, deploys a 3-node cluster to Kubernetes, and runs leader election, open/read/write, restart durability, leader deletion recovery, and node rejoin tests. Cleans up the namespace on completion.
-
-**Other useful make targets:**
-
+To run the latency benchmark against a running local cluster:
 ```bash
-make build            # Build the node binary
-make proto            # Regenerate protobuf/gRPC stubs
-make durability-smoke # Ephemeral Docker durability test (bring-up + test + teardown)
-make client           # Build the manual client binary
+make bench SEEDS=127.0.0.1:9001,127.0.0.1:9002,127.0.0.1:9003 CONCURRENCY=4
+```
+
+When finished:
+```bash
+make etcd-down
+```
+
+### Kubernetes integration tests (requires kubectl + Docker Desktop Kubernetes or kind)
+
+**Additional prerequisites:** kubectl, a running Kubernetes context (Docker Desktop with Kubernetes enabled, or kind/minikube)
+```bash
+make cluster-up TOPOLOGY=hyperconverged    # Build images, deploy 3-node cluster
+make smoke-test TOPOLOGY=hyperconverged    # Run smoke test as a Kubernetes Job
+make cluster-down TOPOLOGY=hyperconverged  # Tear down cluster and namespace
 ```
 
 ## Repository Layout
