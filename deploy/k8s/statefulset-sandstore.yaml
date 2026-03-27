@@ -42,10 +42,14 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+            - name: HOST_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.hostIP
             - name: NODE_ID
               value: "$(POD_NAME)"
             - name: LISTEN_ADDR
-              value: "$(POD_NAME).sandstore-headless:8080"
+              value: ":8080"
             - name: DATA_DIR
               value: /var/lib/sandstore/data
           readinessProbe:

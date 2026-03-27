@@ -48,6 +48,7 @@ go.work.sum
 /mcp
 /open_smoke
 /durability_smoke
+/bench
 /main
 
 # macOS Finder metadata
@@ -56,6 +57,9 @@ go.work.sum
 
 # Local runtime/test artifacts
 /run/
+run/
+results/
 
 .codex
+.claude
 .planning

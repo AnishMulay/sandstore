@@ -31,6 +31,8 @@ LEGACY_CLIENT_BINARY=client
 LEGACY_MCP_BINARY=mcp
 LEGACY_OPEN_SMOKE_BINARY=open_smoke
 LEGACY_DURABILITY_SMOKE_BINARY=durability_smoke
+DURATION ?= 60
+BLOCK_SIZE ?= 4096
 
 # Generate protobuf files
 .PHONY: proto
@@ -65,6 +67,12 @@ client:
 	@mkdir -p $(dir $(CLIENT_BINARY))
 	go build -o $(CLIENT_BINARY) ./clients/client
 	./$(CLIENT_BINARY)
+
+.PHONY: bench
+bench:
+	go build -o bin/bench ./clients/bench
+	./bin/bench --seeds=$(SEEDS) --concurrency=$(CONCURRENCY) \
+		--duration=$(DURATION) --block-size=$(BLOCK_SIZE)
 
 # Run Go tests
 .PHONY: test
@@ -234,6 +242,60 @@ port-forward-prometheus:
 	K8S_NAMESPACE="$${K8S_NAMESPACE:-$(K8S_TEST_NAMESPACE_PREFIX)}"; \
 	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" port-forward service/prometheus 9090:9090
 
+# External access: expose all 3 sandstore pods on Ubuntu LAN so MacBook bench can reach them.
+# Usage:
+#   make port-forward-nodes                         # auto-detect LAN IP from k8s node
+#   make port-forward-nodes EXTERNAL_IP=10.0.0.5   # override with explicit IP
+#   make port-forward-nodes EXTERNAL_IP=127.0.0.1  # same-machine testing on local laptop
+#   Then from MacBook: make bench SEEDS=<printed-ip>:9080,<printed-ip>:9081,<printed-ip>:9082 CONCURRENCY=1
+.PHONY: port-forward-nodes
+port-forward-nodes:
+	@set -eu; \
+	K8S_NAMESPACE="$${K8S_NAMESPACE:-$(K8S_TEST_NAMESPACE_PREFIX)}"; \
+	\
+	if [ -n "$${EXTERNAL_IP:-}" ]; then \
+		DETECTED_IP="$$EXTERNAL_IP"; \
+		echo "Using provided EXTERNAL_IP=$$DETECTED_IP"; \
+	else \
+		DETECTED_IP=$$(kubectl --context="$(KUBE_CONTEXT)" get nodes \
+			-o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || true); \
+		if [ -z "$$DETECTED_IP" ]; then \
+			echo "ERROR: Could not auto-detect node IP. Re-run with: make port-forward-nodes EXTERNAL_IP=<ubuntu-lan-ip>"; \
+			exit 1; \
+		fi; \
+		echo "Auto-detected node IP: $$DETECTED_IP"; \
+	fi; \
+	\
+	echo "Patching sandstore-config ConfigMap with ADVERTISE_HOST=$$DETECTED_IP and EXTERNAL_BASE_PORT=9080..."; \
+	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" patch configmap sandstore-config \
+		--type merge -p "{\"data\":{\"ADVERTISE_HOST\":\"$$DETECTED_IP\",\"EXTERNAL_BASE_PORT\":\"9080\"}}"; \
+	\
+	echo "Triggering rolling restart of sandstore StatefulSet..."; \
+	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" rollout restart statefulset/sandstore; \
+	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" rollout status statefulset/sandstore --timeout=120s; \
+	\
+	echo "Starting port-forwards (0.0.0.0 bound so MacBook can reach Ubuntu)..."; \
+	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" \
+		port-forward --address 0.0.0.0 pod/sandstore-0 9080:8080 &\
+	PF0=$$!; \
+	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" \
+		port-forward --address 0.0.0.0 pod/sandstore-1 9081:8080 &\
+	PF1=$$!; \
+	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" \
+		port-forward --address 0.0.0.0 pod/sandstore-2 9082:8080 &\
+	PF2=$$!; \
+	\
+	trap 'echo "Cleaning up port-forwards..."; kill $$PF0 $$PF1 $$PF2 2>/dev/null || true' INT TERM EXIT; \
+	\
+	echo ""; \
+	echo "========================================"; \
+	echo "Port-forwards active. From MacBook run:"; \
+	echo "  make bench SEEDS=$$DETECTED_IP:9080,$$DETECTED_IP:9081,$$DETECTED_IP:9082 CONCURRENCY=1"; \
+	echo "========================================"; \
+	echo "Press Ctrl-C to stop port-forwards and revert."; \
+	\
+	wait $$PF0 $$PF1 $$PF2
+
 # Kubernetes Flow 5: Observability & Post-Mortem Debugging
 .PHONY: k8s-logs
 k8s-logs:
@@ -304,3 +366,6 @@ clean-artifacts:
 # clean: full local reset (containers + generated artifacts + runtime data)
 .PHONY: clean
 clean: clean-runtime clean-artifacts
+	rm -f ./bin/bench
+	rm -f ./bench
+	rm -rf ./run ./results
