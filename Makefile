@@ -33,6 +33,34 @@ LEGACY_OPEN_SMOKE_BINARY=open_smoke
 LEGACY_DURABILITY_SMOKE_BINARY=durability_smoke
 DURATION ?= 60
 BLOCK_SIZE ?= 4096
+TOPOLOGY ?= hyperconverged
+
+define check-topology
+	+@test -d scripts/topologies/$(TOPOLOGY) || \
+	  (echo ""; \
+	   echo "  Error: topology '$(TOPOLOGY)' not found."; \
+	   echo "  Available topologies: $$(ls scripts/topologies/)"; \
+	   echo "  Usage: make $@ TOPOLOGY=<topology>"; \
+	   echo ""; \
+	   exit 1)
+endef
+
+.PHONY: help
+help:
+	@echo "  cluster-up       Bring up the cluster for a topology"
+	@echo "                   Usage: make cluster-up TOPOLOGY=hyperconverged"
+	@echo ""
+	@echo "  cluster-down     Tear down the cluster for a topology"
+	@echo "                   Usage: make cluster-down TOPOLOGY=hyperconverged"
+	@echo ""
+	@echo "  smoke-test       Run smoke tests for a topology"
+	@echo "                   Usage: make smoke-test TOPOLOGY=hyperconverged"
+	@echo ""
+	@echo "  test-cluster     Run integration tests for a topology"
+	@echo "                   Usage: make test-cluster TOPOLOGY=hyperconverged"
+	@echo ""
+	@echo "  cluster          Run a local cluster for a topology"
+	@echo "                   Usage: make cluster TOPOLOGY=hyperconverged"
 
 # Generate protobuf files
 .PHONY: proto
@@ -59,7 +87,8 @@ simple:
 # Start 5-node Raft cluster
 .PHONY: cluster
 cluster:
-	-./scripts/dev/run-5.sh
+	$(check-topology)
+	./scripts/topologies/$(TOPOLOGY)/run-local.sh
 
 # Run the client
 .PHONY: client
@@ -170,6 +199,7 @@ k8s-update:
 
 .PHONY: test-cluster
 test-cluster:
+	$(check-topology)
 	KUBE_CONTEXT="$(KUBE_CONTEXT)" \
 	PROFILE="$(PROFILE)" \
 	ARCH="$(ARCH)" \
@@ -178,10 +208,11 @@ test-cluster:
 	K8S_IMAGE="$(K8S_LOCAL_IMAGE)" \
 	K8S_TEST_IMAGE="$(K8S_TEST_IMAGE)" \
 	K8S_TEST_NAMESPACE_PREFIX="$(K8S_TEST_NAMESPACE_PREFIX)" \
-	./scripts/dev/test-cluster.sh
+	./scripts/topologies/$(TOPOLOGY)/test.sh
 
 .PHONY: cluster-up
 cluster-up:
+	$(check-topology)
 	KUBE_CONTEXT="$(KUBE_CONTEXT)" \
 	PROFILE="$(PROFILE)" \
 	ARCH="$(ARCH)" \
@@ -191,50 +222,20 @@ cluster-up:
 	K8S_TEST_IMAGE="$(K8S_TEST_IMAGE)" \
 	K8S_TEST_NAMESPACE_PREFIX="$(K8S_TEST_NAMESPACE_PREFIX)" \
 	K8S_NAMESPACE="$${K8S_NAMESPACE:-$(K8S_TEST_NAMESPACE_PREFIX)}" \
-	./scripts/dev/cluster-up.sh
+	./scripts/topologies/$(TOPOLOGY)/cluster-up.sh
 
 .PHONY: cluster-down
 cluster-down:
+	$(check-topology)
 	KUBE_CONTEXT="$(KUBE_CONTEXT)" \
 	K8S_TEST_NAMESPACE_PREFIX="$(K8S_TEST_NAMESPACE_PREFIX)" \
 	K8S_NAMESPACE="$${K8S_NAMESPACE:-$(K8S_TEST_NAMESPACE_PREFIX)}" \
-	./scripts/dev/cluster-down.sh
+	./scripts/topologies/$(TOPOLOGY)/cluster-down.sh
 
 .PHONY: smoke-test
 smoke-test:
-	@set -eu; \
-	K8S_NAMESPACE="$${K8S_NAMESPACE:-$(K8S_TEST_NAMESPACE_PREFIX)}"; \
-	K8S_IMAGE="$${K8S_IMAGE:-$(K8S_LOCAL_IMAGE)}"; \
-	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" delete job sandstore-open-smoke --ignore-not-found=true >/dev/null 2>&1 || true; \
-	printf '%s\n' \
-	  'apiVersion: batch/v1' \
-	  'kind: Job' \
-	  'metadata:' \
-	  '  name: sandstore-open-smoke' \
-	  '  labels:' \
-	  '    app: sandstore' \
-	  '    app.kubernetes.io/name: sandstore' \
-	  'spec:' \
-	  '  backoffLimit: 0' \
-	  '  template:' \
-	  '    metadata:' \
-	  '      labels:' \
-	  '        app: sandstore' \
-	  '        app.kubernetes.io/name: sandstore' \
-	  '    spec:' \
-	  '      restartPolicy: Never' \
-	  '      containers:' \
-	  '        - name: sandstore-open-smoke' \
-	  '          image: '"$$K8S_IMAGE" \
-	  '          imagePullPolicy: IfNotPresent' \
-	  '          command:' \
-	  '            - /usr/local/bin/smoke' \
-	  '          env:' \
-	  '            - name: SANDSTORE_SEEDS' \
-	  '              value: sandstore-0.sandstore-headless:8080,sandstore-1.sandstore-headless:8080,sandstore-2.sandstore-headless:8080' \
-	  | kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" apply -f - >/dev/null; \
-	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" wait --for=condition=complete job/sandstore-open-smoke --timeout=900s; \
-	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" logs job/sandstore-open-smoke --all-containers=true
+	$(check-topology)
+	./scripts/topologies/$(TOPOLOGY)/smoke.sh
 
 .PHONY: port-forward-prometheus
 port-forward-prometheus:

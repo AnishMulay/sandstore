@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 KUBE_CONTEXT="${KUBE_CONTEXT:-docker-desktop}"
 PROFILE="${PROFILE:-default-etcd}"
 ARCH="${ARCH:-amd64}"

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 RUN="$ROOT/run/cluster"
 BIN="$ROOT/bin/sandstore"
 SMOKE="$ROOT/bin/open-smoke"
@@ -89,7 +90,7 @@ build_binaries() {
 
 bootstrap_cluster_config() {
   echo "Bootstrapping etcd node config..."
-  "$ROOT/scripts/dev/init-etcd.sh"
+  "$SCRIPT_DIR/init-etcd.sh"
 }
 
 start_node() {

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 BIN="$ROOT/bin/sandstore"
 CLIENT="$ROOT/bin/client"
 RUN="$ROOT/run/cluster"
