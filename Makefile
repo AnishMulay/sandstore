@@ -56,6 +56,9 @@ help:
 	@echo "  smoke-test       Run smoke tests for a topology"
 	@echo "                   Usage: make smoke-test TOPOLOGY=hyperconverged"
 	@echo ""
+	@echo "  smoke-local      Run local smoke test (requires local etcd on localhost:2379)"
+	@echo "                   Usage: make smoke-local TOPOLOGY=hyperconverged"
+	@echo ""
 	@echo "  test-cluster     Run integration tests for a topology"
 	@echo "                   Usage: make test-cluster TOPOLOGY=hyperconverged"
 	@echo ""
@@ -236,6 +239,11 @@ cluster-down:
 smoke-test:
 	$(check-topology)
 	./scripts/topologies/$(TOPOLOGY)/smoke.sh
+
+.PHONY: smoke-local
+smoke-local:
+	$(check-topology)
+	./scripts/topologies/$(TOPOLOGY)/smoke-local.sh
 
 .PHONY: port-forward-prometheus
 port-forward-prometheus:
