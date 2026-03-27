@@ -68,14 +68,14 @@ apply_manifests() {
     -f "${ROOT}/${K8S_MANIFEST_DIR}/rbac-cluster-tests.yaml" >/dev/null
 
   log "Bootstrapping cluster membership in etcd..."
-  kubectl --context="${KUBE_CONTEXT}" -n "${K8S_NAMESPACE}" delete job sandstore-bootstrap-config --ignore-not-found=true >/dev/null
+  kubectl --context="${KUBE_CONTEXT}" -n "${K8S_NAMESPACE}" delete job sandstore-hyperconverged-bootstrap-config --ignore-not-found=true >/dev/null
   kubectl --context="${KUBE_CONTEXT}" -n "${K8S_NAMESPACE}" apply -f "${ROOT}/${K8S_MANIFEST_DIR}/job-bootstrap.yaml" >/dev/null
-  kubectl --context="${KUBE_CONTEXT}" -n "${K8S_NAMESPACE}" wait --for=condition=complete job/sandstore-bootstrap-config --timeout=180s
+  kubectl --context="${KUBE_CONTEXT}" -n "${K8S_NAMESPACE}" wait --for=condition=complete job/sandstore-hyperconverged-bootstrap-config --timeout=180s
 
   log "Deploying sandstore raft cluster..."
   kubectl --context="${KUBE_CONTEXT}" -n "${K8S_NAMESPACE}" apply -f "${ROOT}/${K8S_MANIFEST_DIR}/statefulset-sandstore.yaml" >/dev/null
-  kubectl --context="${KUBE_CONTEXT}" -n "${K8S_NAMESPACE}" set image statefulset/sandstore "sandstore=${K8S_IMAGE}" >/dev/null
-  kubectl --context="${KUBE_CONTEXT}" -n "${K8S_NAMESPACE}" rollout status statefulset/sandstore --timeout=240s
+  kubectl --context="${KUBE_CONTEXT}" -n "${K8S_NAMESPACE}" set image statefulset/sandstore-hyperconverged "sandstore=${K8S_IMAGE}" >/dev/null
+  kubectl --context="${KUBE_CONTEXT}" -n "${K8S_NAMESPACE}" rollout status statefulset/sandstore-hyperconverged --timeout=240s
 
   log "Deploying Prometheus..."
   kubectl --context="${KUBE_CONTEXT}" -n "${K8S_NAMESPACE}" apply \

@@ -72,7 +72,7 @@ func NewFileStableStore(path string, metricsService ...metrics.MetricsService) (
 	s := &FileStableStore{path: path, metricsService: service}
 	// Eagerly validate: if a file exists at path, confirm it is CRC-valid
 	// before returning. A corrupt file here panics the node at startup via
-	// the caller in wire_grpc_etcd.go, which is the correct behaviour.
+	// the caller in topology_hyperconverged.go, which is the correct behaviour.
 	if _, _, err := s.GetState(); err != nil {
 		return nil, fmt.Errorf("stable store validation on open: %w", err)
 	}

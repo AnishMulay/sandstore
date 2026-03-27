@@ -1,18 +1,18 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: sandstore-test-runner
+  name: sandstore-hyperconverged-test-runner
   labels:
-    app: sandstore
-    app.kubernetes.io/name: sandstore
+    app: sandstore-hyperconverged
+    app.kubernetes.io/name: sandstore-hyperconverged
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: sandstore-test-runner
+  name: sandstore-hyperconverged-test-runner
   labels:
-    app: sandstore
-    app.kubernetes.io/name: sandstore
+    app: sandstore-hyperconverged
+    app.kubernetes.io/name: sandstore-hyperconverged
 rules:
   - apiGroups: [""]
     resources: ["pods"]
@@ -27,14 +27,14 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: sandstore-test-runner
+  name: sandstore-hyperconverged-test-runner
   labels:
-    app: sandstore
-    app.kubernetes.io/name: sandstore
+    app: sandstore-hyperconverged
+    app.kubernetes.io/name: sandstore-hyperconverged
 subjects:
   - kind: ServiceAccount
-    name: sandstore-test-runner
+    name: sandstore-hyperconverged-test-runner
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: sandstore-test-runner
+  name: sandstore-hyperconverged-test-runner

@@ -21,6 +21,8 @@ RUN GOOS="${GOOS}" GOARCH="${GOARCH}" go test -c -tags="${TAGS}" -o /build/clust
 
 FROM alpine:latest AS runner
 
+LABEL io.sandstore.topology="hyperconverged"
+
 RUN mkdir -p /var/lib/sandstore/data /var/lib/sandstore/logs
 
 COPY --from=builder /build/sandstore /usr/local/bin/sandstore
@@ -30,6 +32,8 @@ COPY --from=builder /build/durability_smoke /usr/local/bin/durability_smoke
 ENTRYPOINT ["/usr/local/bin/sandstore"]
 
 FROM alpine:latest AS test-runner
+
+LABEL io.sandstore.topology="hyperconverged"
 
 RUN apk add --no-cache bash ca-certificates kubectl
 

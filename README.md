@@ -58,9 +58,9 @@ Each node is assembled from:
 | Routing | `EndpointResolver` | Static endpoint resolver |
 | Write coordination | `TransactionCoordinator` | Raft transaction coordinator |
 
-The server layer (`SimpleServer`) depends only on the orchestrator interfaces, not on any concrete implementation. This is the seam where new topologies plug in.
+The server layer (`HyperconvergedServer`) depends only on the orchestrator interfaces, not on any concrete implementation. This is the seam where new topologies plug in.
 
-The canonical entry point for understanding the system is `servers/node/wire_grpc_etcd.go`. It assembles every component in dependency order and shows exactly how the current topology is built.
+The canonical entry point for understanding the system is `servers/node/topology_hyperconverged.go`. It assembles every component in dependency order and shows exactly how the current topology is built.
 
 ## Quick Start
 
@@ -110,9 +110,9 @@ internal/
   chunk_service/       # ChunkService interface + local disk implementation
   cluster_service/     # ClusterService interface + etcd implementation
   communication/       # Communicator interface + gRPC implementation
-  server/              # Server interface + SimpleServer
+  server/              # Server interface + HyperconvergedServer
 clients/
-  library/             # SDK, smart client, topology router (ConvergedRouter)
+  library/             # SDK, smart client, topology router (HyperconvergedRouter)
   open_smoke/          # End-to-end smoke test client
   durability_smoke/    # Failover/durability smoke client
   mcp/                 # Model Context Protocol server (in progress)
@@ -133,7 +133,7 @@ To build a new storage topology — say, a GFS-style architecture with a dedicat
 - **`TransactionCoordinator`** — coordination logic matching your write path
 - Optionally: **`MetadataService`**, **`MetadataReplicator`** — if you want different metadata persistence or consensus behavior
 
-Then write a new wiring file (like `servers/node/wire_grpc_etcd.go`) that assembles your implementations and passes them to `SimpleServer`. No changes to the server layer, client, or deploy tooling required.
+Then write a new wiring file (like `servers/node/topology_hyperconverged.go`) that assembles your implementations and passes them to `HyperconvergedServer`. No changes to the server layer, client, or deploy tooling required.
 
 The interface definitions live in `internal/orchestrators/interfaces.go`. Start there.
 
@@ -143,7 +143,7 @@ The interface definitions live in `internal/orchestrators/interfaces.go`. Start 
 - [x] Hyperconverged node topology (etcd + gRPC + durable Raft + BoltDB)
 - [x] Durable Raft WAL with CRC/envelope protection and corruption recovery
 - [x] Kubernetes integration test suite (leader election, durability, node rejoin)
-- [x] Smart client with topology-aware leader routing (ConvergedRouter)
+- [x] Smart client with topology-aware leader routing (HyperconvergedRouter)
 - [x] 2PC transactional chunk writes
 
 ### In Progress
@@ -162,7 +162,7 @@ The interface definitions live in `internal/orchestrators/interfaces.go`. Start 
 
 Contributions are welcome — new topology implementations especially so.
 
-The best place to start is `servers/node/wire_grpc_etcd.go` to understand the current topology, then `internal/orchestrators/interfaces.go` to understand the extension points.
+The best place to start is `servers/node/topology_hyperconverged.go` to understand the current topology, then `internal/orchestrators/interfaces.go` to understand the extension points.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on setting up your environment, code style, and submitting pull requests.
 

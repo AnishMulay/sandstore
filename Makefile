@@ -115,7 +115,7 @@ test:
 durability-smoke:
 	@set -e; \
 	compose_file=deploy/docker/docker-compose-durability.yaml; \
-	docker compose -f $$compose_file up --build -d etcd etcd-init node-1 node-2 node-3; \
+	docker compose -f $$compose_file up --build -d etcd etcd-init sandstore-hyperconverged-1 sandstore-hyperconverged-2 sandstore-hyperconverged-3; \
 	set +e; \
 	docker compose -f $$compose_file run --rm --no-deps smoke-test; \
 	status=$$?; \
@@ -165,9 +165,9 @@ k8s-destroy:
 		echo "Warning: running k8s-destroy against local context '$(KUBE_CONTEXT)'"; \
 	fi; \
 	kubectl --context=$(KUBE_CONTEXT) delete -f $(K8S_MANIFEST_DIR)/ --ignore-not-found=true; \
-	kubectl --context=$(KUBE_CONTEXT) delete pvc -l app=sandstore --ignore-not-found=true; \
-	if kubectl --context=$(KUBE_CONTEXT) get pod -l app=sandstore --no-headers 2>/dev/null | grep -q .; then \
-		kubectl --context=$(KUBE_CONTEXT) wait --for=delete pod -l app=sandstore --timeout=60s || { \
+	kubectl --context=$(KUBE_CONTEXT) delete pvc -l app=sandstore-hyperconverged --ignore-not-found=true; \
+	if kubectl --context=$(KUBE_CONTEXT) get pod -l app=sandstore-hyperconverged --no-headers 2>/dev/null | grep -q .; then \
+		kubectl --context=$(KUBE_CONTEXT) wait --for=delete pod -l app=sandstore-hyperconverged --timeout=60s || { \
 			echo "Teardown wait timed out. Inspect terminating resources and force-delete stuck pods/namespaces if needed."; \
 			exit 1; \
 		}; \
@@ -180,22 +180,22 @@ k8s-deploy: k8s-destroy
 	kubectl --context=$(KUBE_CONTEXT) apply -f $(K8S_MANIFEST_DIR)/configmap.yaml -f $(K8S_MANIFEST_DIR)/storageclass.yaml -f $(K8S_MANIFEST_DIR)/service-headless.yaml -f $(K8S_MANIFEST_DIR)/service-etcd.yaml; \
 	kubectl --context=$(KUBE_CONTEXT) apply -f $(K8S_MANIFEST_DIR)/statefulset-etcd.yaml; \
 	kubectl --context=$(KUBE_CONTEXT) rollout status statefulset/etcd-cluster --timeout=60s; \
-	kubectl --context=$(KUBE_CONTEXT) delete job sandstore-bootstrap-config --ignore-not-found=true; \
+	kubectl --context=$(KUBE_CONTEXT) delete job sandstore-hyperconverged-bootstrap-config --ignore-not-found=true; \
 	kubectl --context=$(KUBE_CONTEXT) apply -f $(K8S_MANIFEST_DIR)/job-bootstrap.yaml; \
-	kubectl --context=$(KUBE_CONTEXT) wait --for=condition=complete job/sandstore-bootstrap-config --timeout=60s; \
+	kubectl --context=$(KUBE_CONTEXT) wait --for=condition=complete job/sandstore-hyperconverged-bootstrap-config --timeout=60s; \
 	kubectl --context=$(KUBE_CONTEXT) apply -f $(K8S_MANIFEST_DIR)/statefulset-sandstore.yaml; \
-	kubectl --context=$(KUBE_CONTEXT) set image statefulset/sandstore sandstore=$(K8S_IMAGE); \
+	kubectl --context=$(KUBE_CONTEXT) set image statefulset/sandstore-hyperconverged sandstore=$(K8S_IMAGE); \
 	kubectl --context=$(KUBE_CONTEXT) apply -f $(K8S_MANIFEST_DIR)/service-nodeport.yaml
 
 # Kubernetes Flow 4: The Iteration Loop (Stateful Rolling Update)
 .PHONY: k8s-update
 k8s-update:
 	@set -eu; \
-	kubectl --context=$(KUBE_CONTEXT) get statefulset sandstore >/dev/null; \
+	kubectl --context=$(KUBE_CONTEXT) get statefulset sandstore-hyperconverged >/dev/null; \
 	$(MAKE) --no-print-directory k8s-build PROFILE="$(PROFILE)" REGISTRY_URL="$(REGISTRY_URL)" ARCH="$(ARCH)"; \
-	kubectl --context=$(KUBE_CONTEXT) set image statefulset/sandstore sandstore=$(K8S_IMAGE); \
-	kubectl --context=$(KUBE_CONTEXT) rollout restart statefulset/sandstore; \
-	kubectl --context=$(KUBE_CONTEXT) rollout status statefulset/sandstore --timeout=120s || { \
+	kubectl --context=$(KUBE_CONTEXT) set image statefulset/sandstore-hyperconverged sandstore=$(K8S_IMAGE); \
+	kubectl --context=$(KUBE_CONTEXT) rollout restart statefulset/sandstore-hyperconverged; \
+	kubectl --context=$(KUBE_CONTEXT) rollout status statefulset/sandstore-hyperconverged --timeout=120s || { \
 		echo "Rollout failed or timed out. Inspect crash logs with: make k8s-logs-crash POD=<pod_name> KUBE_CONTEXT=$(KUBE_CONTEXT)"; \
 		exit 1; \
 	}
@@ -275,23 +275,23 @@ port-forward-nodes:
 		echo "Auto-detected node IP: $$DETECTED_IP"; \
 	fi; \
 	\
-	echo "Patching sandstore-config ConfigMap with ADVERTISE_HOST=$$DETECTED_IP and EXTERNAL_BASE_PORT=9080..."; \
-	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" patch configmap sandstore-config \
+	echo "Patching sandstore-hyperconverged-config ConfigMap with ADVERTISE_HOST=$$DETECTED_IP and EXTERNAL_BASE_PORT=9080..."; \
+	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" patch configmap sandstore-hyperconverged-config \
 		--type merge -p "{\"data\":{\"ADVERTISE_HOST\":\"$$DETECTED_IP\",\"EXTERNAL_BASE_PORT\":\"9080\"}}"; \
 	\
-	echo "Triggering rolling restart of sandstore StatefulSet..."; \
-	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" rollout restart statefulset/sandstore; \
-	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" rollout status statefulset/sandstore --timeout=120s; \
+	echo "Triggering rolling restart of sandstore-hyperconverged StatefulSet..."; \
+	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" rollout restart statefulset/sandstore-hyperconverged; \
+	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" rollout status statefulset/sandstore-hyperconverged --timeout=120s; \
 	\
 	echo "Starting port-forwards (0.0.0.0 bound so MacBook can reach Ubuntu)..."; \
 	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" \
-		port-forward --address 0.0.0.0 pod/sandstore-0 9080:8080 &\
+		port-forward --address 0.0.0.0 pod/sandstore-hyperconverged-0 9080:8080 &\
 	PF0=$$!; \
 	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" \
-		port-forward --address 0.0.0.0 pod/sandstore-1 9081:8080 &\
+		port-forward --address 0.0.0.0 pod/sandstore-hyperconverged-1 9081:8080 &\
 	PF1=$$!; \
 	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" \
-		port-forward --address 0.0.0.0 pod/sandstore-2 9082:8080 &\
+		port-forward --address 0.0.0.0 pod/sandstore-hyperconverged-2 9082:8080 &\
 	PF2=$$!; \
 	\
 	trap 'echo "Cleaning up port-forwards..."; kill $$PF0 $$PF1 $$PF2 2>/dev/null || true' INT TERM EXIT; \
@@ -308,7 +308,7 @@ port-forward-nodes:
 # Kubernetes Flow 5: Observability & Post-Mortem Debugging
 .PHONY: k8s-logs
 k8s-logs:
-	kubectl --context=$(KUBE_CONTEXT) logs -l app=sandstore -f --max-log-requests=10
+	kubectl --context=$(KUBE_CONTEXT) logs -l app=sandstore-hyperconverged -f --max-log-requests=10
 
 .PHONY: k8s-logs-crash
 k8s-logs-crash:

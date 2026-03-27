@@ -23,10 +23,10 @@ func NewPrometheusMetricsService(port string, nodeName string) *PrometheusMetric
 		},
 		[]string{"operation", "service", "node"},
 	)
-	simpleServerLatencyHistogram := promauto.NewHistogramVec(
+	hyperconvergedServerLatencyHistogram := promauto.NewHistogramVec(
 		prometheusclient.HistogramOpts{
-			Name: "sandstore_simple_server_latency_seconds",
-			Help: "Histogram of latency for Sandstore SimpleServer operations",
+			Name: "sandstore_hyperconverged_server_latency_seconds",
+			Help: "Histogram of latency for Sandstore HyperconvergedServer operations",
 		},
 		[]string{"operation", "service", "node"},
 	)
@@ -110,7 +110,7 @@ func NewPrometheusMetricsService(port string, nodeName string) *PrometheusMetric
 
 	histograms := map[metrics.ObservationName]*prometheusclient.HistogramVec{
 		metrics.MetadataOperationLatency:                          latencyHistogram,
-		metrics.SimpleServerHandleMessageLatency:                  simpleServerLatencyHistogram,
+		metrics.HyperconvergedServerHandleMessageLatency:          hyperconvergedServerLatencyHistogram,
 		metrics.ControlPlanePrepareFileWriteLatency:               controlPlaneLatencyHistogram,
 		metrics.ControlPlaneCommitFileWriteLatency:                controlPlaneLatencyHistogram,
 		metrics.ControlPlaneAbortFileWriteLatency:                 controlPlaneLatencyHistogram,

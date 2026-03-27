@@ -25,7 +25,7 @@ const writeRPCChunkSize = 8 * 1024 * 1024
 // NewSandstoreClient constructs a client from a seed set and performs the
 // initial topology bootstrap before returning.
 func NewSandstoreClient(seeds []string, comm *grpccomm.GRPCCommunicator) (*SandstoreClient, error) {
-	router := topology.NewConvergedRouter(seeds, comm)
+	router := topology.NewHyperconvergedRouter(seeds, comm)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

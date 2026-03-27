@@ -19,7 +19,7 @@ import (
 	metadataservice "github.com/AnishMulay/sandstore/internal/metadata_service/bolt"
 	metrics "github.com/AnishMulay/sandstore/internal/metrics/prometheus"
 	"github.com/AnishMulay/sandstore/internal/orchestrators"
-	simpleserver "github.com/AnishMulay/sandstore/internal/server/simple"
+	hyperconvergedserver "github.com/AnishMulay/sandstore/internal/server/hyperconverged"
 )
 
 func parseEtcdEndpoints(raw string) []string {
@@ -80,7 +80,7 @@ func (e *externalTopology) GetLeaderAddress() string {
 	if err != nil || basePort <= 0 {
 		return addr
 	}
-	// Extract ordinal from NODE_ID suffix, e.g. "sandstore-2" → 2.
+	// Extract ordinal from NODE_ID suffix, e.g. "sandstore-hyperconverged-2" → 2.
 	// If the suffix is not a valid integer, ordinal defaults to 0.
 	ordinal := 0
 	nodeID := strings.TrimSpace(os.Getenv("NODE_ID"))
@@ -150,14 +150,14 @@ func Build(opts Options) runnable {
 	chunkSize := int64(8 * 1024 * 1024) // 8MB default
 	replicaCount := 3
 
-	placementStrategy := orchestrators.NewLegacySortedPlacementStrategy(clusterService, replicaCount, metricsService)
+	placementStrategy := orchestrators.NewSortedPlacementStrategy(clusterService, replicaCount, metricsService)
 	endpointResolver := orchestrators.NewStaticEndpointResolver(clusterService)
 	dpo := orchestrators.NewRaftDataPlaneOrchestrator(comm, endpointResolver, chunkSize, cs, metricsService)
 	txnCoordinator := orchestrators.NewRaftTransactionCoordinator(comm, metaRepl, metricsService)
 	cpo := orchestrators.NewControlPlaneOrchestrator(ms, placementStrategy, txnCoordinator, metaRepl, metricsService, chunkSize, replicaCount)
 
 	// 6. Server (The Gateway)
-	var topology simpleserver.TopologyProvider = metaRepl
+	var topology hyperconvergedserver.TopologyProvider = metaRepl
 	hostIP := strings.TrimSpace(os.Getenv("ADVERTISE_HOST"))
 	if hostIP == "" {
 		hostIP = strings.TrimSpace(os.Getenv("HOST_IP"))
@@ -166,7 +166,7 @@ func Build(opts Options) runnable {
 	if hostIP != "" && extBasePort != "" {
 		topology = &externalTopology{inner: metaRepl}
 	}
-	srv := simpleserver.NewSimpleServer(comm, cpo, dpo, ls, topology, metricsService)
+	srv := hyperconvergedserver.NewHyperconvergedServer(comm, cpo, dpo, ls, topology, metricsService)
 
 	return &singleNodeServer{
 		server:         srv,

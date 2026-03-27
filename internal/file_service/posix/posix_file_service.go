@@ -1,4 +1,4 @@
-package simple
+package posix
 
 import (
 	"context"
@@ -14,19 +14,19 @@ import (
 	"github.com/google/uuid"
 )
 
-type SimpleFileService struct {
+type PosixFileService struct {
 	ms        pms.MetadataService
 	cs        pcs.ChunkService
 	ls        log_service.LogService
 	chunkSize int64
 }
 
-func NewSimpleFileService(
+func NewPosixFileService(
 	ms pms.MetadataService,
 	cs pcs.ChunkService,
 	ls log_service.LogService,
-) *SimpleFileService {
-	return &SimpleFileService{
+) *PosixFileService {
+	return &PosixFileService{
 		ms: ms,
 		cs: cs,
 		ls: ls,
@@ -35,8 +35,8 @@ func NewSimpleFileService(
 
 // --- Lifecycle ---
 
-func (s *SimpleFileService) Start() error {
-	s.ls.Info(log_service.LogEvent{Message: "Starting Simple POSIX File Service"})
+func (s *PosixFileService) Start() error {
+	s.ls.Info(log_service.LogEvent{Message: "Starting Posix File Service"})
 
 	// 1. Start Metadata Service
 	if err := s.ms.Start(); err != nil {
@@ -63,14 +63,14 @@ func (s *SimpleFileService) Start() error {
 	return nil
 }
 
-func (s *SimpleFileService) Stop() error {
-	s.ls.Info(log_service.LogEvent{Message: "Stopping Simple POSIX File Service"})
+func (s *PosixFileService) Stop() error {
+	s.ls.Info(log_service.LogEvent{Message: "Stopping Posix File Service"})
 	return s.ms.Stop()
 }
 
 // --- Data Operations (The Complex Logic) ---
 
-func (s *SimpleFileService) Read(ctx context.Context, inodeID string, offset int64, length int64) ([]byte, error) {
+func (s *PosixFileService) Read(ctx context.Context, inodeID string, offset int64, length int64) ([]byte, error) {
 	s.ls.Debug(log_service.LogEvent{
 		Message:  "Read Request",
 		Metadata: map[string]any{"inodeID": inodeID, "offset": offset, "length": length},
@@ -145,7 +145,7 @@ func (s *SimpleFileService) Read(ctx context.Context, inodeID string, offset int
 	return result, nil
 }
 
-func (s *SimpleFileService) Write(ctx context.Context, inodeID string, offset int64, data []byte) (int64, error) {
+func (s *PosixFileService) Write(ctx context.Context, inodeID string, offset int64, data []byte) (int64, error) {
 	s.ls.Debug(log_service.LogEvent{
 		Message:  "Write Request",
 		Metadata: map[string]any{"inodeID": inodeID, "offset": offset, "len": len(data)},
@@ -283,15 +283,15 @@ func (s *SimpleFileService) Write(ctx context.Context, inodeID string, offset in
 
 // --- Directory & Metadata Operations (Delegation) ---
 
-func (s *SimpleFileService) Create(ctx context.Context, parentInodeID string, name string, mode uint32, uid, gid uint32) (*pms.Inode, error) {
+func (s *PosixFileService) Create(ctx context.Context, parentInodeID string, name string, mode uint32, uid, gid uint32) (*pms.Inode, error) {
 	return s.ms.Create(ctx, parentInodeID, name, mode, uid, gid)
 }
 
-func (s *SimpleFileService) Mkdir(ctx context.Context, parentInodeID string, name string, mode uint32, uid, gid uint32) (*pms.Inode, error) {
+func (s *PosixFileService) Mkdir(ctx context.Context, parentInodeID string, name string, mode uint32, uid, gid uint32) (*pms.Inode, error) {
 	return s.ms.Mkdir(ctx, parentInodeID, name, mode, uid, gid)
 }
 
-func (s *SimpleFileService) Remove(ctx context.Context, parentInodeID string, name string) error {
+func (s *PosixFileService) Remove(ctx context.Context, parentInodeID string, name string) error {
 	// 1. Resolve ID to clean up chunks later
 	inodeID, err := s.ms.Lookup(ctx, parentInodeID, name)
 	if err != nil {
@@ -325,47 +325,47 @@ func (s *SimpleFileService) Remove(ctx context.Context, parentInodeID string, na
 	return nil
 }
 
-func (s *SimpleFileService) Rmdir(ctx context.Context, parentInodeID string, name string) error {
+func (s *PosixFileService) Rmdir(ctx context.Context, parentInodeID string, name string) error {
 	return s.ms.Rmdir(ctx, parentInodeID, name)
 }
 
-func (s *SimpleFileService) Rename(ctx context.Context, srcParentID, srcName, dstParentID, dstName string) error {
+func (s *PosixFileService) Rename(ctx context.Context, srcParentID, srcName, dstParentID, dstName string) error {
 	return s.ms.Rename(ctx, srcParentID, srcName, dstParentID, dstName)
 }
 
-func (s *SimpleFileService) GetAttr(ctx context.Context, inodeID string) (*pms.Attributes, error) {
+func (s *PosixFileService) GetAttr(ctx context.Context, inodeID string) (*pms.Attributes, error) {
 	return s.ms.GetAttributes(ctx, inodeID)
 }
 
-func (s *SimpleFileService) SetAttr(ctx context.Context, inodeID string, mode *uint32, uid, gid *uint32, atime, mtime *int64) (*pms.Attributes, error) {
+func (s *PosixFileService) SetAttr(ctx context.Context, inodeID string, mode *uint32, uid, gid *uint32, atime, mtime *int64) (*pms.Attributes, error) {
 	return s.ms.SetAttributes(ctx, inodeID, mode, uid, gid, atime, mtime)
 }
 
-func (s *SimpleFileService) Lookup(ctx context.Context, parentInodeID string, name string) (string, error) {
+func (s *PosixFileService) Lookup(ctx context.Context, parentInodeID string, name string) (string, error) {
 	return s.ms.Lookup(ctx, parentInodeID, name)
 }
 
-func (s *SimpleFileService) LookupPath(ctx context.Context, path string) (string, error) {
+func (s *PosixFileService) LookupPath(ctx context.Context, path string) (string, error) {
 	return s.ms.LookupPath(ctx, path)
 }
 
-func (s *SimpleFileService) Access(ctx context.Context, inodeID string, uid, gid uint32, accessMask uint32) error {
+func (s *PosixFileService) Access(ctx context.Context, inodeID string, uid, gid uint32, accessMask uint32) error {
 	return s.ms.Access(ctx, inodeID, uid, gid, accessMask)
 }
 
-func (s *SimpleFileService) ReadDir(ctx context.Context, inodeID string, cookie int, maxEntries int) ([]pms.DirEntry, int, bool, error) {
+func (s *PosixFileService) ReadDir(ctx context.Context, inodeID string, cookie int, maxEntries int) ([]pms.DirEntry, int, bool, error) {
 	return s.ms.ReadDir(ctx, inodeID, cookie, maxEntries)
 }
 
-func (s *SimpleFileService) ReadDirPlus(ctx context.Context, inodeID string, cookie int, maxEntries int) ([]pms.DirEntryPlus, int, bool, error) {
+func (s *PosixFileService) ReadDirPlus(ctx context.Context, inodeID string, cookie int, maxEntries int) ([]pms.DirEntryPlus, int, bool, error) {
 	return s.ms.ReadDirPlus(ctx, inodeID, cookie, maxEntries)
 }
 
-func (s *SimpleFileService) GetFsStat(ctx context.Context) (*pms.FileSystemStats, error) {
+func (s *PosixFileService) GetFsStat(ctx context.Context) (*pms.FileSystemStats, error) {
 	return s.ms.GetFsStat(ctx)
 }
 
-func (s *SimpleFileService) GetFsInfo(ctx context.Context) (*pms.FileSystemInfo, error) {
+func (s *PosixFileService) GetFsInfo(ctx context.Context) (*pms.FileSystemInfo, error) {
 	return s.ms.GetFsInfo(ctx)
 }
 

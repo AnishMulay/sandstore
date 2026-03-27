@@ -16,9 +16,9 @@ K8S_MANIFEST_DIR="${K8S_MANIFEST_DIR:-deploy/k8s}"
 
 TEST_STATUS=0
 FAILURES=()
-OPEN_JOB_NAME="sandstore-open-smoke"
-DURABILITY_JOB_NAME="sandstore-durability-smoke"
-LEADER_JOB_NAME="sandstore-leader-ready"
+OPEN_JOB_NAME="sandstore-hyperconverged-open-smoke"
+DURABILITY_JOB_NAME="sandstore-hyperconverged-durability-smoke"
+LEADER_JOB_NAME="sandstore-hyperconverged-leader-ready"
 
 log() {
   printf '%s\n' "$*"
@@ -117,14 +117,14 @@ apply_manifests() {
     -f "${ROOT}/${K8S_MANIFEST_DIR}/rbac-cluster-tests.yaml" >/dev/null
 
   log "Bootstrapping cluster membership in etcd..."
-  kubectl --context="${KUBE_CONTEXT}" -n "${K8S_NAMESPACE}" delete job sandstore-bootstrap-config --ignore-not-found=true >/dev/null
+  kubectl --context="${KUBE_CONTEXT}" -n "${K8S_NAMESPACE}" delete job sandstore-hyperconverged-bootstrap-config --ignore-not-found=true >/dev/null
   kubectl --context="${KUBE_CONTEXT}" -n "${K8S_NAMESPACE}" apply -f "${ROOT}/${K8S_MANIFEST_DIR}/job-bootstrap.yaml" >/dev/null
-  kubectl --context="${KUBE_CONTEXT}" -n "${K8S_NAMESPACE}" wait --for=condition=complete job/sandstore-bootstrap-config --timeout=180s
+  kubectl --context="${KUBE_CONTEXT}" -n "${K8S_NAMESPACE}" wait --for=condition=complete job/sandstore-hyperconverged-bootstrap-config --timeout=180s
 
   log "Deploying sandstore raft cluster..."
   kubectl --context="${KUBE_CONTEXT}" -n "${K8S_NAMESPACE}" apply -f "${ROOT}/${K8S_MANIFEST_DIR}/statefulset-sandstore.yaml" >/dev/null
-  kubectl --context="${KUBE_CONTEXT}" -n "${K8S_NAMESPACE}" set image statefulset/sandstore "sandstore=${K8S_IMAGE}" >/dev/null
-  kubectl --context="${KUBE_CONTEXT}" -n "${K8S_NAMESPACE}" rollout status statefulset/sandstore --timeout=240s
+  kubectl --context="${KUBE_CONTEXT}" -n "${K8S_NAMESPACE}" set image statefulset/sandstore-hyperconverged "sandstore=${K8S_IMAGE}" >/dev/null
+  kubectl --context="${KUBE_CONTEXT}" -n "${K8S_NAMESPACE}" rollout status statefulset/sandstore-hyperconverged --timeout=240s
 }
 
 apply_test_job() {
@@ -138,17 +138,17 @@ kind: Job
 metadata:
   name: ${job_name}
   labels:
-    app: sandstore
-    app.kubernetes.io/name: sandstore
+    app: sandstore-hyperconverged
+    app.kubernetes.io/name: sandstore-hyperconverged
 spec:
   backoffLimit: 0
   template:
     metadata:
       labels:
-        app: sandstore
-        app.kubernetes.io/name: sandstore
+        app: sandstore-hyperconverged
+        app.kubernetes.io/name: sandstore-hyperconverged
     spec:
-      serviceAccountName: sandstore-test-runner
+      serviceAccountName: sandstore-hyperconverged-test-runner
       restartPolicy: Never
       containers:
         - name: ${job_name}
@@ -165,11 +165,11 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
             - name: SANDSTORE_SEEDS
-              value: sandstore-0.sandstore-headless:8080,sandstore-1.sandstore-headless:8080,sandstore-2.sandstore-headless:8080
+              value: sandstore-hyperconverged-0.sandstore-hyperconverged-headless:8080,sandstore-hyperconverged-1.sandstore-hyperconverged-headless:8080,sandstore-hyperconverged-2.sandstore-hyperconverged-headless:8080
             - name: SANDSTORE_NODE_ADDRS
-              value: sandstore-0.sandstore-headless:8080,sandstore-1.sandstore-headless:8080,sandstore-2.sandstore-headless:8080
+              value: sandstore-hyperconverged-0.sandstore-hyperconverged-headless:8080,sandstore-hyperconverged-1.sandstore-hyperconverged-headless:8080,sandstore-hyperconverged-2.sandstore-hyperconverged-headless:8080
             - name: SANDSTORE_STATEFULSET
-              value: sandstore
+              value: sandstore-hyperconverged
             - name: DURABILITY_SNAPSHOT_FILE_COUNT
               value: "260"
 EOF

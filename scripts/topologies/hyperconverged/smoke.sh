@@ -5,9 +5,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 KUBE_CONTEXT="${KUBE_CONTEXT:-docker-desktop}"
 K8S_NAMESPACE="${K8S_NAMESPACE:-sandstore-test}"
-SANDSTORE_STATEFULSET="${SANDSTORE_STATEFULSET:-sandstore}"
+SANDSTORE_STATEFULSET="${SANDSTORE_STATEFULSET:-sandstore-hyperconverged}"
 K8S_IMAGE="${K8S_IMAGE:-sandstore-node:cluster-local}"
-JOB_NAME="${JOB_NAME:-sandstore-open-smoke}"
+JOB_NAME="${JOB_NAME:-sandstore-hyperconverged-open-smoke}"
 JOB_TIMEOUT_SECONDS="${JOB_TIMEOUT_SECONDS:-900}"
 SANDSTORE_SEEDS="${SANDSTORE_SEEDS:-${SANDSTORE_STATEFULSET}-0.${SANDSTORE_STATEFULSET}-headless:8080,${SANDSTORE_STATEFULSET}-1.${SANDSTORE_STATEFULSET}-headless:8080,${SANDSTORE_STATEFULSET}-2.${SANDSTORE_STATEFULSET}-headless:8080}"
 
@@ -28,15 +28,15 @@ kind: Job
 metadata:
   name: ${JOB_NAME}
   labels:
-    app: sandstore
-    app.kubernetes.io/name: sandstore
+    app: sandstore-hyperconverged
+    app.kubernetes.io/name: sandstore-hyperconverged
 spec:
   backoffLimit: 0
   template:
     metadata:
       labels:
-        app: sandstore
-        app.kubernetes.io/name: sandstore
+        app: sandstore-hyperconverged
+        app.kubernetes.io/name: sandstore-hyperconverged
     spec:
       restartPolicy: Never
       containers:

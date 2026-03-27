@@ -1,22 +1,22 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: sandstore
+  name: sandstore-hyperconverged
   labels:
-    app: sandstore
-    app.kubernetes.io/name: sandstore
+    app: sandstore-hyperconverged
+    app.kubernetes.io/name: sandstore-hyperconverged
 spec:
-  serviceName: sandstore-headless
+  serviceName: sandstore-hyperconverged-headless
   replicas: 3
   selector:
     matchLabels:
-      app: sandstore
+      app: sandstore-hyperconverged
       sandstore-role: node
   template:
     metadata:
       labels:
-        app: sandstore
-        app.kubernetes.io/name: sandstore
+        app: sandstore-hyperconverged
+        app.kubernetes.io/name: sandstore-hyperconverged
         sandstore-role: node
     spec:
       containers:
@@ -32,7 +32,7 @@ spec:
               protocol: TCP
           envFrom:
             - configMapRef:
-                name: sandstore-config
+                name: sandstore-hyperconverged-config
           env:
             - name: POD_NAME
               valueFrom:
@@ -69,12 +69,12 @@ spec:
     - metadata:
         name: sandstore-data
         labels:
-          app: sandstore
-          app.kubernetes.io/name: sandstore
+          app: sandstore-hyperconverged
+          app.kubernetes.io/name: sandstore-hyperconverged
       spec:
         accessModes:
           - ReadWriteOnce
-        storageClassName: sandstore-local-ssd
+        storageClassName: sandstore-hyperconverged-local-ssd
         resources:
           requests:
             storage: 20Gi

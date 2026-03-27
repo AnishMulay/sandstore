@@ -1,4 +1,4 @@
-package simple
+package hyperconverged
 
 import (
 	"context"
@@ -23,7 +23,7 @@ type TopologyProvider interface {
 	GetLeaderAddress() string
 }
 
-type SimpleServer struct {
+type HyperconvergedServer struct {
 	comm           *grpccomm.GRPCCommunicator
 	cpo            orchestrators.ControlPlaneOrchestrator
 	dpo            orchestrators.DataPlaneOrchestrator
@@ -32,15 +32,15 @@ type SimpleServer struct {
 	metricsService metrics.MetricsService
 }
 
-func NewSimpleServer(
+func NewHyperconvergedServer(
 	comm *grpccomm.GRPCCommunicator,
 	cpo orchestrators.ControlPlaneOrchestrator,
 	dpo orchestrators.DataPlaneOrchestrator,
 	ls log_service.LogService,
 	topology TopologyProvider,
 	metricsService metrics.MetricsService,
-) *SimpleServer {
-	return &SimpleServer{
+) *HyperconvergedServer {
+	return &HyperconvergedServer{
 		comm:           comm,
 		cpo:            cpo,
 		dpo:            dpo,
@@ -50,8 +50,8 @@ func NewSimpleServer(
 	}
 }
 
-func (s *SimpleServer) Start() error {
-	s.ls.Info(log_service.LogEvent{Message: "Starting Simple POSIX Server"})
+func (s *HyperconvergedServer) Start() error {
+	s.ls.Info(log_service.LogEvent{Message: "Starting Hyperconverged POSIX Server"})
 
 	// 1. Register Payload Types with Communicator
 	s.registerPayloads()
@@ -65,15 +65,15 @@ func (s *SimpleServer) Start() error {
 	return s.comm.Start(s.handleMessage)
 }
 
-func (s *SimpleServer) Stop() error {
-	s.ls.Info(log_service.LogEvent{Message: "Stopping Simple POSIX Server"})
+func (s *HyperconvergedServer) Stop() error {
+	s.ls.Info(log_service.LogEvent{Message: "Stopping Hyperconverged POSIX Server"})
 	if err := s.cpo.Stop(); err != nil {
 		s.ls.Error(log_service.LogEvent{Message: "Failed to stop control plane", Metadata: map[string]any{"error": err.Error()}})
 	}
 	return s.comm.Stop()
 }
 
-func (s *SimpleServer) registerPayloads() {
+func (s *HyperconvergedServer) registerPayloads() {
 	// File System Payloads
 	s.comm.RegisterPayloadType(ps.MsgGetAttr, reflect.TypeOf(ps.GetAttrRequest{}))
 	s.comm.RegisterPayloadType(ps.MsgSetAttr, reflect.TypeOf(ps.SetAttrRequest{}))
@@ -111,7 +111,7 @@ func (s *SimpleServer) registerPayloads() {
 	s.comm.RegisterPayloadType(communication.MessageTypeAbortChunk, reflect.TypeOf(communication.AbortChunkRequest{}))
 }
 
-func (s *SimpleServer) RegisterTypedHandler(messageType string, payloadType reflect.Type, handler func(msg communication.Message) (*communication.Response, error)) {
+func (s *HyperconvergedServer) RegisterTypedHandler(messageType string, payloadType reflect.Type, handler func(msg communication.Message) (*communication.Response, error)) {
 	// This is a placeholder to satisfy the interface.
 	// In a real implementation, we might want to allow dynamic registration of handlers.
 	// For now, our handleMessage router handles everything.
@@ -122,7 +122,7 @@ func (s *SimpleServer) RegisterTypedHandler(messageType string, payloadType refl
 }
 
 // Central Router for all incoming messages
-func (s *SimpleServer) handleMessage(msg communication.Message) (*communication.Response, error) {
+func (s *HyperconvergedServer) handleMessage(msg communication.Message) (*communication.Response, error) {
 	ctx := context.Background()
 	start := time.Now()
 	var operation string
@@ -131,9 +131,9 @@ func (s *SimpleServer) handleMessage(msg communication.Message) (*communication.
 			return
 		}
 		elapsed := time.Since(start).Seconds()
-		s.metricsService.Observe(metrics.SimpleServerHandleMessageLatency, elapsed, metrics.MetricTags{
+		s.metricsService.Observe(metrics.HyperconvergedServerHandleMessageLatency, elapsed, metrics.MetricTags{
 			Operation:  operation,
-			Service:    "SimpleServer",
+			Service:    "HyperconvergedServer",
 			Additional: nil,
 		})
 	}()
@@ -379,7 +379,7 @@ func (s *SimpleServer) handleMessage(msg communication.Message) (*communication.
 }
 
 // respond is a helper to standardize JSON responses and error codes
-func (s *SimpleServer) respond(data any, err error) (*communication.Response, error) {
+func (s *HyperconvergedServer) respond(data any, err error) (*communication.Response, error) {
 	if err != nil {
 		code := communication.CodeInternal
 		switch {

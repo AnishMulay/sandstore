@@ -10,7 +10,7 @@ import (
 	"github.com/AnishMulay/sandstore/internal/communication"
 )
 
-type ConvergedRouter struct {
+type HyperconvergedRouter struct {
 	seeds []string
 	comm  communication.Communicator
 
@@ -22,14 +22,14 @@ type ConvergedRouter struct {
 	refreshMu sync.Mutex
 }
 
-func NewConvergedRouter(seeds []string, comm communication.Communicator) *ConvergedRouter {
-	return &ConvergedRouter{
+func NewHyperconvergedRouter(seeds []string, comm communication.Communicator) *HyperconvergedRouter {
+	return &HyperconvergedRouter{
 		seeds: seeds,
 		comm:  comm,
 	}
 }
 
-func (r *ConvergedRouter) GetRoute(isMutation bool) (string, error) {
+func (r *HyperconvergedRouter) GetRoute(isMutation bool) (string, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	if r.leaderAddr == "" {
@@ -39,7 +39,7 @@ func (r *ConvergedRouter) GetRoute(isMutation bool) (string, error) {
 	return r.leaderAddr, nil
 }
 
-func (r *ConvergedRouter) Invalidate(failedAddr string) {
+func (r *HyperconvergedRouter) Invalidate(failedAddr string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.leaderAddr == failedAddr {
@@ -47,14 +47,14 @@ func (r *ConvergedRouter) Invalidate(failedAddr string) {
 	}
 }
 
-func (r *ConvergedRouter) SetRouteHint(hint string) {
+func (r *HyperconvergedRouter) SetRouteHint(hint string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.leaderAddr = hint
 	r.lastUpdate = time.Now()
 }
 
-func (r *ConvergedRouter) fetchTopologyFromSeeds(ctx context.Context) (string, []string, error) {
+func (r *HyperconvergedRouter) fetchTopologyFromSeeds(ctx context.Context) (string, []string, error) {
 	for _, seed := range r.seeds {
 		req := communication.Message{
 			From:    "sandlib",
@@ -74,7 +74,7 @@ func (r *ConvergedRouter) fetchTopologyFromSeeds(ctx context.Context) (string, [
 	return "", nil, fmt.Errorf("all seeds failed topology ping")
 }
 
-func (r *ConvergedRouter) Refresh(ctx context.Context) error {
+func (r *HyperconvergedRouter) Refresh(ctx context.Context) error {
 	r.refreshMu.Lock()
 	defer r.refreshMu.Unlock()
 

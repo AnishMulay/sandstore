@@ -24,7 +24,7 @@ start_node() {
     mkdir -p "$RUN/$dir_name"
     
     # We use '--server node' because cmd/sandstore/main.go expects "node"
-    # This launches the SimpleServer which is Posix-compliant.
+    # This launches the HyperconvergedServer, which exposes the POSIX surface.
     "$BIN" \
         --server node \
         --node-id "$addr" \

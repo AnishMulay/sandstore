@@ -1,17 +1,17 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: sandstore-bootstrap-config
+  name: sandstore-hyperconverged-bootstrap-config
   labels:
-    app: sandstore
-    app.kubernetes.io/name: sandstore
+    app: sandstore-hyperconverged
+    app.kubernetes.io/name: sandstore-hyperconverged
 spec:
   backoffLimit: 2
   template:
     metadata:
       labels:
-        app: sandstore
-        app.kubernetes.io/name: sandstore
+        app: sandstore-hyperconverged
+        app.kubernetes.io/name: sandstore-hyperconverged
     spec:
       restartPolicy: OnFailure
       containers:
@@ -20,7 +20,7 @@ spec:
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:
-                name: sandstore-config
+                name: sandstore-hyperconverged-config
           command:
             - /bin/sh
             - -ec
@@ -30,9 +30,9 @@ spec:
 
               etcdctl --endpoints="${ENDPOINTS}" del --prefix /sandstore/config/nodes/
 
-              etcdctl --endpoints="${ENDPOINTS}" put /sandstore/config/nodes/sandstore-0 \
-                '{"id":"sandstore-0","address":"sandstore-0.sandstore-headless:8080","role":"voter"}'
-              etcdctl --endpoints="${ENDPOINTS}" put /sandstore/config/nodes/sandstore-1 \
-                '{"id":"sandstore-1","address":"sandstore-1.sandstore-headless:8080","role":"voter"}'
-              etcdctl --endpoints="${ENDPOINTS}" put /sandstore/config/nodes/sandstore-2 \
-                '{"id":"sandstore-2","address":"sandstore-2.sandstore-headless:8080","role":"voter"}'
+              etcdctl --endpoints="${ENDPOINTS}" put /sandstore/config/nodes/sandstore-hyperconverged-0 \
+                '{"id":"sandstore-hyperconverged-0","address":"sandstore-hyperconverged-0.sandstore-hyperconverged-headless:8080","role":"voter"}'
+              etcdctl --endpoints="${ENDPOINTS}" put /sandstore/config/nodes/sandstore-hyperconverged-1 \
+                '{"id":"sandstore-hyperconverged-1","address":"sandstore-hyperconverged-1.sandstore-hyperconverged-headless:8080","role":"voter"}'
+              etcdctl --endpoints="${ENDPOINTS}" put /sandstore/config/nodes/sandstore-hyperconverged-2 \
+                '{"id":"sandstore-hyperconverged-2","address":"sandstore-hyperconverged-2.sandstore-hyperconverged-headless:8080","role":"voter"}'

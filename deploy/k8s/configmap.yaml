@@ -1,10 +1,10 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: sandstore-config
+  name: sandstore-hyperconverged-config
   labels:
-    app: sandstore
-    app.kubernetes.io/name: sandstore
+    app: sandstore-hyperconverged
+    app.kubernetes.io/name: sandstore-hyperconverged
 data:
   # Future Makefile PROFILE flows can override these values before apply.
   ETCD_ENDPOINTS: "etcd-cluster-0.etcd-cluster:2379,etcd-cluster-1.etcd-cluster:2379,etcd-cluster-2.etcd-cluster:2379"
