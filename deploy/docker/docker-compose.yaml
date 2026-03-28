@@ -19,7 +19,7 @@ services:
       retries: 20
       start_period: 5s
     networks:
-      - sandstore-net
+      - sandstore-hyperconverged-net
 
   etcd-init:
     image: alpine:latest
@@ -28,7 +28,7 @@ services:
         condition: service_healthy
     environment:
       ETCD_CONTAINER: sandstore-etcd
-      CLUSTER_NODES: node-1@node-1:8080,node-2@node-2:8080,node-3@node-3:8080
+      CLUSTER_NODES: sandstore-hyperconverged-1@sandstore-hyperconverged-1:8080,sandstore-hyperconverged-2@sandstore-hyperconverged-2:8080,sandstore-hyperconverged-3@sandstore-hyperconverged-3:8080
     volumes:
       - ../../scripts/dev/init-etcd.sh:/init-etcd.sh:ro
       - /var/run/docker.sock:/var/run/docker.sock
@@ -41,9 +41,9 @@ services:
         chmod +x /init-etcd.sh
         /init-etcd.sh
     networks:
-      - sandstore-net
+      - sandstore-hyperconverged-net
 
-  node-1:
+  sandstore-hyperconverged-1:
     image: sandstore-node:latest
     depends_on:
       etcd-init:
@@ -54,17 +54,17 @@ services:
       - --server
       - node
       - --node-id
-      - node-1
+      - sandstore-hyperconverged-1
       - --listen
-      - node-1:8080
+      - sandstore-hyperconverged-1:8080
       - --data-dir
       - /var/lib/sandstore/data
     volumes:
-      - ../../run/node-1/data:/var/lib/sandstore/data
+      - ../../run/sandstore-hyperconverged-1/data:/var/lib/sandstore/data
     networks:
-      - sandstore-net
+      - sandstore-hyperconverged-net
 
-  node-2:
+  sandstore-hyperconverged-2:
     image: sandstore-node:latest
     depends_on:
       etcd-init:
@@ -75,17 +75,17 @@ services:
       - --server
       - node
       - --node-id
-      - node-2
+      - sandstore-hyperconverged-2
       - --listen
-      - node-2:8080
+      - sandstore-hyperconverged-2:8080
       - --data-dir
       - /var/lib/sandstore/data
     volumes:
-      - ../../run/node-2/data:/var/lib/sandstore/data
+      - ../../run/sandstore-hyperconverged-2/data:/var/lib/sandstore/data
     networks:
-      - sandstore-net
+      - sandstore-hyperconverged-net
 
-  node-3:
+  sandstore-hyperconverged-3:
     image: sandstore-node:latest
     depends_on:
       etcd-init:
@@ -96,36 +96,36 @@ services:
       - --server
       - node
       - --node-id
-      - node-3
+      - sandstore-hyperconverged-3
       - --listen
-      - node-3:8080
+      - sandstore-hyperconverged-3:8080
       - --data-dir
       - /var/lib/sandstore/data
     volumes:
-      - ../../run/node-3/data:/var/lib/sandstore/data
+      - ../../run/sandstore-hyperconverged-3/data:/var/lib/sandstore/data
     networks:
-      - sandstore-net
+      - sandstore-hyperconverged-net
 
   smoke-test:
     image: sandstore-node:latest
     depends_on:
-      node-1:
+      sandstore-hyperconverged-1:
         condition: service_started
-      node-2:
+      sandstore-hyperconverged-2:
         condition: service_started
-      node-3:
+      sandstore-hyperconverged-3:
         condition: service_started
     volumes:
-      - ../../run/node-1/data/logs:/cluster-logs/node-1:ro
-      - ../../run/node-2/data/logs:/cluster-logs/node-2:ro
-      - ../../run/node-3/data/logs:/cluster-logs/node-3:ro
+      - ../../run/sandstore-hyperconverged-1/data/logs:/cluster-logs/sandstore-hyperconverged-1:ro
+      - ../../run/sandstore-hyperconverged-2/data/logs:/cluster-logs/sandstore-hyperconverged-2:ro
+      - ../../run/sandstore-hyperconverged-3/data/logs:/cluster-logs/sandstore-hyperconverged-3:ro
     entrypoint:
       - /bin/sh
       - -c
       - |
         apk add --no-cache netcat-openbsd
 
-        until nc -z node-1 8080 && nc -z node-2 8080 && nc -z node-3 8080; do
+        until nc -z sandstore-hyperconverged-1 8080 && nc -z sandstore-hyperconverged-2 8080 && nc -z sandstore-hyperconverged-3 8080; do
           echo "Waiting for Sand Store nodes..."
           sleep 2
         done
@@ -133,7 +133,7 @@ services:
         echo "Detecting current leader from node logs..."
         LEADER_ADDR=""
         for _ in $$(seq 1 60); do
-          for NODE in node-1 node-2 node-3; do
+          for NODE in sandstore-hyperconverged-1 sandstore-hyperconverged-2 sandstore-hyperconverged-3; do
             LOG_FILE="/cluster-logs/$${NODE}/$${NODE}.log"
             if [ -f "$$LOG_FILE" ] && grep -q "Became Leader" "$$LOG_FILE"; then
               LEADER_ADDR="$${NODE}:8080"
@@ -149,8 +149,8 @@ services:
         done
 
         if [ -z "$$LEADER_ADDR" ]; then
-          echo "Failed to discover leader from logs; defaulting to node-1:8080"
-          LEADER_ADDR="node-1:8080"
+          echo "Failed to discover leader from logs; defaulting to sandstore-hyperconverged-1:8080"
+          LEADER_ADDR="sandstore-hyperconverged-1:8080"
         fi
 
         export SANDSTORE_ADDR="$$LEADER_ADDR"
@@ -158,8 +158,8 @@ services:
 
         exec /usr/local/bin/smoke
     networks:
-      - sandstore-net
+      - sandstore-hyperconverged-net
 
 networks:
-  sandstore-net:
+  sandstore-hyperconverged-net:
     driver: bridge

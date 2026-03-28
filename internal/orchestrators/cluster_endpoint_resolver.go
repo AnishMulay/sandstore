@@ -11,8 +11,6 @@ type StaticEndpointResolver struct {
 	clusterService cluster_service.ClusterService
 }
 
-var _ EndpointResolver = (*StaticEndpointResolver)(nil)
-
 func NewStaticEndpointResolver(clusterService cluster_service.ClusterService) *StaticEndpointResolver {
 	return &StaticEndpointResolver{clusterService: clusterService}
 }

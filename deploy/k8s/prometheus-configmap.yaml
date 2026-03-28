@@ -17,7 +17,7 @@ data:
           - role: pod
         relabel_configs:
           - source_labels: [__meta_kubernetes_pod_label_app]
-            regex: sandstore
+            regex: sandstore-hyperconverged
             action: keep
           - source_labels: [__meta_kubernetes_pod_ip]
             target_label: __address__

@@ -33,6 +33,45 @@ LEGACY_OPEN_SMOKE_BINARY=open_smoke
 LEGACY_DURABILITY_SMOKE_BINARY=durability_smoke
 DURATION ?= 60
 BLOCK_SIZE ?= 4096
+TOPOLOGY ?= hyperconverged
+
+define check-topology
+	+@test -d scripts/topologies/$(TOPOLOGY) || \
+	  (echo ""; \
+	   echo "  Error: topology '$(TOPOLOGY)' not found."; \
+	   echo "  Available topologies: $$(ls scripts/topologies/)"; \
+	   echo "  Usage: make $@ TOPOLOGY=<topology>"; \
+	   echo ""; \
+	   exit 1)
+endef
+
+.PHONY: help
+help:
+	@echo "  cluster-up       Bring up the cluster for a topology"
+	@echo "                   Usage: make cluster-up TOPOLOGY=hyperconverged"
+	@echo ""
+	@echo "  cluster-down     Tear down the cluster for a topology"
+	@echo "                   Usage: make cluster-down TOPOLOGY=hyperconverged"
+	@echo ""
+	@echo "  etcd-up          Start local etcd (required for local development)"
+	@echo "  etcd-down        Stop local etcd"
+	@echo ""
+	@echo "  smoke-test       Run smoke tests for a topology"
+	@echo "                   Usage: make smoke-test TOPOLOGY=hyperconverged"
+	@echo ""
+	@echo "  smoke-local      Run local smoke test (requires local etcd on localhost:2379)"
+	@echo "                   Usage: make smoke-local TOPOLOGY=hyperconverged"
+	@echo ""
+	@echo "  test-cluster     Run integration tests for a topology"
+	@echo "                   Usage: make test-cluster TOPOLOGY=hyperconverged"
+	@echo ""
+	@echo "  cluster          Run a local cluster for a topology"
+	@echo "                   Usage: make cluster TOPOLOGY=hyperconverged"
+	@echo ""
+	@echo "  bench            Run latency benchmark against a running local cluster"
+	@echo "                   Usage: make bench SEEDS=127.0.0.1:9001,127.0.0.1:9002,127.0.0.1:9003 CONCURRENCY=4"
+	@echo "                   Results written to results/bench/<timestamp>.csv"
+	@echo ""
 
 # Generate protobuf files
 .PHONY: proto
@@ -59,7 +98,8 @@ simple:
 # Start 5-node Raft cluster
 .PHONY: cluster
 cluster:
-	-./scripts/dev/run-5.sh
+	$(check-topology)
+	./scripts/topologies/$(TOPOLOGY)/run-local.sh
 
 # Run the client
 .PHONY: client
@@ -83,7 +123,7 @@ test:
 durability-smoke:
 	@set -e; \
 	compose_file=deploy/docker/docker-compose-durability.yaml; \
-	docker compose -f $$compose_file up --build -d etcd etcd-init node-1 node-2 node-3; \
+	docker compose -f $$compose_file up --build -d etcd etcd-init sandstore-hyperconverged-1 sandstore-hyperconverged-2 sandstore-hyperconverged-3; \
 	set +e; \
 	docker compose -f $$compose_file run --rm --no-deps smoke-test; \
 	status=$$?; \
@@ -133,9 +173,9 @@ k8s-destroy:
 		echo "Warning: running k8s-destroy against local context '$(KUBE_CONTEXT)'"; \
 	fi; \
 	kubectl --context=$(KUBE_CONTEXT) delete -f $(K8S_MANIFEST_DIR)/ --ignore-not-found=true; \
-	kubectl --context=$(KUBE_CONTEXT) delete pvc -l app=sandstore --ignore-not-found=true; \
-	if kubectl --context=$(KUBE_CONTEXT) get pod -l app=sandstore --no-headers 2>/dev/null | grep -q .; then \
-		kubectl --context=$(KUBE_CONTEXT) wait --for=delete pod -l app=sandstore --timeout=60s || { \
+	kubectl --context=$(KUBE_CONTEXT) delete pvc -l app=sandstore-hyperconverged --ignore-not-found=true; \
+	if kubectl --context=$(KUBE_CONTEXT) get pod -l app=sandstore-hyperconverged --no-headers 2>/dev/null | grep -q .; then \
+		kubectl --context=$(KUBE_CONTEXT) wait --for=delete pod -l app=sandstore-hyperconverged --timeout=60s || { \
 			echo "Teardown wait timed out. Inspect terminating resources and force-delete stuck pods/namespaces if needed."; \
 			exit 1; \
 		}; \
@@ -148,28 +188,29 @@ k8s-deploy: k8s-destroy
 	kubectl --context=$(KUBE_CONTEXT) apply -f $(K8S_MANIFEST_DIR)/configmap.yaml -f $(K8S_MANIFEST_DIR)/storageclass.yaml -f $(K8S_MANIFEST_DIR)/service-headless.yaml -f $(K8S_MANIFEST_DIR)/service-etcd.yaml; \
 	kubectl --context=$(KUBE_CONTEXT) apply -f $(K8S_MANIFEST_DIR)/statefulset-etcd.yaml; \
 	kubectl --context=$(KUBE_CONTEXT) rollout status statefulset/etcd-cluster --timeout=60s; \
-	kubectl --context=$(KUBE_CONTEXT) delete job sandstore-bootstrap-config --ignore-not-found=true; \
+	kubectl --context=$(KUBE_CONTEXT) delete job sandstore-hyperconverged-bootstrap-config --ignore-not-found=true; \
 	kubectl --context=$(KUBE_CONTEXT) apply -f $(K8S_MANIFEST_DIR)/job-bootstrap.yaml; \
-	kubectl --context=$(KUBE_CONTEXT) wait --for=condition=complete job/sandstore-bootstrap-config --timeout=60s; \
+	kubectl --context=$(KUBE_CONTEXT) wait --for=condition=complete job/sandstore-hyperconverged-bootstrap-config --timeout=60s; \
 	kubectl --context=$(KUBE_CONTEXT) apply -f $(K8S_MANIFEST_DIR)/statefulset-sandstore.yaml; \
-	kubectl --context=$(KUBE_CONTEXT) set image statefulset/sandstore sandstore=$(K8S_IMAGE); \
+	kubectl --context=$(KUBE_CONTEXT) set image statefulset/sandstore-hyperconverged sandstore=$(K8S_IMAGE); \
 	kubectl --context=$(KUBE_CONTEXT) apply -f $(K8S_MANIFEST_DIR)/service-nodeport.yaml
 
 # Kubernetes Flow 4: The Iteration Loop (Stateful Rolling Update)
 .PHONY: k8s-update
 k8s-update:
 	@set -eu; \
-	kubectl --context=$(KUBE_CONTEXT) get statefulset sandstore >/dev/null; \
+	kubectl --context=$(KUBE_CONTEXT) get statefulset sandstore-hyperconverged >/dev/null; \
 	$(MAKE) --no-print-directory k8s-build PROFILE="$(PROFILE)" REGISTRY_URL="$(REGISTRY_URL)" ARCH="$(ARCH)"; \
-	kubectl --context=$(KUBE_CONTEXT) set image statefulset/sandstore sandstore=$(K8S_IMAGE); \
-	kubectl --context=$(KUBE_CONTEXT) rollout restart statefulset/sandstore; \
-	kubectl --context=$(KUBE_CONTEXT) rollout status statefulset/sandstore --timeout=120s || { \
+	kubectl --context=$(KUBE_CONTEXT) set image statefulset/sandstore-hyperconverged sandstore=$(K8S_IMAGE); \
+	kubectl --context=$(KUBE_CONTEXT) rollout restart statefulset/sandstore-hyperconverged; \
+	kubectl --context=$(KUBE_CONTEXT) rollout status statefulset/sandstore-hyperconverged --timeout=120s || { \
 		echo "Rollout failed or timed out. Inspect crash logs with: make k8s-logs-crash POD=<pod_name> KUBE_CONTEXT=$(KUBE_CONTEXT)"; \
 		exit 1; \
 	}
 
 .PHONY: test-cluster
 test-cluster:
+	$(check-topology)
 	KUBE_CONTEXT="$(KUBE_CONTEXT)" \
 	PROFILE="$(PROFILE)" \
 	ARCH="$(ARCH)" \
@@ -178,10 +219,11 @@ test-cluster:
 	K8S_IMAGE="$(K8S_LOCAL_IMAGE)" \
 	K8S_TEST_IMAGE="$(K8S_TEST_IMAGE)" \
 	K8S_TEST_NAMESPACE_PREFIX="$(K8S_TEST_NAMESPACE_PREFIX)" \
-	./scripts/dev/test-cluster.sh
+	./scripts/topologies/$(TOPOLOGY)/test.sh
 
 .PHONY: cluster-up
 cluster-up:
+	$(check-topology)
 	KUBE_CONTEXT="$(KUBE_CONTEXT)" \
 	PROFILE="$(PROFILE)" \
 	ARCH="$(ARCH)" \
@@ -191,50 +233,33 @@ cluster-up:
 	K8S_TEST_IMAGE="$(K8S_TEST_IMAGE)" \
 	K8S_TEST_NAMESPACE_PREFIX="$(K8S_TEST_NAMESPACE_PREFIX)" \
 	K8S_NAMESPACE="$${K8S_NAMESPACE:-$(K8S_TEST_NAMESPACE_PREFIX)}" \
-	./scripts/dev/cluster-up.sh
+	./scripts/topologies/$(TOPOLOGY)/cluster-up.sh
 
 .PHONY: cluster-down
 cluster-down:
+	$(check-topology)
 	KUBE_CONTEXT="$(KUBE_CONTEXT)" \
 	K8S_TEST_NAMESPACE_PREFIX="$(K8S_TEST_NAMESPACE_PREFIX)" \
 	K8S_NAMESPACE="$${K8S_NAMESPACE:-$(K8S_TEST_NAMESPACE_PREFIX)}" \
-	./scripts/dev/cluster-down.sh
+	./scripts/topologies/$(TOPOLOGY)/cluster-down.sh
+
+.PHONY: etcd-up
+etcd-up:
+	docker compose -f deploy/docker/etcd/docker-compose.yaml up -d
+
+.PHONY: etcd-down
+etcd-down:
+	docker compose -f deploy/docker/etcd/docker-compose.yaml down
 
 .PHONY: smoke-test
 smoke-test:
-	@set -eu; \
-	K8S_NAMESPACE="$${K8S_NAMESPACE:-$(K8S_TEST_NAMESPACE_PREFIX)}"; \
-	K8S_IMAGE="$${K8S_IMAGE:-$(K8S_LOCAL_IMAGE)}"; \
-	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" delete job sandstore-open-smoke --ignore-not-found=true >/dev/null 2>&1 || true; \
-	printf '%s\n' \
-	  'apiVersion: batch/v1' \
-	  'kind: Job' \
-	  'metadata:' \
-	  '  name: sandstore-open-smoke' \
-	  '  labels:' \
-	  '    app: sandstore' \
-	  '    app.kubernetes.io/name: sandstore' \
-	  'spec:' \
-	  '  backoffLimit: 0' \
-	  '  template:' \
-	  '    metadata:' \
-	  '      labels:' \
-	  '        app: sandstore' \
-	  '        app.kubernetes.io/name: sandstore' \
-	  '    spec:' \
-	  '      restartPolicy: Never' \
-	  '      containers:' \
-	  '        - name: sandstore-open-smoke' \
-	  '          image: '"$$K8S_IMAGE" \
-	  '          imagePullPolicy: IfNotPresent' \
-	  '          command:' \
-	  '            - /usr/local/bin/smoke' \
-	  '          env:' \
-	  '            - name: SANDSTORE_SEEDS' \
-	  '              value: sandstore-0.sandstore-headless:8080,sandstore-1.sandstore-headless:8080,sandstore-2.sandstore-headless:8080' \
-	  | kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" apply -f - >/dev/null; \
-	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" wait --for=condition=complete job/sandstore-open-smoke --timeout=900s; \
-	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" logs job/sandstore-open-smoke --all-containers=true
+	$(check-topology)
+	./scripts/topologies/$(TOPOLOGY)/smoke.sh
+
+.PHONY: smoke-local
+smoke-local:
+	$(check-topology)
+	./scripts/topologies/$(TOPOLOGY)/smoke-local.sh
 
 .PHONY: port-forward-prometheus
 port-forward-prometheus:
@@ -266,23 +291,23 @@ port-forward-nodes:
 		echo "Auto-detected node IP: $$DETECTED_IP"; \
 	fi; \
 	\
-	echo "Patching sandstore-config ConfigMap with ADVERTISE_HOST=$$DETECTED_IP and EXTERNAL_BASE_PORT=9080..."; \
-	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" patch configmap sandstore-config \
+	echo "Patching sandstore-hyperconverged-config ConfigMap with ADVERTISE_HOST=$$DETECTED_IP and EXTERNAL_BASE_PORT=9080..."; \
+	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" patch configmap sandstore-hyperconverged-config \
 		--type merge -p "{\"data\":{\"ADVERTISE_HOST\":\"$$DETECTED_IP\",\"EXTERNAL_BASE_PORT\":\"9080\"}}"; \
 	\
-	echo "Triggering rolling restart of sandstore StatefulSet..."; \
-	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" rollout restart statefulset/sandstore; \
-	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" rollout status statefulset/sandstore --timeout=120s; \
+	echo "Triggering rolling restart of sandstore-hyperconverged StatefulSet..."; \
+	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" rollout restart statefulset/sandstore-hyperconverged; \
+	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" rollout status statefulset/sandstore-hyperconverged --timeout=120s; \
 	\
 	echo "Starting port-forwards (0.0.0.0 bound so MacBook can reach Ubuntu)..."; \
 	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" \
-		port-forward --address 0.0.0.0 pod/sandstore-0 9080:8080 &\
+		port-forward --address 0.0.0.0 pod/sandstore-hyperconverged-0 9080:8080 &\
 	PF0=$$!; \
 	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" \
-		port-forward --address 0.0.0.0 pod/sandstore-1 9081:8080 &\
+		port-forward --address 0.0.0.0 pod/sandstore-hyperconverged-1 9081:8080 &\
 	PF1=$$!; \
 	kubectl --context="$(KUBE_CONTEXT)" -n "$$K8S_NAMESPACE" \
-		port-forward --address 0.0.0.0 pod/sandstore-2 9082:8080 &\
+		port-forward --address 0.0.0.0 pod/sandstore-hyperconverged-2 9082:8080 &\
 	PF2=$$!; \
 	\
 	trap 'echo "Cleaning up port-forwards..."; kill $$PF0 $$PF1 $$PF2 2>/dev/null || true' INT TERM EXIT; \
@@ -299,7 +324,7 @@ port-forward-nodes:
 # Kubernetes Flow 5: Observability & Post-Mortem Debugging
 .PHONY: k8s-logs
 k8s-logs:
-	kubectl --context=$(KUBE_CONTEXT) logs -l app=sandstore -f --max-log-requests=10
+	kubectl --context=$(KUBE_CONTEXT) logs -l app=sandstore-hyperconverged -f --max-log-requests=10
 
 .PHONY: k8s-logs-crash
 k8s-logs-crash:

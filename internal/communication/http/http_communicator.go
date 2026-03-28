@@ -279,7 +279,7 @@ func (c *HTTPCommunicator) handleHTTPMessage(w http.ResponseWriter, r *http.Requ
 		msg.Payload = payloadValue.Elem().Interface()
 	}
 
-	resp, err := c.handler(msg)
+	resp, err := c.handler(r.Context(), msg)
 	if err != nil {
 		c.ls.Error(log_service.LogEvent{
 			Message:  "Message handler failed",

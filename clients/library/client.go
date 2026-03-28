@@ -22,12 +22,22 @@ const firstUserFD uint64 = 3
 const writeBufferLimit = 2 * 1024 * 1024
 const writeRPCChunkSize = 8 * 1024 * 1024
 
+const (
+	// defaultOperationTimeout bounds a single client API operation, including
+	// retries, routing refresh, network latency, and server-side processing.
+	defaultOperationTimeout = 30 * time.Second
+
+	// defaultConnectTimeout bounds the initial topology bootstrap in
+	// NewSandstoreClient.
+	defaultConnectTimeout = 5 * time.Second
+)
+
 // NewSandstoreClient constructs a client from a seed set and performs the
 // initial topology bootstrap before returning.
 func NewSandstoreClient(seeds []string, comm *grpccomm.GRPCCommunicator) (*SandstoreClient, error) {
-	router := topology.NewConvergedRouter(seeds, comm)
+	router := topology.NewHyperconvergedRouter(seeds, comm)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultConnectTimeout)
 	defer cancel()
 
 	if err := router.Refresh(ctx); err != nil {
@@ -77,13 +87,15 @@ func (c *SandstoreClient) Open(path string, mode int) (int, error) {
 	if c.ServerAddr == "" {
 		return 0, fmt.Errorf("sandstore server address is empty")
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultOperationTimeout)
+	defer cancel()
 
 	cleanPath, err := normalizePath(path)
 	if err != nil {
 		return 0, err
 	}
 
-	inodeID, lookupResp, err := c.lookupPath(cleanPath)
+	inodeID, lookupResp, err := c.lookupPath(ctx, cleanPath)
 	if err != nil {
 		return 0, err
 	}
@@ -99,7 +111,7 @@ func (c *SandstoreClient) Open(path string, mode int) (int, error) {
 		return 0, responseError("open", cleanPath, lookupResp)
 	}
 
-	createResp, err := c.createPath(cleanPath, mode)
+	createResp, err := c.createPath(ctx, cleanPath, mode)
 	if err != nil {
 		return 0, err
 	}
@@ -112,7 +124,7 @@ func (c *SandstoreClient) Open(path string, mode int) (int, error) {
 		}
 		return c.addFD(inodeID, cleanPath, mode)
 	case communication.CodeAlreadyExists:
-		inodeID, retryResp, retryErr := c.lookupPath(cleanPath)
+		inodeID, retryResp, retryErr := c.lookupPath(ctx, cleanPath)
 		if retryErr != nil {
 			return 0, retryErr
 		}
@@ -151,6 +163,8 @@ func (c *SandstoreClient) Read(fd int, n int) ([]byte, error) {
 	if n < 0 {
 		return nil, fmt.Errorf("invalid read length %d", n)
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultOperationTimeout)
+	defer cancel()
 
 	c.TableMu.RLock()
 	fileStruct := c.OpenFiles[uint64(fd)]
@@ -167,11 +181,11 @@ func (c *SandstoreClient) Read(fd int, n int) ([]byte, error) {
 		return nil, fmt.Errorf("file not open for reading")
 	}
 
-	resp, err := c.send(ps.MsgRead, ps.ReadRequest{
+	resp, err := c.send(ctx, ps.MsgRead, ps.ReadRequest{
 		InodeID: fileStruct.InodeID,
 		Offset:  fileStruct.Offset,
 		Length:  int64(n),
-	})
+	}, false)
 	if err != nil {
 		return nil, fmt.Errorf("read %q failed: %w", fileStruct.FilePath, err)
 	}
@@ -212,6 +226,8 @@ func (c *SandstoreClient) Write(fd int, data []byte) (int, error) {
 	if fd < 0 {
 		return 0, fmt.Errorf("bad file descriptor")
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultOperationTimeout)
+	defer cancel()
 
 	c.TableMu.RLock()
 	fileStruct := c.OpenFiles[uint64(fd)]
@@ -233,7 +249,7 @@ func (c *SandstoreClient) Write(fd int, data []byte) (int, error) {
 	}
 
 	if len(fileStruct.Buffer) > 0 && len(fileStruct.Buffer)+len(data) > writeBufferLimit {
-		if err := c.flushBufferedWrites(fileStruct, "write"); err != nil {
+		if err := c.flushBufferedWrites(ctx, fileStruct, "write"); err != nil {
 			return 0, err
 		}
 	}
@@ -250,7 +266,7 @@ func (c *SandstoreClient) Write(fd int, data []byte) (int, error) {
 	toFlush := make([]byte, flushBytes)
 	copy(toFlush, fileStruct.Buffer[:flushBytes])
 
-	if err := c.sendWriteInChunks(fileStruct, flushOffset, toFlush, "write"); err != nil {
+	if err := c.sendWriteInChunks(ctx, fileStruct, flushOffset, toFlush, "write"); err != nil {
 		return 0, err
 	}
 
@@ -261,7 +277,7 @@ func (c *SandstoreClient) Write(fd int, data []byte) (int, error) {
 	return len(data), nil
 }
 
-func (c *SandstoreClient) sendWriteInChunks(fileStruct *SandstoreFD, startOffset int64, payload []byte, op string) error {
+func (c *SandstoreClient) sendWriteInChunks(ctx context.Context, fileStruct *SandstoreFD, startOffset int64, payload []byte, op string) error {
 	if len(payload) == 0 {
 		return nil
 	}
@@ -282,11 +298,11 @@ func (c *SandstoreClient) sendWriteInChunks(fileStruct *SandstoreFD, startOffset
 			end = len(payload)
 		}
 
-		resp, err := c.send(ps.MsgWrite, ps.WriteRequest{
+		resp, err := c.send(ctx, ps.MsgWrite, ps.WriteRequest{
 			InodeID: fileStruct.InodeID,
 			Offset:  startOffset + int64(written),
 			Data:    payload[written:end],
-		})
+		}, true)
 		if err != nil {
 			return fmt.Errorf("%s %q failed: %w", op, fileStruct.FilePath, err)
 		}
@@ -300,7 +316,7 @@ func (c *SandstoreClient) sendWriteInChunks(fileStruct *SandstoreFD, startOffset
 	return nil
 }
 
-func (c *SandstoreClient) flushBufferedWrites(fileStruct *SandstoreFD, op string) error {
+func (c *SandstoreClient) flushBufferedWrites(ctx context.Context, fileStruct *SandstoreFD, op string) error {
 	if len(fileStruct.Buffer) == 0 {
 		return nil
 	}
@@ -309,7 +325,7 @@ func (c *SandstoreClient) flushBufferedWrites(fileStruct *SandstoreFD, op string
 	payload := make([]byte, len(fileStruct.Buffer))
 	copy(payload, fileStruct.Buffer)
 
-	err := c.sendWriteInChunks(fileStruct, flushOffset, payload, op)
+	err := c.sendWriteInChunks(ctx, fileStruct, flushOffset, payload, op)
 	if err != nil {
 		return err
 	}
@@ -344,6 +360,8 @@ func (c *SandstoreClient) Fsync(fd int) error {
 	if fd < 0 {
 		return fmt.Errorf("bad file descriptor")
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultOperationTimeout)
+	defer cancel()
 
 	c.TableMu.RLock()
 	fileStruct := c.OpenFiles[uint64(fd)]
@@ -356,7 +374,7 @@ func (c *SandstoreClient) Fsync(fd int) error {
 	fileStruct.Mu.Lock()
 	defer fileStruct.Mu.Unlock()
 
-	return c.flushBufferedWrites(fileStruct, "fsync")
+	return c.flushBufferedWrites(ctx, fileStruct, "fsync")
 }
 
 // Close detaches fd from the client table and flushes any remaining buffered
@@ -386,6 +404,8 @@ func (c *SandstoreClient) Close(fd int) error {
 	if fd < 0 {
 		return fmt.Errorf("bad file descriptor")
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultOperationTimeout)
+	defer cancel()
 
 	c.TableMu.Lock()
 	fileStruct := c.OpenFiles[uint64(fd)]
@@ -399,7 +419,7 @@ func (c *SandstoreClient) Close(fd int) error {
 	fileStruct.Mu.Lock()
 	defer fileStruct.Mu.Unlock()
 
-	return c.flushBufferedWrites(fileStruct, "close")
+	return c.flushBufferedWrites(ctx, fileStruct, "close")
 }
 
 // Remove unlinks filepath on the server and eagerly removes any matching open
@@ -428,6 +448,8 @@ func (c *SandstoreClient) Remove(filepath string) error {
 	if c.ServerAddr == "" {
 		return fmt.Errorf("sandstore server address is empty")
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultOperationTimeout)
+	defer cancel()
 
 	cleanPath, err := normalizePath(filepath)
 	if err != nil {
@@ -458,7 +480,7 @@ func (c *SandstoreClient) Remove(filepath string) error {
 		targetStruct.Mu.Lock()
 	} else {
 		var lookupResp *communication.Response
-		inodeID, lookupResp, err = c.lookupPath(cleanPath)
+		inodeID, lookupResp, err = c.lookupPath(ctx, cleanPath)
 		if err != nil {
 			return err
 		}
@@ -474,7 +496,7 @@ func (c *SandstoreClient) Remove(filepath string) error {
 		return fmt.Errorf("remove %q failed: missing inode id", cleanPath)
 	}
 
-	parentID, parentResp, err := c.lookupPath(parentPath)
+	parentID, parentResp, err := c.lookupPath(ctx, parentPath)
 	if err != nil {
 		if targetStruct != nil {
 			targetStruct.Mu.Unlock()
@@ -488,10 +510,10 @@ func (c *SandstoreClient) Remove(filepath string) error {
 		return responseError("remove", cleanPath, parentResp)
 	}
 
-	resp, err := c.send(ps.MsgRemove, ps.RemoveRequest{
+	resp, err := c.send(ctx, ps.MsgRemove, ps.RemoveRequest{
 		ParentID: parentID,
 		Name:     name,
-	})
+	}, true)
 	if err != nil {
 		if targetStruct != nil {
 			targetStruct.Mu.Unlock()
@@ -539,6 +561,8 @@ func (c *SandstoreClient) Rename(src string, dst string) error {
 	if c.ServerAddr == "" {
 		return fmt.Errorf("sandstore server address is empty")
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultOperationTimeout)
+	defer cancel()
 
 	cleanSrc, err := normalizePath(src)
 	if err != nil {
@@ -561,7 +585,7 @@ func (c *SandstoreClient) Rename(src string, dst string) error {
 	c.TableMu.Lock()
 	defer c.TableMu.Unlock()
 
-	srcParentID, srcParentResp, err := c.lookupPath(srcParentPath)
+	srcParentID, srcParentResp, err := c.lookupPath(ctx, srcParentPath)
 	if err != nil {
 		return err
 	}
@@ -569,7 +593,7 @@ func (c *SandstoreClient) Rename(src string, dst string) error {
 		return responseError("rename", cleanSrc, srcParentResp)
 	}
 
-	dstParentID, dstParentResp, err := c.lookupPath(dstParentPath)
+	dstParentID, dstParentResp, err := c.lookupPath(ctx, dstParentPath)
 	if err != nil {
 		return err
 	}
@@ -577,12 +601,12 @@ func (c *SandstoreClient) Rename(src string, dst string) error {
 		return responseError("rename", cleanDst, dstParentResp)
 	}
 
-	resp, err := c.send(ps.MsgRename, ps.RenameRequest{
+	resp, err := c.send(ctx, ps.MsgRename, ps.RenameRequest{
 		SrcParentID: srcParentID,
 		SrcName:     srcName,
 		DstParentID: dstParentID,
 		DstName:     dstName,
-	})
+	}, true)
 	if err != nil {
 		return fmt.Errorf("rename %q -> %q failed: %w", cleanSrc, cleanDst, err)
 	}
@@ -625,6 +649,8 @@ func (c *SandstoreClient) Mkdir(path string, mode int) error {
 	if c.ServerAddr == "" {
 		return fmt.Errorf("sandstore server address is empty")
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultOperationTimeout)
+	defer cancel()
 
 	cleanPath, err := normalizePath(path)
 	if err != nil {
@@ -637,7 +663,7 @@ func (c *SandstoreClient) Mkdir(path string, mode int) error {
 		return fmt.Errorf("invalid path %q", cleanPath)
 	}
 
-	parentID, parentResp, err := c.lookupPath(parentPath)
+	parentID, parentResp, err := c.lookupPath(ctx, parentPath)
 	if err != nil {
 		return err
 	}
@@ -645,13 +671,13 @@ func (c *SandstoreClient) Mkdir(path string, mode int) error {
 		return responseError("mkdir", cleanPath, parentResp)
 	}
 
-	resp, err := c.send(ps.MsgMkdir, ps.MkdirRequest{
+	resp, err := c.send(ctx, ps.MsgMkdir, ps.MkdirRequest{
 		ParentID: parentID,
 		Name:     name,
 		Mode:     uint32(mode & 0o777),
 		UID:      0,
 		GID:      0,
-	})
+	}, true)
 	if err != nil {
 		return fmt.Errorf("mkdir %q failed: %w", cleanPath, err)
 	}
@@ -685,6 +711,8 @@ func (c *SandstoreClient) Rmdir(path string) error {
 	if c.ServerAddr == "" {
 		return fmt.Errorf("sandstore server address is empty")
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultOperationTimeout)
+	defer cancel()
 
 	cleanPath, err := normalizePath(path)
 	if err != nil {
@@ -697,7 +725,7 @@ func (c *SandstoreClient) Rmdir(path string) error {
 		return fmt.Errorf("invalid path %q", cleanPath)
 	}
 
-	parentID, parentResp, err := c.lookupPath(parentPath)
+	parentID, parentResp, err := c.lookupPath(ctx, parentPath)
 	if err != nil {
 		return err
 	}
@@ -705,10 +733,10 @@ func (c *SandstoreClient) Rmdir(path string) error {
 		return responseError("rmdir", cleanPath, parentResp)
 	}
 
-	resp, err := c.send(ps.MsgRmdir, ps.RmdirRequest{
+	resp, err := c.send(ctx, ps.MsgRmdir, ps.RmdirRequest{
 		ParentID: parentID,
 		Name:     name,
-	})
+	}, true)
 	if err != nil {
 		return fmt.Errorf("rmdir %q failed: %w", cleanPath, err)
 	}
@@ -742,13 +770,15 @@ func (c *SandstoreClient) ListDir(path string) ([]pms.DirEntry, error) {
 	if c.ServerAddr == "" {
 		return nil, fmt.Errorf("sandstore server address is empty")
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultOperationTimeout)
+	defer cancel()
 
 	cleanPath, err := normalizePath(path)
 	if err != nil {
 		return nil, err
 	}
 
-	inodeID, lookupResp, err := c.lookupPath(cleanPath)
+	inodeID, lookupResp, err := c.lookupPath(ctx, cleanPath)
 	if err != nil {
 		return nil, err
 	}
@@ -762,11 +792,11 @@ func (c *SandstoreClient) ListDir(path string) ([]pms.DirEntry, error) {
 	eof := false
 
 	for !eof {
-		resp, err := c.send(ps.MsgReadDir, ps.ReadDirRequest{
+		resp, err := c.send(ctx, ps.MsgReadDir, ps.ReadDirRequest{
 			InodeID:    inodeID,
 			Cookie:     cookie,
 			MaxEntries: batchSize,
-		})
+		}, false)
 		if err != nil {
 			return nil, fmt.Errorf("listdir %q failed: %w", cleanPath, err)
 		}
@@ -813,13 +843,15 @@ func (c *SandstoreClient) Stat(path string) (*pms.Attributes, error) {
 	if c.ServerAddr == "" {
 		return nil, fmt.Errorf("sandstore server address is empty")
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), defaultOperationTimeout)
+	defer cancel()
 
 	cleanPath, err := normalizePath(path)
 	if err != nil {
 		return nil, err
 	}
 
-	inodeID, lookupResp, err := c.lookupPath(cleanPath)
+	inodeID, lookupResp, err := c.lookupPath(ctx, cleanPath)
 	if err != nil {
 		return nil, err
 	}
@@ -827,7 +859,7 @@ func (c *SandstoreClient) Stat(path string) (*pms.Attributes, error) {
 		return nil, responseError("stat", cleanPath, lookupResp)
 	}
 
-	resp, err := c.send(ps.MsgGetAttr, ps.GetAttrRequest{InodeID: inodeID})
+	resp, err := c.send(ctx, ps.MsgGetAttr, ps.GetAttrRequest{InodeID: inodeID}, false)
 	if err != nil {
 		return nil, fmt.Errorf("stat %q failed: %w", cleanPath, err)
 	}
@@ -880,8 +912,8 @@ func (c *SandstoreClient) addFD(inodeID string, filePath string, mode int) (int,
 	return int(fd), nil
 }
 
-func (c *SandstoreClient) lookupPath(path string) (string, *communication.Response, error) {
-	resp, err := c.send(ps.MsgLookupPath, ps.LookupPathRequest{Path: path})
+func (c *SandstoreClient) lookupPath(ctx context.Context, path string) (string, *communication.Response, error) {
+	resp, err := c.send(ctx, ps.MsgLookupPath, ps.LookupPathRequest{Path: path}, false)
 	if err != nil {
 		return "", nil, fmt.Errorf("lookup %q failed: %w", path, err)
 	}
@@ -902,13 +934,13 @@ func (c *SandstoreClient) lookupPath(path string) (string, *communication.Respon
 	return inodeID, resp, nil
 }
 
-func (c *SandstoreClient) createPath(path string, mode int) (*communication.Response, error) {
+func (c *SandstoreClient) createPath(ctx context.Context, path string, mode int) (*communication.Response, error) {
 	parentPath, name, err := splitParentAndName(path)
 	if err != nil {
 		return nil, err
 	}
 
-	parentID, parentResp, err := c.lookupPath(parentPath)
+	parentID, parentResp, err := c.lookupPath(ctx, parentPath)
 	if err != nil {
 		return nil, err
 	}
@@ -921,21 +953,23 @@ func (c *SandstoreClient) createPath(path string, mode int) (*communication.Resp
 		createMode = 0o644
 	}
 
-	return c.send(ps.MsgCreate, ps.CreateRequest{
+	return c.send(ctx, ps.MsgCreate, ps.CreateRequest{
 		ParentID: parentID,
 		Name:     name,
 		Mode:     createMode,
 		UID:      0,
 		GID:      0,
-	})
+	}, true)
 }
 
-func (c *SandstoreClient) send(msgType string, payload any) (*communication.Response, error) {
-	return c.Comm.Send(context.Background(), c.ServerAddr, communication.Message{
-		From:    "sandlib",
-		Type:    msgType,
-		Payload: payload,
-	})
+func (c *SandstoreClient) send(ctx context.Context, msgType string, payload any, isMutation bool) (*communication.Response, error) {
+	if c.reqManager == nil {
+		return nil, fmt.Errorf("sandstore request manager is nil")
+	}
+	if isMutation {
+		return c.reqManager.ExecuteMutation(ctx, msgType, payload)
+	}
+	return c.reqManager.ExecuteIdempotent(ctx, msgType, payload)
 }
 
 func splitParentAndName(path string) (string, string, error) {

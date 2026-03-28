@@ -1,3 +1,6 @@
+// Package raft_replicator contains legacy Raft types shared by the
+// durable_raft implementation. It is retained for compatibility and should not
+// receive new feature work.
 package raft_replicator
 
 import (
@@ -269,15 +272,6 @@ func (r *RaftMetadataReplicator) startElection() {
 					Message:  "Vote Granted",
 					Metadata: map[string]any{"from": peer.Address, "votes": currentVotes, "quorum": quorum},
 				})
-
-				// The provided snippet for "Checking Commit Index" and `matchCount` seems to belong to `advanceCommitIndex`.
-				// Assuming the user intended to add this log within `advanceCommitIndex` or a similar commit-related logic.
-				// Since `advanceCommitIndex` is called from `broadcastAppendEntries`, I'll place the log there.
-				// However, the snippet provided is directly in the `startElection` context.
-				// Given the instruction "Add debug logs in broadcastAppendEntries and advanceCommitIndex",
-				// and the content of the log, I will place it in `advanceCommitIndex` as that's where `matchCount` and `n` would be relevant.
-				// The snippet provided in the prompt is syntactically incorrect and contextually misplaced for `startElection`.
-				// I will apply the log to `advanceCommitIndex` as per the instruction's intent.
 
 				if int(currentVotes) >= quorum {
 					// Check again to be sure we didn't already become leader in another goroutine

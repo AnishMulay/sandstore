@@ -13,27 +13,25 @@ import (
 
 const defaultReplicaCount = 3
 
-type LegacySortedPlacementStrategy struct {
+type SortedPlacementStrategy struct {
 	clusterService cluster_service.ClusterService
 	replicaCount   int
 	metricsService metrics.MetricsService
 }
 
-var _ PlacementStrategy = (*LegacySortedPlacementStrategy)(nil)
-
-func NewLegacySortedPlacementStrategy(clusterService cluster_service.ClusterService, replicaCount int, metricsService metrics.MetricsService) *LegacySortedPlacementStrategy {
+func NewSortedPlacementStrategy(clusterService cluster_service.ClusterService, replicaCount int, metricsService metrics.MetricsService) *SortedPlacementStrategy {
 	if replicaCount <= 0 {
 		replicaCount = defaultReplicaCount
 	}
 
-	return &LegacySortedPlacementStrategy{
+	return &SortedPlacementStrategy{
 		clusterService: clusterService,
 		replicaCount:   replicaCount,
 		metricsService: metricsService,
 	}
 }
 
-func (s *LegacySortedPlacementStrategy) SelectTargets(ctx context.Context, chunkID string, replicaCount int) ([]domain.ChunkLocation, error) {
+func (s *SortedPlacementStrategy) SelectTargets(ctx context.Context, chunkID string, replicaCount int) ([]domain.ChunkLocation, error) {
 	start := time.Now()
 	defer func() {
 		if s == nil || s.metricsService == nil {
@@ -42,7 +40,7 @@ func (s *LegacySortedPlacementStrategy) SelectTargets(ctx context.Context, chunk
 		elapsed := time.Since(start).Seconds()
 		s.metricsService.Observe(metrics.PlacementStrategySelectTargetsLatency, elapsed, metrics.MetricTags{
 			Operation: "select_targets",
-			Service:   "LegacySortedPlacementStrategy",
+			Service:   "SortedPlacementStrategy",
 		})
 	}()
 

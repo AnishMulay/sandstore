@@ -88,7 +88,7 @@ spec:
       spec:
         accessModes:
           - ReadWriteOnce
-        storageClassName: sandstore-local-ssd
+        storageClassName: sandstore-hyperconverged-local-ssd
         resources:
           requests:
             storage: 2Gi

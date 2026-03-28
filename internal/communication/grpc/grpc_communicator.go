@@ -285,7 +285,7 @@ func (s *grpcServer) SendMessage(ctx context.Context, req *communicationpb.Messa
 		msg.Payload = reflect.ValueOf(payload).Elem().Interface()
 	}
 
-	resp, err := s.comm.handler(msg)
+	resp, err := s.comm.handler(ctx, msg)
 	if err != nil {
 		s.comm.ls.Error(log_service.LogEvent{
 			Message:  "Message handler failed",

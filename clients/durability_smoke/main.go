@@ -15,7 +15,7 @@ import (
 	locallog "github.com/AnishMulay/sandstore/internal/log_service/localdisc"
 )
 
-var defaultNodeServices = []string{"node-1", "node-2", "node-3"}
+var defaultNodeServices = []string{"sandstore-hyperconverged-1", "sandstore-hyperconverged-2", "sandstore-hyperconverged-3"}
 
 func envInt(name string, fallback int) int {
 	raw := strings.TrimSpace(os.Getenv(name))
@@ -359,9 +359,9 @@ func main() {
 
 	// Test 3: Snapshot Integrity Under Crash
 	log.Println("--- Test Case 3: Snapshot Integrity ---")
-	crashFollower := "node-2"
+	crashFollower := "sandstore-hyperconverged-2"
 	if crashFollower == leaderService {
-		crashFollower = "node-3"
+		crashFollower = "sandstore-hyperconverged-3"
 	}
 	go func() {
 		time.Sleep(1 * time.Second)
@@ -377,9 +377,9 @@ func main() {
 
 	// Test 4: Catch-Up via InstallSnapshot
 	log.Println("--- Test Case 4: InstallSnapshot Catch-Up ---")
-	lagger := "node-3"
+	lagger := "sandstore-hyperconverged-3"
 	if lagger == leaderService {
-		lagger = "node-2"
+		lagger = "sandstore-hyperconverged-2"
 	}
 	must(dockerAction("pause", lagger))
 	client, catchupPath, err := createFiles(comm, client, fmt.Sprintf("install_snapshot_%d", time.Now().UnixNano()), snapshotFileCount)

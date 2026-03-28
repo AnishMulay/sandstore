@@ -25,6 +25,7 @@ type Sample struct {
 	WorkerID           int
 	Operation          string
 	LatencyNanoseconds int64
+	Failed             bool
 }
 
 type BenchmarkConfig struct {
@@ -68,10 +69,14 @@ func percentileMs(sorted []int64, p float64) float64 {
 	return float64(sorted[index]) / 1e6
 }
 
-func aggregate(results <-chan Sample, operation string, cfg BenchmarkConfig, w *csv.Writer) {
+func aggregate(results <-chan Sample, operation string, cfg BenchmarkConfig, w *csv.Writer) (BenchmarkResult, error) {
 	latencies := make([]int64, 0)
+	var errorCount int64
 	for sample := range results {
 		latencies = append(latencies, sample.LatencyNanoseconds)
+		if sample.Failed {
+			errorCount++
+		}
 	}
 
 	sort.Slice(latencies, func(i int, j int) bool {
@@ -83,7 +88,7 @@ func aggregate(results <-chan Sample, operation string, cfg BenchmarkConfig, w *
 		Concurrency:    cfg.Concurrency,
 		BlockSizeBytes: cfg.BlockSizeBytes,
 		TotalOps:       int64(len(latencies)),
-		ErrorCount:     0,
+		ErrorCount:     errorCount,
 	}
 
 	if len(latencies) > 0 {
@@ -93,7 +98,7 @@ func aggregate(results <-chan Sample, operation string, cfg BenchmarkConfig, w *
 		result.P100Ms = percentileMs(latencies, 100)
 	}
 
-	_ = w.Write([]string{
+	if err := w.Write([]string{
 		result.Operation,
 		strconv.FormatInt(result.Concurrency, 10),
 		strconv.FormatInt(result.BlockSizeBytes, 10),
@@ -103,8 +108,32 @@ func aggregate(results <-chan Sample, operation string, cfg BenchmarkConfig, w *
 		strconv.FormatFloat(result.P100Ms, 'f', -1, 64),
 		strconv.FormatInt(result.TotalOps, 10),
 		strconv.FormatInt(result.ErrorCount, 10),
-	})
+	}); err != nil {
+		return BenchmarkResult{}, fmt.Errorf("writing benchmark row for %s: %w", operation, err)
+	}
 	w.Flush()
+	if err := w.Error(); err != nil {
+		return BenchmarkResult{}, fmt.Errorf("flushing benchmark row for %s: %w", operation, err)
+	}
+
+	return result, nil
+}
+
+func printSummary(results []BenchmarkResult, csvPath string) {
+	fmt.Printf("\nOperation   | P50 (ms) | P95 (ms) | P99 (ms) | Total Ops | Errors\n")
+	fmt.Printf("------------|----------|----------|----------|-----------|--------\n")
+	for _, result := range results {
+		fmt.Printf(
+			"%-11s | %8.2f | %8.2f | %8.2f | %9d | %6d\n",
+			result.Operation,
+			result.P50Ms,
+			result.P95Ms,
+			result.P99Ms,
+			result.TotalOps,
+			result.ErrorCount,
+		)
+	}
+	fmt.Printf("\nFull results written to: %s\n", csvPath)
 }
 
 func main() {
@@ -157,8 +186,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	outputPath := filepath.Join("results", "bench", fmt.Sprintf("%s.csv", time.Now().Format(time.RFC3339)))
-	outputFile, err := os.OpenFile(outputPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	csvPath := filepath.Join("results", "bench", fmt.Sprintf("%s.csv", time.Now().Format(time.RFC3339)))
+	outputFile, err := os.OpenFile(csvPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -173,7 +202,7 @@ func main() {
 
 	csvWriter := csv.NewWriter(outputFile)
 	if fileInfo.Size() == 0 {
-		_ = csvWriter.Write([]string{
+		if err := csvWriter.Write([]string{
 			"operation",
 			"concurrency",
 			"block_size_bytes",
@@ -183,8 +212,15 @@ func main() {
 			"p100_ms",
 			"total_ops",
 			"error_count",
-		})
+		}); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 		csvWriter.Flush()
+		if err := csvWriter.Error(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	}
 
 	fds, err := openFiles(client, int(cfg.Concurrency), "bench_write", os.O_CREATE|os.O_WRONLY|os.O_TRUNC)
@@ -199,6 +235,7 @@ func main() {
 	defer cancel()
 
 	buf := generateBytes(cfg.BlockSizeBytes)
+	summaryResults := make([]BenchmarkResult, 0, 5)
 
 	var wg sync.WaitGroup
 	for i := 0; i < int(cfg.Concurrency); i++ {
@@ -220,11 +257,11 @@ func main() {
 					WorkerID:           workerID,
 					Operation:          "write",
 					LatencyNanoseconds: latency,
+					Failed:             err != nil,
 				}:
 				case <-ctx.Done():
 					return
 				}
-				_ = err
 			}
 		}(i, fds[i])
 	}
@@ -232,7 +269,12 @@ func main() {
 	wg.Wait()
 	close(results)
 
-	aggregate(results, "write", cfg, csvWriter)
+	writeSummary, err := aggregate(results, "write", cfg, csvWriter)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	summaryResults = append(summaryResults, writeSummary)
 
 	fmt.Println("write benchmark complete")
 
@@ -265,24 +307,32 @@ func main() {
 				start := time.Now()
 				_, err := client.Read(fd, int(cfg.BlockSizeBytes))
 				latency := time.Since(start).Nanoseconds()
+				failed := err != nil && err != io.EOF
+				if err == io.EOF {
+					if closeErr := client.Close(fd); closeErr != nil {
+						failed = true
+					} else {
+						fd, err = client.Open(
+							fmt.Sprintf("/bench_write_worker_%d", workerID),
+							os.O_RDONLY,
+						)
+						if err != nil {
+							failed = true
+						}
+					}
+				}
 				select {
 				case readResults <- Sample{
 					WorkerID:           workerID,
 					Operation:          "read",
 					LatencyNanoseconds: latency,
+					Failed:             failed,
 				}:
 				case <-readCtx.Done():
 					return
 				}
-				if err == io.EOF {
-					client.Close(fd)
-					fd, err = client.Open(
-						fmt.Sprintf("/bench_write_worker_%d", workerID),
-						os.O_RDONLY,
-					)
-					if err != nil {
-						return
-					}
+				if err == io.EOF && failed {
+					return
 				}
 			}
 		}(i, readFds[i])
@@ -290,7 +340,12 @@ func main() {
 
 	readWg.Wait()
 	close(readResults)
-	aggregate(readResults, "read", cfg, csvWriter)
+	readSummary, err := aggregate(readResults, "read", cfg, csvWriter)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	summaryResults = append(summaryResults, readSummary)
 	fmt.Println("read benchmark complete")
 
 	_, err = openFiles(client, int(cfg.Concurrency), "bench_stat", os.O_CREATE|os.O_WRONLY)
@@ -327,6 +382,7 @@ func main() {
 					WorkerID:           workerID,
 					Operation:          "stat",
 					LatencyNanoseconds: latency,
+					Failed:             err != nil,
 				}:
 				case <-statCtx.Done():
 					return
@@ -337,7 +393,12 @@ func main() {
 
 	statWg.Wait()
 	close(statResults)
-	aggregate(statResults, "stat", cfg, csvWriter)
+	statSummary, err := aggregate(statResults, "stat", cfg, csvWriter)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	summaryResults = append(summaryResults, statSummary)
 	fmt.Println("stat benchmark complete")
 
 	createResults := make(chan Sample, int(cfg.Concurrency)*1000)
@@ -363,8 +424,11 @@ func main() {
 				start := time.Now()
 				fd, err := client.Open(fmt.Sprintf("/bench_create_worker_%d_%d", workerID, iteration), os.O_CREATE|os.O_WRONLY)
 				latency := time.Since(start).Nanoseconds()
+				failed := err != nil
 				if err == nil {
-					_ = client.Close(fd)
+					if closeErr := client.Close(fd); closeErr != nil {
+						failed = true
+					}
 				}
 				iteration++
 				select {
@@ -372,6 +436,7 @@ func main() {
 					WorkerID:           workerID,
 					Operation:          "create",
 					LatencyNanoseconds: latency,
+					Failed:             failed,
 				}:
 				case <-createCtx.Done():
 					return
@@ -382,7 +447,12 @@ func main() {
 
 	createWg.Wait()
 	close(createResults)
-	aggregate(createResults, "create", cfg, csvWriter)
+	createSummary, err := aggregate(createResults, "create", cfg, csvWriter)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	summaryResults = append(summaryResults, createSummary)
 	fmt.Println("create benchmark complete")
 
 	listResults := make(chan Sample, int(cfg.Concurrency)*1000)
@@ -407,12 +477,12 @@ func main() {
 				start := time.Now()
 				_, err := client.ListDir("/")
 				latency := time.Since(start).Nanoseconds()
-				_ = err
 				select {
 				case listResults <- Sample{
 					WorkerID:           workerID,
 					Operation:          "listdir",
 					LatencyNanoseconds: latency,
+					Failed:             err != nil,
 				}:
 				case <-listCtx.Done():
 					return
@@ -423,7 +493,13 @@ func main() {
 
 	listWg.Wait()
 	close(listResults)
-	aggregate(listResults, "listdir", cfg, csvWriter)
+	listSummary, err := aggregate(listResults, "listdir", cfg, csvWriter)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	summaryResults = append(summaryResults, listSummary)
 	fmt.Println("listdir benchmark complete")
 	fmt.Println("all benchmarks complete")
+	printSummary(summaryResults, csvPath)
 }

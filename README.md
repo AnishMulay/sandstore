@@ -21,13 +21,13 @@
 
 </div>
 
-Sandstore lets you assemble a distributed storage system from well-defined, swappable components — choose your metadata engine, consensus mechanism, chunk storage, cluster membership, and transport — then deploy and test the result against a real multi-node cluster in minutes.
+Sandstore lets you assemble a distributed storage system from well-defined, swappable components. Choose your metadata engine, consensus mechanism, chunk storage, cluster membership, and transport, then deploy and test the result against a real multi-node cluster in minutes.
 
 It started as a way to learn distributed systems internals by building them. It has grown into a platform for experimenting with how fundamental architectural decisions change the behavior of a storage system.
 
 ## Why Sandstore?
 
-Most distributed storage systems bake their architecture in. The topology — where metadata lives, how replication works, how nodes discover each other — is a fixed decision made at design time.
+Most distributed storage systems bake their architecture in. The topology, including where metadata lives, how replication works, and how nodes discover each other, is a fixed decision made at design time.
 
 Sandstore treats topology as a variable.
 
@@ -41,7 +41,7 @@ This makes Sandstore useful for:
 
 ## Current Architecture
 
-The active topology today is a **hyperconverged node** — every node runs both the control and data plane, similar in spirit to CockroachDB. There are no separate metadata servers. Cluster membership is handled by etcd.
+The active topology today is a **hyperconverged node**. Every node runs both the control and data plane, similar in spirit to CockroachDB. There are no separate metadata servers. Cluster membership is handled by etcd.
 
 Each node is assembled from:
 
@@ -58,44 +58,54 @@ Each node is assembled from:
 | Routing | `EndpointResolver` | Static endpoint resolver |
 | Write coordination | `TransactionCoordinator` | Raft transaction coordinator |
 
-The server layer (`SimpleServer`) depends only on the orchestrator interfaces, not on any concrete implementation. This is the seam where new topologies plug in.
+The server layer (`HyperconvergedServer`) depends only on the orchestrator interfaces, not on any concrete implementation. This is the seam where new topologies plug in.
 
-The canonical entry point for understanding the system is `servers/node/wire_grpc_etcd.go`. It assembles every component in dependency order and shows exactly how the current topology is built.
+The canonical entry point for understanding the system is `servers/node/topology_hyperconverged.go`. It assembles every component in dependency order and shows exactly how the current topology is built.
 
 ## Quick Start
 
-**Prerequisites:** Go 1.24+, Docker with Compose, Bash, free ports 2379, 2380, 9001–9003
+**Prerequisites:**
+- Go 1.24+
+- Docker with Compose
+- Bash
+- Free ports: 2379, 2380 (etcd), 9001-9003 (sandstore nodes)
 
-**Start a 3-node local cluster:**
-
+### Local development (no Kubernetes required)
 ```bash
 git clone https://github.com/AnishMulay/sandstore
 cd sandstore
 
 # Start etcd
-docker compose -f deploy/docker/etcd/docker-compose.yaml up -d
+make etcd-up
 
-# Build, start 3 nodes, elect a leader, run smoke test
-./scripts/dev/run-smoke.sh
+# Build, start 3 nodes, elect a leader, run smoke test, and tear down
+make smoke-local TOPOLOGY=hyperconverged
 ```
 
-This boots a full 3-node Sandstore cluster on localhost, waits for leader election, and runs an end-to-end open/read/write/fsync/remove smoke test against it. The cluster stays up after the script finishes for manual exploration.
+The smoke test builds all required binaries, starts a 3-node cluster on localhost, waits for leader election, runs an end-to-end open/read/write/fsync/remove test, then shuts down the nodes. etcd keeps running for subsequent runs.
 
-**Kubernetes (full integration suite):**
-
+To run a persistent local cluster for manual exploration:
 ```bash
-make test-cluster
+make cluster TOPOLOGY=hyperconverged
 ```
 
-Builds Docker images, deploys a 3-node cluster to Kubernetes, and runs leader election, open/read/write, restart durability, leader deletion recovery, and node rejoin tests. Cleans up the namespace on completion.
-
-**Other useful make targets:**
-
+To run the latency benchmark against a running local cluster:
 ```bash
-make build            # Build the node binary
-make proto            # Regenerate protobuf/gRPC stubs
-make durability-smoke # Ephemeral Docker durability test (bring-up + test + teardown)
-make client           # Build the manual client binary
+make bench SEEDS=127.0.0.1:9001,127.0.0.1:9002,127.0.0.1:9003 CONCURRENCY=4
+```
+
+When finished:
+```bash
+make etcd-down
+```
+
+### Kubernetes integration tests (requires kubectl + Docker Desktop Kubernetes or kind)
+
+**Additional prerequisites:** kubectl, a running Kubernetes context (Docker Desktop with Kubernetes enabled, or kind/minikube)
+```bash
+make cluster-up TOPOLOGY=hyperconverged    # Build images, deploy 3-node cluster
+make smoke-test TOPOLOGY=hyperconverged    # Run smoke test as a Kubernetes Job
+make cluster-down TOPOLOGY=hyperconverged  # Tear down cluster and namespace
 ```
 
 ## Repository Layout
@@ -110,9 +120,9 @@ internal/
   chunk_service/       # ChunkService interface + local disk implementation
   cluster_service/     # ClusterService interface + etcd implementation
   communication/       # Communicator interface + gRPC implementation
-  server/              # Server interface + SimpleServer
+  server/              # Server interface + HyperconvergedServer
 clients/
-  library/             # SDK, smart client, topology router (ConvergedRouter)
+  library/             # SDK, smart client, topology router (HyperconvergedRouter)
   open_smoke/          # End-to-end smoke test client
   durability_smoke/    # Failover/durability smoke client
   mcp/                 # Model Context Protocol server (in progress)
@@ -126,14 +136,14 @@ proto/                 # Protobuf source definitions
 
 ## Implementing a New Topology
 
-To build a new storage topology — say, a GFS-style architecture with a dedicated metadata server — you implement new versions of the interfaces relevant to your design:
+To build a new storage topology, such as a GFS-style architecture with a dedicated metadata server, you implement new versions of the interfaces relevant to your design:
 
-- **`PlacementStrategy`** — placement logic for your node roles
-- **`DataPlaneOrchestrator`** — your write/read semantics (e.g. primary/secondary instead of replicated-prepare + Raft-commit)
-- **`TransactionCoordinator`** — coordination logic matching your write path
-- Optionally: **`MetadataService`**, **`MetadataReplicator`** — if you want different metadata persistence or consensus behavior
+- **`PlacementStrategy`**: placement logic for your node roles
+- **`DataPlaneOrchestrator`**: your write/read semantics (e.g. primary/secondary instead of replicated-prepare + Raft-commit)
+- **`TransactionCoordinator`**: coordination logic matching your write path
+- Optionally: **`MetadataService`**, **`MetadataReplicator`** if you want different metadata persistence or consensus behavior
 
-Then write a new wiring file (like `servers/node/wire_grpc_etcd.go`) that assembles your implementations and passes them to `SimpleServer`. No changes to the server layer, client, or deploy tooling required.
+Then write a new wiring file (like `servers/node/topology_hyperconverged.go`) that assembles your implementations and passes them to `HyperconvergedServer`. No changes to the server layer, client, or deploy tooling required.
 
 The interface definitions live in `internal/orchestrators/interfaces.go`. Start there.
 
@@ -143,7 +153,7 @@ The interface definitions live in `internal/orchestrators/interfaces.go`. Start 
 - [x] Hyperconverged node topology (etcd + gRPC + durable Raft + BoltDB)
 - [x] Durable Raft WAL with CRC/envelope protection and corruption recovery
 - [x] Kubernetes integration test suite (leader election, durability, node rejoin)
-- [x] Smart client with topology-aware leader routing (ConvergedRouter)
+- [x] Smart client with topology-aware leader routing (HyperconvergedRouter)
 - [x] 2PC transactional chunk writes
 
 ### In Progress
@@ -160,9 +170,9 @@ The interface definitions live in `internal/orchestrators/interfaces.go`. Start 
 
 ## Contributing
 
-Contributions are welcome — new topology implementations especially so.
+Contributions are welcome, especially new topology implementations.
 
-The best place to start is `servers/node/wire_grpc_etcd.go` to understand the current topology, then `internal/orchestrators/interfaces.go` to understand the extension points.
+The best place to start is `servers/node/topology_hyperconverged.go` to understand the current topology, then `internal/orchestrators/interfaces.go` to understand the extension points.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on setting up your environment, code style, and submitting pull requests.
 
@@ -172,6 +182,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on setting up your environ
 
 ## License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
 ---

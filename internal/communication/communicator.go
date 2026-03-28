@@ -36,8 +36,6 @@ const (
 type WriteChunkRequest struct {
 	ChunkID string
 	Data    []byte
-	// Future-proofing: We could add 'Offset' here later for partial updates!
-	// Offset int64
 }
 
 type ReadChunkRequest struct {
@@ -136,7 +134,7 @@ type Response struct {
 	Headers map[string]string // Optional, used only in HTTP
 }
 
-type MessageHandler func(msg Message) (*Response, error)
+type MessageHandler func(ctx context.Context, msg Message) (*Response, error)
 
 type Communicator interface {
 	Start(handler MessageHandler) error

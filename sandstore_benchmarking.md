@@ -12,9 +12,9 @@ Sandstore has a working hyper-converged architecture with full telemetry instrum
 
 ## Technical Background & Rationale
 
-- The `sandlib` client (`clients/library`) is the correct entry point. It handles topology bootstrap, gRPC transport, and internal write buffering (2 MiB buffer, 8 MiB RPC chunk). All benchmark measurements are client-observed wall-clock latency — the most honest number to publish because it includes network, serialization, server processing, and replication.
+- The `sandlib` client (`clients/library`) is the correct entry point. It handles topology bootstrap, gRPC transport, and internal write buffering (2 MiB buffer, 8 MiB RPC chunk). All benchmark measurements are client-observed wall-clock latency. That is the most honest number to publish because it includes network, serialization, server processing, and replication.
 - **Benchmark classification**: Steady-state load benchmark. A fixed goroutine pool runs for a fixed duration (60s default), self-generating load as fast as possible. This is not a push-to-failure load test and not a microbenchmark.
-- **Concurrency model**: N independent goroutines each run an infinite loop issuing operations. Shutdown is coordinated via `context.WithTimeout`. When the context cancels, workers stop issuing new requests but finish their current in-flight RPC — this prevents coordinated omission and avoids artificially truncating tail latency.
+- **Concurrency model**: N independent goroutines each run an infinite loop issuing operations. Shutdown is coordinated via `context.WithTimeout`. When the context cancels, workers stop issuing new requests but finish their current in-flight RPC. This prevents coordinated omission and avoids artificially truncating tail latency.
 - **Result collection**: Workers send latency samples (int64 nanoseconds) to a dedicated buffered results channel. Aggregation happens post-run after the channel is closed. No shared slice, no mutex contention.
 - **Pre-warming**: One global warmup happens after client creation and before any benchmark phase. The binary issues 10 sequential `Stat("/")` calls to ensure the gRPC connection is fully established. No per-phase warmup is performed.
 - **Two write modes** (required due to 2 MiB internal client buffer):
@@ -24,12 +24,12 @@ Sandstore has a working hyper-converged architecture with full telemetry instrum
 - Binary location follows existing convention: `clients/bench/main.go`, built as `bin/bench`.
 - **Deployment**: cluster on Ubuntu gaming laptop via Kubernetes (`make cluster-up`). Benchmark client on MacBook M4 connecting over the local network via static seed addresses passed to `sandlib.NewSandstoreClient`.
 
-## Study Session Goals — Completed ✓
+## Study Session Goals: Completed ✓
 
-1. Fair, repeatable distributed system benchmark design — measurement error sources and controls ✓
-2. Latency percentiles (p50/p95/p99) — computation and interpretation ✓
-3. Go goroutine pool concurrency model — worker loops, context cancellation, WaitGroup ✓
-4. Client-side buffering effects — two-mode write strategy crystallized ✓
+1. Fair, repeatable distributed system benchmark design: measurement error sources and controls ✓
+2. Latency percentiles (p50/p95/p99): computation and interpretation ✓
+3. Go goroutine pool concurrency model: worker loops, context cancellation, WaitGroup ✓
+4. Client-side buffering effects: two-mode write strategy crystallized ✓
 5. CSV output conventions for pandas consumption ✓
 
 ---
@@ -60,12 +60,12 @@ Sandstore has a working hyper-converged architecture with full telemetry instrum
 - US-2: As a developer, after a benchmark run a CSV file is written to a timestamped path under `results/` that I can use for analysis and charting.
 - US-3: As a developer, the benchmark code is readable enough that I can follow the existing pattern to add a new operation without touching the concurrency or CSV logic.
 - US-4: As a developer, before the benchmark starts a pre-flight health check runs, and if the cluster is unreachable the binary exits immediately with a clear error message.
-- US-5: As a developer, if internal server errors occur during a run they are recorded in the CSV output and the benchmark continues — other goroutines are unaffected.
+- US-5: As a developer, if internal server errors occur during a run they are recorded in the CSV output and the benchmark continues. Other goroutines are unaffected.
 
 ## Failure Path Stories (AI-Generated)
 
-- US-F1: As a developer, the `results/` directory does not exist on the client machine when I run the benchmark — the binary creates it automatically rather than crashing.
-- US-F2: As a developer, multiple benchmark phases complete within one invocation — the binary appends a new row for each phase to the same timestamped CSV file rather than overwriting earlier phase rows.
+- US-F1: As a developer, the `results/` directory does not exist on the client machine when I run the benchmark. The binary creates it automatically rather than crashing.
+- US-F2: As a developer, multiple benchmark phases complete within one invocation. The binary appends a new row for each phase to the same timestamped CSV file rather than overwriting earlier phase rows.
 
 ---
 
@@ -108,13 +108,13 @@ type BenchmarkResult struct {
 
 **Design notes:**
 
-- `LatencyNanoseconds` is `int64` — raw `time.Duration` value, no floating point representation error. Conversion to milliseconds happens at aggregation time only.
+- `LatencyNanoseconds` is `int64`: raw `time.Duration` value, with no floating point representation error. Conversion to milliseconds happens at aggregation time only.
 - Duration is exposed as a `--duration` flag with a default of 60 seconds.
 - One benchmark invocation uses one block size. The developer is responsible for invoking the binary multiple times with different `--block-size` values to collect a dataset across sizes. Typical values: 4 KiB (4096), 64 KiB (65536), 1 MiB (1048576), 8 MiB (8388608).
-- `BenchmarkResult.P100Ms` is the maximum observed latency — the single worst sample in the run.
-- Operations run sequentially, one at a time. No generic operation interface is needed — each operation is called directly in its own benchmark phase.
+- `BenchmarkResult.P100Ms` is the maximum observed latency, which is the single worst sample in the run.
+- Operations run sequentially, one at a time. No generic operation interface is needed because each operation is called directly in its own benchmark phase.
 - The Read benchmark uses files written during the Write benchmark phase. This is a hard ordering constraint: Write must complete fully before Read opens its measurement window.
-- The pre-flight health check (`Stat` on root) runs before any benchmark phase. If it fails, the binary exits immediately — no `BenchmarkResult` is written.
+- The pre-flight health check (`Stat` on root) runs before any benchmark phase. If it fails, the binary exits immediately, and no `BenchmarkResult` is written.
 
 ---
 
@@ -122,11 +122,11 @@ type BenchmarkResult struct {
 
 ## New Files
 
-- `clients/bench/main.go` — the benchmark binary. Named `bench` to distinguish it from future benchmark suites (e.g. `bench_v2`, `bench_filesystem`). Follows the existing `clients/` binary convention.
+- `clients/bench/main.go`: the benchmark binary. It is named `bench` to distinguish it from future benchmark suites (e.g. `bench_v2`, `bench_filesystem`). It follows the existing `clients/` binary convention.
 
 ## Modified Files
 
-- `Makefile` — add a `make bench` target that builds `bin/bench` and runs it with the appropriate flags.
+- `Makefile`: add a `make bench` target that builds `bin/bench` and runs it with the appropriate flags.
   The `make bench` target accepts `SEEDS` and `CONCURRENCY` as make variables and passes them through as `--seeds` and `--concurrency` flags to `bin/bench`. Example: `make bench SEEDS=192.168.1.10:8080,192.168.1.11:8080 CONCURRENCY=8`
 
 ## Strictly Off-Limits
@@ -143,9 +143,9 @@ Go. Standard library only (`encoding/csv`, `context`, `sync`, `sort`, `time`, `o
 
 # Future
 
-- **Filesystem comparison experiments**: This benchmark suite acts as the execution harness for the next phase — running the same workloads against Sandstore clusters backed by different underlying filesystems (ext4, btrfs, etc.) on the Ubuntu machine. No code changes required; the benchmark runs as-is.
-- **Blueprint for future benchmark suites**: The structure of this binary — goroutine pool, context cancellation, channel-based result collection, CSV output — becomes the pattern for all subsequent benchmarking work in the project.
-- **Optimization feedback loop**: Combined with the existing Prometheus telemetry already wired through the hyper-converged architecture, benchmark results can open concrete avenues for performance optimization — correlating client-observed latency with server-side internal metrics.
+- **Filesystem comparison experiments**: This benchmark suite acts as the execution harness for the next phase. It can run the same workloads against Sandstore clusters backed by different underlying filesystems (ext4, btrfs, etc.) on the Ubuntu machine. No code changes are required.
+- **Blueprint for future benchmark suites**: The structure of this binary, including the goroutine pool, context cancellation, channel-based result collection, and CSV output, becomes the pattern for subsequent benchmarking work in the project.
+- **Optimization feedback loop**: Combined with the existing Prometheus telemetry already wired through the hyper-converged architecture, benchmark results can open concrete avenues for performance optimization by correlating client-observed latency with server-side internal metrics.
 
 ---
 
@@ -174,7 +174,7 @@ if err != nil {
 
 ---
 
-## Flow 1: Setup Helper — openFiles
+## Flow 1: Setup Helper, `openFiles`
 
 Called before each benchmark phase that requires file descriptors. Creates or opens one file per worker goroutine.
 

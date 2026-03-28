@@ -13,7 +13,7 @@ import (
 func TestFileLogStore_MissingFileIsEmpty(t *testing.T) {
 	path := t.TempDir() + "/raft_wal.json"
 
-	s, err := NewFileLogStore(path)
+	s, err := NewFileLogStore(path, nil)
 	if err != nil {
 		t.Fatalf("expected nil error on missing file, got: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestFileLogStore_MissingFileIsEmpty(t *testing.T) {
 func TestStoreLogs_SurvivesReload(t *testing.T) {
 	path := t.TempDir() + "/raft_wal.json"
 
-	s, err := NewFileLogStore(path)
+	s, err := NewFileLogStore(path, nil)
 	if err != nil {
 		t.Fatalf("NewFileLogStore: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestStoreLogs_SurvivesReload(t *testing.T) {
 		t.Fatalf("StoreLogs: %v", err)
 	}
 
-	s2, err := NewFileLogStore(path)
+	s2, err := NewFileLogStore(path, nil)
 	if err != nil {
 		t.Fatalf("NewFileLogStore on reload: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestStoreLogs_SurvivesReload(t *testing.T) {
 func TestFileLogStore_CorruptCRCReturnsErrWALCorrupt(t *testing.T) {
 	path := t.TempDir() + "/raft_wal.json"
 
-	s, err := NewFileLogStore(path)
+	s, err := NewFileLogStore(path, nil)
 	if err != nil {
 		t.Fatalf("NewFileLogStore: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestFileLogStore_CorruptCRCReturnsErrWALCorrupt(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	_, err = NewFileLogStore(path)
+	_, err = NewFileLogStore(path, nil)
 	if !errors.Is(err, ErrWALCorrupt) {
 		t.Fatalf("expected ErrWALCorrupt, got: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestFileLogStore_CorruptCRCReturnsErrWALCorrupt(t *testing.T) {
 func TestFileLogStore_TruncatedFileReturnsErrWALCorrupt(t *testing.T) {
 	path := t.TempDir() + "/raft_wal.json"
 
-	s, err := NewFileLogStore(path)
+	s, err := NewFileLogStore(path, nil)
 	if err != nil {
 		t.Fatalf("NewFileLogStore: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestFileLogStore_TruncatedFileReturnsErrWALCorrupt(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	_, err = NewFileLogStore(path)
+	_, err = NewFileLogStore(path, nil)
 	if !errors.Is(err, ErrWALCorrupt) {
 		t.Fatalf("expected ErrWALCorrupt, got: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestFileStableStore_CorruptCRCReturnsErrStableCorrupt(t *testing.T) {
 func TestFileLogStore_RoundTrip(t *testing.T) {
 	path := t.TempDir() + "/raft_wal.json"
 
-	s, err := NewFileLogStore(path)
+	s, err := NewFileLogStore(path, nil)
 	if err != nil {
 		t.Fatalf("NewFileLogStore: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestFileLogStore_RoundTrip(t *testing.T) {
 		t.Fatalf("StoreLogs: %v", err)
 	}
 
-	s2, err := NewFileLogStore(path)
+	s2, err := NewFileLogStore(path, nil)
 	if err != nil {
 		t.Fatalf("NewFileLogStore on reload: %v", err)
 	}

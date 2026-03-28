@@ -16,7 +16,7 @@ import (
 
 type RaftDataPlaneOrchestrator struct {
 	comm             communication.Communicator
-	endpointResolver EndpointResolver
+	endpointResolver *StaticEndpointResolver
 	chunkSize        int64
 	cs               pcs.ChunkService
 	metricsService   metrics.MetricsService
@@ -24,7 +24,7 @@ type RaftDataPlaneOrchestrator struct {
 
 var _ DataPlaneOrchestrator = (*RaftDataPlaneOrchestrator)(nil)
 
-func NewRaftDataPlaneOrchestrator(comm communication.Communicator, endpointResolver EndpointResolver, chunkSize int64, cs pcs.ChunkService, metricsService metrics.MetricsService) *RaftDataPlaneOrchestrator {
+func NewRaftDataPlaneOrchestrator(comm communication.Communicator, endpointResolver *StaticEndpointResolver, chunkSize int64, cs pcs.ChunkService, metricsService metrics.MetricsService) *RaftDataPlaneOrchestrator {
 	return &RaftDataPlaneOrchestrator{
 		comm:             comm,
 		endpointResolver: endpointResolver,
