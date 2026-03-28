@@ -21,13 +21,13 @@
 
 </div>
 
-Sandstore lets you assemble a distributed storage system from well-defined, swappable components — choose your metadata engine, consensus mechanism, chunk storage, cluster membership, and transport — then deploy and test the result against a real multi-node cluster in minutes.
+Sandstore lets you assemble a distributed storage system from well-defined, swappable components. Choose your metadata engine, consensus mechanism, chunk storage, cluster membership, and transport, then deploy and test the result against a real multi-node cluster in minutes.
 
 It started as a way to learn distributed systems internals by building them. It has grown into a platform for experimenting with how fundamental architectural decisions change the behavior of a storage system.
 
 ## Why Sandstore?
 
-Most distributed storage systems bake their architecture in. The topology — where metadata lives, how replication works, how nodes discover each other — is a fixed decision made at design time.
+Most distributed storage systems bake their architecture in. The topology, including where metadata lives, how replication works, and how nodes discover each other, is a fixed decision made at design time.
 
 Sandstore treats topology as a variable.
 
@@ -41,7 +41,7 @@ This makes Sandstore useful for:
 
 ## Current Architecture
 
-The active topology today is a **hyperconverged node** — every node runs both the control and data plane, similar in spirit to CockroachDB. There are no separate metadata servers. Cluster membership is handled by etcd.
+The active topology today is a **hyperconverged node**. Every node runs both the control and data plane, similar in spirit to CockroachDB. There are no separate metadata servers. Cluster membership is handled by etcd.
 
 Each node is assembled from:
 
@@ -136,12 +136,12 @@ proto/                 # Protobuf source definitions
 
 ## Implementing a New Topology
 
-To build a new storage topology — say, a GFS-style architecture with a dedicated metadata server — you implement new versions of the interfaces relevant to your design:
+To build a new storage topology, such as a GFS-style architecture with a dedicated metadata server, you implement new versions of the interfaces relevant to your design:
 
-- **`PlacementStrategy`** — placement logic for your node roles
-- **`DataPlaneOrchestrator`** — your write/read semantics (e.g. primary/secondary instead of replicated-prepare + Raft-commit)
-- **`TransactionCoordinator`** — coordination logic matching your write path
-- Optionally: **`MetadataService`**, **`MetadataReplicator`** — if you want different metadata persistence or consensus behavior
+- **`PlacementStrategy`**: placement logic for your node roles
+- **`DataPlaneOrchestrator`**: your write/read semantics (e.g. primary/secondary instead of replicated-prepare + Raft-commit)
+- **`TransactionCoordinator`**: coordination logic matching your write path
+- Optionally: **`MetadataService`**, **`MetadataReplicator`** if you want different metadata persistence or consensus behavior
 
 Then write a new wiring file (like `servers/node/topology_hyperconverged.go`) that assembles your implementations and passes them to `HyperconvergedServer`. No changes to the server layer, client, or deploy tooling required.
 
@@ -170,7 +170,7 @@ The interface definitions live in `internal/orchestrators/interfaces.go`. Start 
 
 ## Contributing
 
-Contributions are welcome — new topology implementations especially so.
+Contributions are welcome, especially new topology implementations.
 
 The best place to start is `servers/node/topology_hyperconverged.go` to understand the current topology, then `internal/orchestrators/interfaces.go` to understand the extension points.
 
@@ -182,6 +182,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on setting up your environ
 
 ## License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
 ---
