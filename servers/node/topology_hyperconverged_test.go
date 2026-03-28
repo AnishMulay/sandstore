@@ -1,7 +1,6 @@
 package node
 
 import (
-	"os"
 	"testing"
 )
 
@@ -24,7 +23,7 @@ func TestExternalTopology(t *testing.T) {
 		expectedResult string
 	}{
 		{
-			name:           "Test 1: HOST_IP and EXTERNAL_BASE_PORT set, ordinal 2",
+			name:           "Uses external host and ordinal offset two",
 			hostIP:         "10.0.0.5",
 			basePort:       "9080",
 			nodeID:         "sandstore-hyperconverged-2",
@@ -32,7 +31,7 @@ func TestExternalTopology(t *testing.T) {
 			expectedResult: "10.0.0.5:9082",
 		},
 		{
-			name:           "Test 2: HOST_IP and EXTERNAL_BASE_PORT set, ordinal 0",
+			name:           "Uses external host and ordinal offset zero",
 			hostIP:         "10.0.0.5",
 			basePort:       "9080",
 			nodeID:         "sandstore-hyperconverged-0",
@@ -40,7 +39,7 @@ func TestExternalTopology(t *testing.T) {
 			expectedResult: "10.0.0.5:9080",
 		},
 		{
-			name:           "Test 3: HOST_IP unset, returns inner address unchanged",
+			name:           "Returns inner address when host is unset",
 			hostIP:         "",
 			basePort:       "9080",
 			nodeID:         "sandstore-hyperconverged-1",
@@ -48,7 +47,7 @@ func TestExternalTopology(t *testing.T) {
 			expectedResult: "sandstore-hyperconverged-1.sandstore-hyperconverged-headless:8080",
 		},
 		{
-			name:           "Test 4: EXTERNAL_BASE_PORT unset, returns inner address unchanged",
+			name:           "Returns inner address when external base port is unset",
 			hostIP:         "10.0.0.5",
 			basePort:       "",
 			nodeID:         "sandstore-hyperconverged-1",
@@ -56,7 +55,7 @@ func TestExternalTopology(t *testing.T) {
 			expectedResult: "sandstore-hyperconverged-1.sandstore-hyperconverged-headless:8080",
 		},
 		{
-			name:           "Test 5: NODE_ID has no numeric suffix, ordinal defaults to 0",
+			name:           "Defaults ordinal to zero when node ID has no numeric suffix",
 			hostIP:         "10.0.0.5",
 			basePort:       "9080",
 			nodeID:         "sandstore",
@@ -64,7 +63,7 @@ func TestExternalTopology(t *testing.T) {
 			expectedResult: "10.0.0.5:9080",
 		},
 		{
-			name:           "Test 6: inner returns empty string (no leader), wrapper returns empty",
+			name:           "Returns empty when inner topology has no leader",
 			hostIP:         "10.0.0.5",
 			basePort:       "9080",
 			nodeID:         "sandstore-hyperconverged-1",
@@ -75,28 +74,13 @@ func TestExternalTopology(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Set environment variables with cleanup to avoid leaking between tests.
-			if tt.hostIP != "" {
-				t.Setenv("HOST_IP", tt.hostIP)
-			} else {
-				os.Unsetenv("HOST_IP")
-				t.Cleanup(func() { os.Unsetenv("HOST_IP") })
-			}
-			if tt.basePort != "" {
-				t.Setenv("EXTERNAL_BASE_PORT", tt.basePort)
-			} else {
-				os.Unsetenv("EXTERNAL_BASE_PORT")
-				t.Cleanup(func() { os.Unsetenv("EXTERNAL_BASE_PORT") })
-			}
-			if tt.nodeID != "" {
-				t.Setenv("NODE_ID", tt.nodeID)
-			} else {
-				os.Unsetenv("NODE_ID")
-				t.Cleanup(func() { os.Unsetenv("NODE_ID") })
-			}
-
 			inner := &fakeTopology{addr: tt.innerAddr}
-			wrapper := &externalTopology{inner: inner}
+			wrapper := &externalTopology{
+				inner:            inner,
+				advertiseHost:    tt.hostIP,
+				externalBasePort: tt.basePort,
+				nodeID:           tt.nodeID,
+			}
 
 			got := wrapper.GetLeaderAddress()
 			if got != tt.expectedResult {

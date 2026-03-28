@@ -16,6 +16,7 @@ import (
 const (
 	EtcdDialTimeout = 5 * time.Second
 	EtcdSyncTimeout = 10 * time.Second
+	etcdOperationTimeout = 10 * time.Second
 	LeaseTTL        = 5 // seconds
 	PrefixConfig    = "/sandstore/config/nodes/"
 	PrefixLease     = "/sandstore/leases/"
@@ -40,18 +41,21 @@ type EtcdClusterService struct {
 	// Callbacks
 	watchCallbacks []func()
 
-	stopCh chan struct{}
+	ctx    context.Context
+	cancel context.CancelFunc
 	wg     sync.WaitGroup
 }
 
 func NewEtcdClusterService(endpoints []string, ls log_service.LogService, metricsService metrics.MetricsService) *EtcdClusterService {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &EtcdClusterService{
 		endpoints:      endpoints,
 		ls:             ls,
 		metricsService: metricsService,
 		configCache:    make(map[string]cluster.ClusterNode),
 		livenessCache:  make(map[string]cluster.NodeLiveness),
-		stopCh:         make(chan struct{}),
+		ctx:            ctx,
+		cancel:         cancel,
 	}
 }
 
@@ -94,7 +98,7 @@ func (s *EtcdClusterService) Start(ctx context.Context) error {
 
 func (s *EtcdClusterService) Stop(ctx context.Context) error {
 	s.ls.Info(log_service.LogEvent{Message: "Stopping EtcdClusterService"})
-	close(s.stopCh)
+	s.cancel()
 
 	if s.leaseID != 0 {
 		_, err := s.client.Revoke(ctx, s.leaseID)
@@ -107,7 +111,7 @@ func (s *EtcdClusterService) Stop(ctx context.Context) error {
 	return s.client.Close()
 }
 
-func (s *EtcdClusterService) RegisterNode(node cluster.ClusterNode) error {
+func (s *EtcdClusterService) RegisterNode(ctx context.Context, node cluster.ClusterNode) error {
 	start := time.Now()
 	defer func() {
 		if s == nil || s.metricsService == nil {
@@ -129,7 +133,10 @@ func (s *EtcdClusterService) RegisterNode(node cluster.ClusterNode) error {
 
 	s.selfNode = node
 
-	resp, err := s.client.Grant(context.TODO(), LeaseTTL)
+	opCtx, cancel := context.WithTimeout(ctx, etcdOperationTimeout)
+	defer cancel()
+
+	resp, err := s.client.Grant(opCtx, LeaseTTL)
 	if err != nil {
 		return fmt.Errorf("failed to grant lease: %w", err)
 	}
@@ -141,10 +148,13 @@ func (s *EtcdClusterService) RegisterNode(node cluster.ClusterNode) error {
 		LeaseID:       int64(s.leaseID),
 		LastRenewedAt: time.Now(),
 	}
-	val, _ := json.Marshal(liveness)
+	val, err := json.Marshal(liveness)
+	if err != nil {
+		return fmt.Errorf("marshaling node liveness for etcd: %w", err)
+	}
 
 	key := PrefixLease + node.ID
-	_, err = s.client.Put(context.TODO(), key, string(val), clientv3.WithLease(s.leaseID))
+	_, err = s.client.Put(opCtx, key, string(val), clientv3.WithLease(s.leaseID))
 	if err != nil {
 		return fmt.Errorf("failed to put liveness key: %w", err)
 	}
@@ -163,7 +173,7 @@ func (s *EtcdClusterService) RegisterNode(node cluster.ClusterNode) error {
 func (s *EtcdClusterService) heartbeatLoop() {
 	defer s.wg.Done()
 
-	ch, err := s.client.KeepAlive(context.Background(), s.leaseID)
+	ch, err := s.client.KeepAlive(s.ctx, s.leaseID)
 	if err != nil {
 		s.ls.Error(log_service.LogEvent{Message: "Failed to start keepalive channel", Metadata: map[string]any{"error": err.Error()}})
 		return
@@ -171,7 +181,7 @@ func (s *EtcdClusterService) heartbeatLoop() {
 
 	for {
 		select {
-		case <-s.stopCh:
+		case <-s.ctx.Done():
 			return
 		case ka, ok := <-ch:
 			if !ok {
@@ -227,13 +237,16 @@ func (s *EtcdClusterService) syncState(ctx context.Context) error {
 func (s *EtcdClusterService) watchLoop() {
 	defer s.wg.Done()
 
-	watchCh := s.client.Watch(context.Background(), "/sandstore/", clientv3.WithPrefix())
+	watchCh := s.client.Watch(s.ctx, "/sandstore/", clientv3.WithPrefix())
 
 	for {
 		select {
-		case <-s.stopCh:
+		case <-s.ctx.Done():
 			return
-		case resp := <-watchCh:
+		case resp, ok := <-watchCh:
+			if !ok {
+				return
+			}
 			for _, ev := range resp.Events {
 				s.handleEvent(ev)
 			}

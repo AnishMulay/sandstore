@@ -19,8 +19,6 @@ type SortedPlacementStrategy struct {
 	metricsService metrics.MetricsService
 }
 
-var _ PlacementStrategy = (*SortedPlacementStrategy)(nil)
-
 func NewSortedPlacementStrategy(clusterService cluster_service.ClusterService, replicaCount int, metricsService metrics.MetricsService) *SortedPlacementStrategy {
 	if replicaCount <= 0 {
 		replicaCount = defaultReplicaCount

@@ -1,3 +1,6 @@
+// Package raft_replicator contains legacy Raft types shared by the
+// durable_raft implementation. It is retained for compatibility and should not
+// receive new feature work.
 package raft_replicator
 
 import (

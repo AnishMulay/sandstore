@@ -276,7 +276,10 @@ func (r *DurableRaftReplicator) startElectionLocked() {
 	r.currentTerm++
 	r.votedFor = r.id
 	r.electionResetEvent = time.Now()
-	r.mustPersistStableLocked()
+	if err := r.persistStableLocked(); err != nil {
+		r.handleStableStoreFailureLocked("starting election", err)
+		return
+	}
 
 	nodes, err := r.clusterService.GetAllNodes()
 	if err != nil {
@@ -332,7 +335,9 @@ func (r *DurableRaftReplicator) startElectionLocked() {
 				return
 			}
 			if reply.Term > int64(r.currentTerm) {
-				r.stepDownLocked(uint64(reply.Term), "")
+				if err := r.stepDownLocked(uint64(reply.Term), "", "received higher term in vote response"); err != nil {
+					return
+				}
 				return
 			}
 
@@ -561,7 +566,9 @@ func (r *DurableRaftReplicator) replicateAppendEntries(w appendWork) {
 		return
 	}
 	if reply.Term > int64(r.currentTerm) {
-		r.stepDownLocked(uint64(reply.Term), "")
+		if err := r.stepDownLocked(uint64(reply.Term), "", "received higher term in append entries response"); err != nil {
+			return
+		}
 		return
 	}
 
@@ -629,7 +636,9 @@ func (r *DurableRaftReplicator) replicateSnapshot(w snapshotWork) {
 		return
 	}
 	if reply.Term > int64(r.currentTerm) {
-		r.stepDownLocked(uint64(reply.Term), "")
+		if err := r.stepDownLocked(uint64(reply.Term), "", "received higher term in install snapshot response"); err != nil {
+			return
+		}
 		return
 	}
 	if reply.Success {
@@ -745,12 +754,18 @@ func (r *DurableRaftReplicator) HandleAppendEntries(ctx context.Context, req com
 	}
 
 	if req.Term > int64(r.currentTerm) {
-		r.stepDownLocked(uint64(req.Term), req.LeaderID)
+		if err := r.stepDownLocked(uint64(req.Term), req.LeaderID, "received higher term append entries"); err != nil {
+			return reply, err
+		}
 	}
 
+	wasFollower := r.state == raft_replicator.Follower
 	r.state = raft_replicator.Follower
 	r.leaderID = req.LeaderID
 	r.electionResetEvent = time.Now()
+	if !wasFollower {
+		r.logFollowerTransitionLocked("received append entries from leader")
+	}
 	reply.Term = int64(r.currentTerm)
 
 	if uint64(req.PrevLogIndex) < r.lastIncludedIndex {
@@ -862,7 +877,10 @@ func (r *DurableRaftReplicator) HandleRequestVote(ctx context.Context, req raft_
 		return reply, nil
 	}
 	if req.Term > int64(r.currentTerm) {
-		r.stepDownLocked(uint64(req.Term), "")
+		if err := r.stepDownLocked(uint64(req.Term), "", "received higher term vote request"); err != nil {
+			reply.Term = int64(r.currentTerm)
+			return reply, err
+		}
 	}
 
 	lastIdx, lastTerm := r.getLastLogInfoLocked()
@@ -870,7 +888,11 @@ func (r *DurableRaftReplicator) HandleRequestVote(ctx context.Context, req raft_
 
 	if (r.votedFor == "" || r.votedFor == req.CandidateID) && logIsUpToDate {
 		r.votedFor = req.CandidateID
-		r.mustPersistStableLocked()
+		if err := r.persistStableLocked(); err != nil {
+			r.handleStableStoreFailureLocked("persisting granted vote", err)
+			reply.Term = int64(r.currentTerm)
+			return reply, err
+		}
 		r.electionResetEvent = time.Now()
 		reply.VoteGranted = true
 	}
@@ -905,12 +927,18 @@ func (r *DurableRaftReplicator) HandleInstallSnapshot(ctx context.Context, req c
 		return reply, nil
 	}
 	if req.Term > int64(r.currentTerm) {
-		r.stepDownLocked(uint64(req.Term), req.LeaderID)
+		if err := r.stepDownLocked(uint64(req.Term), req.LeaderID, "received higher term install snapshot"); err != nil {
+			return reply, err
+		}
 	}
 
+	wasFollower := r.state == raft_replicator.Follower
 	r.state = raft_replicator.Follower
 	r.leaderID = req.LeaderID
 	r.electionResetEvent = time.Now()
+	if !wasFollower {
+		r.logFollowerTransitionLocked("received install snapshot from leader")
+	}
 	reply.Term = int64(r.currentTerm)
 
 	incomingIndex := uint64(req.LastIncludedIndex)
@@ -1054,7 +1082,7 @@ func (r *DurableRaftReplicator) getLastLogInfoLocked() (uint64, uint64) {
 	return idx, term
 }
 
-func (r *DurableRaftReplicator) stepDownLocked(newTerm uint64, leaderID string) {
+func (r *DurableRaftReplicator) stepDownLocked(newTerm uint64, leaderID string, reason string) error {
 	r.state = raft_replicator.Follower
 	r.currentTerm = newTerm
 	r.votedFor = ""
@@ -1063,13 +1091,22 @@ func (r *DurableRaftReplicator) stepDownLocked(newTerm uint64, leaderID string) 
 	}
 	r.failAllPendingLocked(fmt.Errorf("leadership changed during replication"))
 	r.electionResetEvent = time.Now()
-	r.mustPersistStableLocked()
+	if err := r.persistStableLocked(); err != nil {
+		return r.handleStableStoreFailureLocked(reason, err)
+	}
+	r.logFollowerTransitionLocked(reason)
+	return nil
 }
 
-func (r *DurableRaftReplicator) mustPersistStableLocked() {
+// persistStableLocked writes currentTerm and votedFor to the stable store.
+// Must be called with r.mu held.
+// If the write fails, the caller must step the node down to follower state
+// and reject any pending operations — this is a data safety violation.
+func (r *DurableRaftReplicator) persistStableLocked() error {
 	if err := r.stableStore.SetState(r.currentTerm, r.votedFor); err != nil {
-		panic(fmt.Sprintf("durable raft stable store write failed: %v", err))
+		return fmt.Errorf("stable store write failed (term=%d): %w", r.currentTerm, err)
 	}
+	return nil
 }
 
 func randomElectionTimeout() time.Duration {
@@ -1086,4 +1123,34 @@ func (r *DurableRaftReplicator) failAllPendingLocked(err error) {
 		close(ch)
 		delete(r.pendingClients, idx)
 	}
+}
+
+func (r *DurableRaftReplicator) handleStableStoreFailureLocked(reason string, err error) error {
+	r.ls.Error(log_service.LogEvent{
+		Message: "stable store persistence failed",
+		Metadata: map[string]any{
+			"nodeID": r.id,
+			"term":   r.currentTerm,
+			"reason": reason,
+			"error":  err.Error(),
+		},
+	})
+
+	r.state = raft_replicator.Follower
+	r.electionResetEvent = time.Now()
+	r.failAllPendingLocked(fmt.Errorf("stable store persistence failure: %w", err))
+	r.logFollowerTransitionLocked("stable store failure")
+	return err
+}
+
+func (r *DurableRaftReplicator) logFollowerTransitionLocked(reason string) {
+	r.ls.Info(log_service.LogEvent{
+		Message: "Became Follower",
+		Metadata: map[string]any{
+			"nodeID":   r.id,
+			"term":     r.currentTerm,
+			"reason":   reason,
+			"newState": "Follower",
+		},
+	})
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -66,7 +67,11 @@ func (r *HyperconvergedRouter) fetchTopologyFromSeeds(ctx context.Context) (stri
 		if err == nil && resp != nil && resp.Code == communication.CodeOK {
 			var topoMsg MsgTopologyResponse
 			if err := json.Unmarshal(resp.Body, &topoMsg); err == nil {
-				return string(topoMsg.TopologyData), r.seeds, nil
+				leaderAddr := strings.TrimSpace(string(topoMsg.TopologyData))
+				if leaderAddr == "" {
+					continue
+				}
+				return leaderAddr, r.seeds, nil
 			}
 		}
 	}
@@ -80,8 +85,9 @@ func (r *HyperconvergedRouter) Refresh(ctx context.Context) error {
 
 	r.mu.RLock()
 	isFresh := time.Since(r.lastUpdate) < 1*time.Second
+	hasLeaderRoute := r.leaderAddr != ""
 	r.mu.RUnlock()
-	if isFresh {
+	if isFresh && hasLeaderRoute {
 		return nil
 	}
 

@@ -280,8 +280,8 @@ func (r *RaftClusterService) sendRequestVote(nodeAddress string, term int64) boo
 	req := communication.RequestVoteRequest{
 		Term:         term,
 		CandidateID:  r.id,
-		LastLogIndex: 0, // TODO: Get from log service
-		LastLogTerm:  0, // TODO: Get from log service
+		LastLogIndex: 0, // TODO(#dx-phase7): get from log service.
+		LastLogTerm:  0, // TODO(#dx-phase7): get from log service.
 	}
 
 	msg := communication.Message{
@@ -510,11 +510,6 @@ func (r *RaftClusterService) sendAppendEntries(nodeAddress string, entriesData [
 	}
 
 	resp, err := r.comm.Send(context.Background(), nodeAddress, msg)
-
-	// r.ls.Info(log_service.LogEvent{
-	// 	Message:  "Response from append entries",
-	// 	Metadata: map[string]any{"nodeAddress": nodeAddress, "error": err, "response": resp},
-	// })
 
 	return err == nil && resp.Code == communication.CodeOK
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/domain"
+	durableraft "github.com/AnishMulay/sandstore/internal/metadata_replicator/durable_raft"
 	raft "github.com/AnishMulay/sandstore/internal/metadata_replicator/raft_replicator"
 	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
 	"github.com/AnishMulay/sandstore/internal/metrics"
@@ -23,9 +24,9 @@ var (
 
 type controlPlaneOrchestrator struct {
 	metadataService   pms.MetadataService
-	placementStrategy PlacementStrategy
-	txnCoordinator    TransactionCoordinator
-	consensusHandler  ConsensusMessageHandler
+	placementStrategy *SortedPlacementStrategy
+	txnCoordinator    *RaftTransactionCoordinator
+	consensusHandler  *durableraft.DurableRaftReplicator
 	metricsService    metrics.MetricsService
 	chunkSize         int64
 	replicaCount      int
@@ -35,9 +36,9 @@ var _ ControlPlaneOrchestrator = (*controlPlaneOrchestrator)(nil)
 
 func NewControlPlaneOrchestrator(
 	metadataService pms.MetadataService,
-	placementStrategy PlacementStrategy,
-	txnCoordinator TransactionCoordinator,
-	consensusHandler ConsensusMessageHandler,
+	placementStrategy *SortedPlacementStrategy,
+	txnCoordinator *RaftTransactionCoordinator,
+	consensusHandler *durableraft.DurableRaftReplicator,
 	metricsService metrics.MetricsService,
 	chunkSize int64,
 	replicaCount int,

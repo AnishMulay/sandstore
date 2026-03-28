@@ -57,7 +57,7 @@ type ClusterService interface {
 	Stop(ctx context.Context) error
 
 	// Registration (Node Side)
-	RegisterNode(node ClusterNode) error
+	RegisterNode(ctx context.Context, node ClusterNode) error
 
 	// GetHealthyNodes returns a list of nodes that are currently Alive.
 	GetHealthyNodes() ([]Node, error)

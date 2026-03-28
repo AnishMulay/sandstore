@@ -52,16 +52,16 @@ func NewLocalDiscChunkService(
 	baseDir string,
 	ls log_service.LogService,
 	metricsService metrics.MetricsService,
-) *LocalDiscChunkService {
+) (*LocalDiscChunkService, error) {
 	if err := os.MkdirAll(baseDir, os.ModePerm); err != nil {
-		panic(err)
+		return nil, fmt.Errorf("creating chunk storage directory %q: %w", baseDir, err)
 	}
 	return &LocalDiscChunkService{
 		baseDir:        baseDir,
 		ls:             ls,
 		metricsService: metricsService,
 		preparedIndex:  make(map[string]PreparedIndexEntry),
-	}
+	}, nil
 }
 
 func (cs *LocalDiscChunkService) Start() error {

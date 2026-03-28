@@ -8,33 +8,43 @@ import (
 
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/domain"
+	log_service "github.com/AnishMulay/sandstore/internal/log_service"
 	pmr "github.com/AnishMulay/sandstore/internal/metadata_replicator"
 	rr "github.com/AnishMulay/sandstore/internal/metadata_replicator/raft_replicator"
 	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
 	"github.com/AnishMulay/sandstore/internal/metrics"
 )
 
+const (
+	// commitNotificationTimeout is the maximum time to wait for a commit or
+	// abort notification to be delivered to a participant. This fan-out is
+	// best-effort after the primary transaction outcome has already been
+	// decided, so failures are logged but do not change the commit result.
+	commitNotificationTimeout = 2 * time.Second
+)
+
 type RaftTransactionCoordinator struct {
 	comm           communication.Communicator
 	replicator     pmr.MetadataReplicator
+	ls             log_service.LogService
 	metricsService metrics.MetricsService
 }
 
-var _ TransactionCoordinator = (*RaftTransactionCoordinator)(nil)
-
-func NewRaftTransactionCoordinator(comm communication.Communicator, replicator pmr.MetadataReplicator, metricsService metrics.MetricsService) *RaftTransactionCoordinator {
+func NewRaftTransactionCoordinator(comm communication.Communicator, replicator pmr.MetadataReplicator, ls log_service.LogService, metricsService metrics.MetricsService) *RaftTransactionCoordinator {
 	return &RaftTransactionCoordinator{
 		comm:           comm,
 		replicator:     replicator,
+		ls:             ls,
 		metricsService: metricsService,
 	}
 }
 
-func (c *RaftTransactionCoordinator) NewTransaction(txnID string) TxHandle {
+func (c *RaftTransactionCoordinator) NewTransaction(txnID string) *RaftTxHandle {
 	return &RaftTxHandle{
 		txnID:          txnID,
 		comm:           c.comm,
 		replicator:     c.replicator,
+		ls:             c.ls,
 		metricsService: c.metricsService,
 	}
 }
@@ -43,10 +53,9 @@ type RaftTxHandle struct {
 	txnID          string
 	comm           communication.Communicator
 	replicator     pmr.MetadataReplicator
+	ls             log_service.LogService
 	metricsService metrics.MetricsService
 }
-
-var _ TxHandle = (*RaftTxHandle)(nil)
 
 func (h *RaftTxHandle) Init(ctx context.Context, chunkID string, participants []domain.ChunkLocation) error {
 	start := time.Now()
@@ -138,8 +147,12 @@ func (h *RaftTxHandle) broadcastCommitAsync(txnID string, chunkID string, partic
 	}()
 
 	for _, participant := range participants {
+		// This goroutine sends a best-effort commit notification after the
+		// consensus commit has already succeeded. Its lifetime is bounded by
+		// commitNotificationTimeout. Delivery failures are logged but not
+		// retried or otherwise tracked in this coordinator.
 		go func(participant domain.ChunkLocation) {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), commitNotificationTimeout)
 			defer cancel()
 
 			msg := communication.Message{
@@ -150,7 +163,17 @@ func (h *RaftTxHandle) broadcastCommitAsync(txnID string, chunkID string, partic
 					ChunkID: chunkID,
 				},
 			}
-			_, _ = h.comm.Send(ctx, participant.PhysicalEndpoint, msg)
+			if _, err := h.comm.Send(ctx, participant.PhysicalEndpoint, msg); err != nil && h.ls != nil {
+				h.ls.Warn(log_service.LogEvent{
+					Message: "commit notification failed",
+					Metadata: map[string]any{
+						"participant": participant.PhysicalEndpoint,
+						"txnID":       txnID,
+						"chunkID":     chunkID,
+						"error":       err.Error(),
+					},
+				})
+			}
 		}(participant)
 	}
 }
@@ -169,8 +192,12 @@ func (h *RaftTxHandle) broadcastAbortAsync(txnID string, chunkID string, partici
 	}()
 
 	for _, participant := range participants {
+		// This goroutine sends a best-effort abort notification after the
+		// transaction outcome has already been decided. Its lifetime is bounded
+		// by commitNotificationTimeout. Delivery failures are logged but not
+		// retried or otherwise tracked in this coordinator.
 		go func(participant domain.ChunkLocation) {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), commitNotificationTimeout)
 			defer cancel()
 
 			msg := communication.Message{
@@ -181,7 +208,17 @@ func (h *RaftTxHandle) broadcastAbortAsync(txnID string, chunkID string, partici
 					ChunkID: chunkID,
 				},
 			}
-			_, _ = h.comm.Send(ctx, participant.PhysicalEndpoint, msg)
+			if _, err := h.comm.Send(ctx, participant.PhysicalEndpoint, msg); err != nil && h.ls != nil {
+				h.ls.Warn(log_service.LogEvent{
+					Message: "abort notification failed",
+					Metadata: map[string]any{
+						"participant": participant.PhysicalEndpoint,
+						"txnID":       txnID,
+						"chunkID":     chunkID,
+						"error":       err.Error(),
+					},
+				})
+			}
 		}(participant)
 	}
 }

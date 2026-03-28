@@ -22,10 +22,37 @@ import (
 	hyperconvergedserver "github.com/AnishMulay/sandstore/internal/server/hyperconverged"
 )
 
+const (
+	// defaultEtcdEndpoint is the local etcd endpoint used when ETCD_ENDPOINTS is unset.
+	defaultEtcdEndpoint = "127.0.0.1:2379"
+
+	// defaultMetricsListenAddr is the fixed Prometheus listener for the node process.
+	defaultMetricsListenAddr = ":2112"
+
+	// defaultRaftMaxBatchSize is the fallback batch size for Raft replication.
+	defaultRaftMaxBatchSize = 64
+
+	// defaultRaftMaxBatchWaitMilliseconds bounds how long Raft batching waits before flushing.
+	defaultRaftMaxBatchWaitMilliseconds = 10
+
+	// defaultRaftSnapshotThresholdLogs controls how many Raft log entries accumulate before snapshotting.
+	defaultRaftSnapshotThresholdLogs = 1000
+
+	// defaultChunkSizeBytes is the default maximum size of a single chunk.
+	// 8 MiB matches the internal write buffer size expected by the node topology.
+	defaultChunkSizeBytes = 8 * 1024 * 1024
+
+	// defaultReplicaCount is the number of replicas requested for each chunk.
+	defaultReplicaCount = 3
+
+	// defaultClusterRegistrationTimeout bounds how long node registration may block during startup.
+	defaultClusterRegistrationTimeout = 30 * time.Second
+)
+
 func parseEtcdEndpoints(raw string) []string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return []string{"127.0.0.1:2379"}
+		return []string{defaultEtcdEndpoint}
 	}
 
 	parts := strings.Split(raw, ",")
@@ -37,7 +64,7 @@ func parseEtcdEndpoints(raw string) []string {
 		}
 	}
 	if len(endpoints) == 0 {
-		return []string{"127.0.0.1:2379"}
+		return []string{defaultEtcdEndpoint}
 	}
 	return endpoints
 }
@@ -60,7 +87,10 @@ func envInt(name string, fallback int) int {
 // HOST_IP. When either host or port is absent the inner provider's address is
 // returned unchanged, preserving existing smoke-test behavior.
 type externalTopology struct {
-	inner interface{ GetLeaderAddress() string }
+	inner            interface{ GetLeaderAddress() string }
+	advertiseHost    string
+	externalBasePort string
+	nodeID           string
 }
 
 func (e *externalTopology) GetLeaderAddress() string {
@@ -68,108 +98,158 @@ func (e *externalTopology) GetLeaderAddress() string {
 	if addr == "" {
 		return addr
 	}
-	hostIP := strings.TrimSpace(os.Getenv("ADVERTISE_HOST"))
-	if hostIP == "" {
-		hostIP = strings.TrimSpace(os.Getenv("HOST_IP"))
-	}
-	basePortStr := strings.TrimSpace(os.Getenv("EXTERNAL_BASE_PORT"))
-	if hostIP == "" || basePortStr == "" {
+	if e.advertiseHost == "" || e.externalBasePort == "" {
 		return addr
 	}
-	basePort, err := strconv.Atoi(basePortStr)
+	basePort, err := strconv.Atoi(e.externalBasePort)
 	if err != nil || basePort <= 0 {
 		return addr
 	}
 	// Extract ordinal from NODE_ID suffix, e.g. "sandstore-hyperconverged-2" → 2.
 	// If the suffix is not a valid integer, ordinal defaults to 0.
 	ordinal := 0
-	nodeID := strings.TrimSpace(os.Getenv("NODE_ID"))
-	if idx := strings.LastIndex(nodeID, "-"); idx >= 0 {
-		if n, err2 := strconv.Atoi(nodeID[idx+1:]); err2 == nil && n >= 0 {
+	if idx := strings.LastIndex(e.nodeID, "-"); idx >= 0 {
+		if n, err2 := strconv.Atoi(e.nodeID[idx+1:]); err2 == nil && n >= 0 {
 			ordinal = n
 		}
 	}
-	return fmt.Sprintf("%s:%d", hostIP, basePort+ordinal)
+	return fmt.Sprintf("%s:%d", e.advertiseHost, basePort+ordinal)
 }
 
-func Build(opts Options) runnable {
-	etcdEndpoints := parseEtcdEndpoints(os.Getenv("ETCD_ENDPOINTS"))
+// hyperconvergedConfig holds all runtime configuration for the hyperconverged
+// topology, parsed from startup options and environment variables.
+type hyperconvergedConfig struct {
+	NodeID                     string
+	ListenAddr                 string
+	DataDir                    string
+	LogDir                     string
+	ChunkDir                   string
+	EtcdEndpoints              []string
+	MetricsListenAddr          string
+	AdvertiseHost              string
+	ExternalBasePort           string
+	RaftConfig                 durableraft.RaftConfig
+	ChunkSizeBytes             int64
+	ReplicaCount               int
+	ClusterRegistrationTimeout time.Duration
+}
+
+// buildConfig reads and validates the environment-backed configuration for the
+// hyperconverged topology.
+func buildConfig(opts Options) (hyperconvergedConfig, error) {
+	cfg := hyperconvergedConfig{
+		NodeID:            opts.NodeID,
+		ListenAddr:        opts.ListenAddr,
+		DataDir:           opts.DataDir,
+		LogDir:            opts.DataDir + "/logs",
+		ChunkDir:          opts.DataDir + "/chunks/" + opts.NodeID,
+		EtcdEndpoints:     parseEtcdEndpoints(os.Getenv("ETCD_ENDPOINTS")),
+		MetricsListenAddr: defaultMetricsListenAddr,
+		RaftConfig: durableraft.RaftConfig{
+			MaxBatchSize:          envInt("RAFT_MAX_BATCH_SIZE", defaultRaftMaxBatchSize),
+			MaxBatchWaitTime:      time.Duration(envInt("RAFT_MAX_BATCH_WAIT_MS", defaultRaftMaxBatchWaitMilliseconds)) * time.Millisecond,
+			SnapshotThresholdLogs: uint64(envInt("RAFT_SNAPSHOT_THRESHOLD_LOGS", defaultRaftSnapshotThresholdLogs)),
+		},
+		ChunkSizeBytes:             defaultChunkSizeBytes,
+		ReplicaCount:               defaultReplicaCount,
+		ClusterRegistrationTimeout: defaultClusterRegistrationTimeout,
+	}
+
+	cfg.AdvertiseHost = strings.TrimSpace(os.Getenv("ADVERTISE_HOST"))
+	if cfg.AdvertiseHost == "" {
+		cfg.AdvertiseHost = strings.TrimSpace(os.Getenv("HOST_IP"))
+	}
+	cfg.ExternalBasePort = strings.TrimSpace(os.Getenv("EXTERNAL_BASE_PORT"))
+
+	if cfg.NodeID == "" {
+		return hyperconvergedConfig{}, fmt.Errorf("node ID is required")
+	}
+	if cfg.ListenAddr == "" {
+		return hyperconvergedConfig{}, fmt.Errorf("listen address is required")
+	}
+	if cfg.DataDir == "" {
+		return hyperconvergedConfig{}, fmt.Errorf("data directory is required")
+	}
+
+	return cfg, nil
+}
+
+func Build(opts Options) (runnable, error) {
+	cfg, err := buildConfig(opts)
+	if err != nil {
+		return nil, fmt.Errorf("building hyperconverged config: %w", err)
+	}
 
 	// 1. Logging
-	logDir := opts.DataDir + "/logs"
-	ls := locallog.NewLocalDiscLogService(logDir, opts.NodeID, logservice.InfoLevel)
+	ls := locallog.NewLocalDiscLogService(cfg.LogDir, cfg.NodeID, logservice.InfoLevel)
 
 	// 2. Metrics
-	metricsService := metrics.NewPrometheusMetricsService(":2112", opts.NodeID)
+	metricsService := metrics.NewPrometheusMetricsService(cfg.MetricsListenAddr, cfg.NodeID)
 	go metricsService.Start()
 
 	// 2. Communication
-	comm := grpccomm.NewGRPCCommunicator(opts.ListenAddr, ls, metricsService)
+	comm := grpccomm.NewGRPCCommunicator(cfg.ListenAddr, ls, metricsService)
 
 	// 3. Cluster Service (The Phonebook)
-	clusterService := clustercetcd.NewEtcdClusterService(etcdEndpoints, ls, metricsService)
+	clusterService := clustercetcd.NewEtcdClusterService(cfg.EtcdEndpoints, ls, metricsService)
 	if err := clusterService.Start(context.Background()); err != nil {
-		panic(err)
+		return nil, fmt.Errorf("starting cluster service: %w", err)
 	}
-	if err := clusterService.RegisterNode(cluster_service.ClusterNode{
-		ID:      opts.NodeID,
-		Address: opts.ListenAddr,
+	regCtx, regCancel := context.WithTimeout(context.Background(), cfg.ClusterRegistrationTimeout)
+	defer regCancel()
+	if err := clusterService.RegisterNode(regCtx, cluster_service.ClusterNode{
+		ID:      cfg.NodeID,
+		Address: cfg.ListenAddr,
 	}); err != nil {
-		panic(err)
+		return nil, fmt.Errorf("registering node %q: %w", cfg.NodeID, err)
 	}
 
-	ms, err := metadataservice.NewBoltMetadataService(opts.DataDir+"/state.db", metricsService)
+	ms, err := metadataservice.NewBoltMetadataService(cfg.DataDir+"/state.db", metricsService)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("creating metadata service: %w", err)
 	}
 
 	// 4. Replicators (The Consensus/Network Layer)
-	raftConfig := durableraft.RaftConfig{
-		MaxBatchSize:          envInt("RAFT_MAX_BATCH_SIZE", 64),
-		MaxBatchWaitTime:      time.Duration(envInt("RAFT_MAX_BATCH_WAIT_MS", 10)) * time.Millisecond,
-		SnapshotThresholdLogs: uint64(envInt("RAFT_SNAPSHOT_THRESHOLD_LOGS", 1000)),
-	}
-	logStore, err := durableraft.NewFileLogStore(opts.DataDir+"/raft_wal.json", metricsService)
+	logStore, err := durableraft.NewFileLogStore(cfg.DataDir+"/raft_wal.json", metricsService)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("creating raft log store: %w", err)
 	}
-	stableStore, err := durableraft.NewFileStableStore(opts.DataDir+"/raft_stable.json", metricsService)
+	stableStore, err := durableraft.NewFileStableStore(cfg.DataDir+"/raft_stable.json", metricsService)
 	if err != nil {
-		panic(err)
+		return nil, fmt.Errorf("creating raft stable store: %w", err)
 	}
-	snapshotStore := durableraft.NewFileSnapshotStore(opts.DataDir+"/raft_snapshot.bin", metricsService)
+	snapshotStore := durableraft.NewFileSnapshotStore(cfg.DataDir+"/raft_snapshot.bin", metricsService)
 
-	metaRepl := durableraft.NewDurableRaftReplicator(opts.NodeID, clusterService, comm, ls, raftConfig, logStore, stableStore, snapshotStore, metricsService, ms)
+	metaRepl := durableraft.NewDurableRaftReplicator(cfg.NodeID, clusterService, comm, ls, cfg.RaftConfig, logStore, stableStore, snapshotStore, metricsService, ms)
 
 	ms.SetReplicator(metaRepl)
-	chunkDir := opts.DataDir + "/chunks/" + opts.NodeID
 
 	// cs now implements the 2PC interface (Prepare, Commit, Abort)
-	cs := chunkservice.NewLocalDiscChunkService(chunkDir, ls, metricsService)
+	cs, err := chunkservice.NewLocalDiscChunkService(cfg.ChunkDir, ls, metricsService)
+	if err != nil {
+		return nil, fmt.Errorf("creating chunk service: %w", err)
+	}
 
-	chunkSize := int64(8 * 1024 * 1024) // 8MB default
-	replicaCount := 3
-
-	placementStrategy := orchestrators.NewSortedPlacementStrategy(clusterService, replicaCount, metricsService)
+	placementStrategy := orchestrators.NewSortedPlacementStrategy(clusterService, cfg.ReplicaCount, metricsService)
 	endpointResolver := orchestrators.NewStaticEndpointResolver(clusterService)
-	dpo := orchestrators.NewRaftDataPlaneOrchestrator(comm, endpointResolver, chunkSize, cs, metricsService)
-	txnCoordinator := orchestrators.NewRaftTransactionCoordinator(comm, metaRepl, metricsService)
-	cpo := orchestrators.NewControlPlaneOrchestrator(ms, placementStrategy, txnCoordinator, metaRepl, metricsService, chunkSize, replicaCount)
+	dpo := orchestrators.NewRaftDataPlaneOrchestrator(comm, endpointResolver, cfg.ChunkSizeBytes, cs, metricsService)
+	txnCoordinator := orchestrators.NewRaftTransactionCoordinator(comm, metaRepl, ls, metricsService)
+	cpo := orchestrators.NewControlPlaneOrchestrator(ms, placementStrategy, txnCoordinator, metaRepl, metricsService, cfg.ChunkSizeBytes, cfg.ReplicaCount)
 
 	// 6. Server (The Gateway)
 	var topology hyperconvergedserver.TopologyProvider = metaRepl
-	hostIP := strings.TrimSpace(os.Getenv("ADVERTISE_HOST"))
-	if hostIP == "" {
-		hostIP = strings.TrimSpace(os.Getenv("HOST_IP"))
-	}
-	extBasePort := strings.TrimSpace(os.Getenv("EXTERNAL_BASE_PORT"))
-	if hostIP != "" && extBasePort != "" {
-		topology = &externalTopology{inner: metaRepl}
+	if cfg.AdvertiseHost != "" && cfg.ExternalBasePort != "" {
+		topology = &externalTopology{
+			inner:            metaRepl,
+			advertiseHost:    cfg.AdvertiseHost,
+			externalBasePort: cfg.ExternalBasePort,
+			nodeID:           cfg.NodeID,
+		}
 	}
 	srv := hyperconvergedserver.NewHyperconvergedServer(comm, cpo, dpo, ls, topology, metricsService)
 
 	return &singleNodeServer{
 		server:         srv,
 		clusterService: clusterService,
-	}
+	}, nil
 }

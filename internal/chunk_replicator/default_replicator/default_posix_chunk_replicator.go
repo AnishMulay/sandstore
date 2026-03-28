@@ -48,7 +48,7 @@ func (r *DefaultChunkReplicator) ReplicateChunk(chunkID string, data []byte, fac
 		}
 	}
 
-	//TODO: Handle insufficient nodes more gracefully
+	// TODO(#dx-phase7): handle insufficient nodes more gracefully.
 	if len(candidateNodes) < factor {
 		r.ls.Warn(log_service.LogEvent{
 			Message:  "Insufficient nodes for requested replication factor",

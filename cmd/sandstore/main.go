@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -50,7 +51,11 @@ func main() {
 		DataDir:    *dataDir,
 		SeedPeers:  seedPeers,
 	}
-	server := node.Build(opts)
+	server, err := node.Build(opts)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to build topology: %v\n", err)
+		os.Exit(1)
+	}
 	if err := server.Run(); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}

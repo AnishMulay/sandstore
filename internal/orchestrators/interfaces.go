@@ -5,38 +5,9 @@ import (
 
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/domain"
-	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
 	raft "github.com/AnishMulay/sandstore/internal/metadata_replicator/raft_replicator"
+	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
 )
-
-// PlacementStrategy determines "WHO" holds the data (Topology Rules).
-type PlacementStrategy interface {
-	SelectTargets(ctx context.Context, chunkID string, replicaCount int) ([]domain.ChunkLocation, error)
-}
-
-// EndpointResolver determines "WHERE" a logical node currently resides (Transport Layer).
-type EndpointResolver interface {
-	ResolveEndpoint(ctx context.Context, logicalAlias string) (string, error)
-}
-
-// TransactionCoordinator acts as a factory for isolated 2PC state machines.
-type TransactionCoordinator interface {
-	NewTransaction(txnID string) TxHandle
-}
-
-// TxHandle isolates the state of a single request.
-type TxHandle interface {
-	Init(ctx context.Context, chunkID string, participants []domain.ChunkLocation) error
-	Commit(ctx context.Context, chunkID string, metaUpdate *pms.MetadataOperation, participants []domain.ChunkLocation) error
-	Abort(ctx context.Context, chunkID string, participants []domain.ChunkLocation) error
-}
-
-// ConsensusMessageHandler defines the peer-to-peer RPCs required by the consensus layer.
-type ConsensusMessageHandler interface {
-	HandleRequestVote(ctx context.Context, req raft.RequestVoteArgs) (*raft.RequestVoteReply, error)
-	HandleAppendEntries(ctx context.Context, req communication.AppendEntriesRequest) (*raft.AppendEntriesReply, error)
-	HandleInstallSnapshot(ctx context.Context, req communication.InstallSnapshotRequest) (*raft.InstallSnapshotReply, error)
-}
 
 // ControlPlaneOrchestrator manages the namespace, permissions, and 2PC intents.
 type ControlPlaneOrchestrator interface {
