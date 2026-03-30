@@ -10,6 +10,7 @@ import (
 	cluster "github.com/AnishMulay/sandstore/internal/cluster_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/log_service"
+	"github.com/AnishMulay/sandstore/internal/orchestrators/protocol"
 	"golang.org/x/exp/rand"
 )
 
@@ -258,7 +259,7 @@ func (r *RaftClusterService) sendRequestVote(nodeAddress string, term int64) boo
 		Metadata: map[string]any{"nodeAddress": nodeAddress, "term": term},
 	})
 
-	req := communication.RequestVoteRequest{
+	req := protocol.RequestVoteRequest{
 		Term:         term,
 		CandidateID:  r.id,
 		LastLogIndex: 0, // TODO(#dx-phase7): get from log service.
@@ -267,7 +268,7 @@ func (r *RaftClusterService) sendRequestVote(nodeAddress string, term int64) boo
 
 	msg := communication.Message{
 		From:    r.comm.Address(),
-		Type:    communication.MessageTypeRequestVote,
+		Type:    protocol.MessageTypeRequestVote,
 		Payload: req,
 	}
 
@@ -321,7 +322,7 @@ func (r *RaftClusterService) becomeLeader() {
 	r.startHeartbeats()
 }
 
-func (r *RaftClusterService) HandleRequestVote(req communication.RequestVoteRequest) (bool, error) {
+func (r *RaftClusterService) HandleRequestVote(req protocol.RequestVoteRequest) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -344,7 +345,7 @@ func (r *RaftClusterService) HandleRequestVote(req communication.RequestVoteRequ
 	return false, nil
 }
 
-func (r *RaftClusterService) HandleAppendEntries(req communication.AppendEntriesRequest) (bool, error) {
+func (r *RaftClusterService) HandleAppendEntries(req protocol.AppendEntriesRequest) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -454,7 +455,7 @@ func (r *RaftClusterService) sendHeartbeats(term int64) {
 }
 
 func (r *RaftClusterService) sendAppendEntries(nodeAddress string, entriesData []byte) bool {
-	req := communication.AppendEntriesRequest{
+	req := protocol.AppendEntriesRequest{
 		Term:         r.currentTerm,
 		LeaderID:     r.id,
 		PrevLogIndex: 0,
@@ -465,7 +466,7 @@ func (r *RaftClusterService) sendAppendEntries(nodeAddress string, entriesData [
 
 	msg := communication.Message{
 		From:    r.comm.Address(),
-		Type:    communication.MessageTypeAppendEntries,
+		Type:    protocol.MessageTypeAppendEntries,
 		Payload: req,
 	}
 

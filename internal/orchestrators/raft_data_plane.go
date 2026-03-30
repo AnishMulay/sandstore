@@ -10,8 +10,8 @@ import (
 
 	pcs "github.com/AnishMulay/sandstore/internal/chunk_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
-	"github.com/AnishMulay/sandstore/internal/domain"
 	"github.com/AnishMulay/sandstore/internal/metrics"
+	"github.com/AnishMulay/sandstore/topology/contract"
 )
 
 type RaftDataPlaneOrchestrator struct {
@@ -22,7 +22,7 @@ type RaftDataPlaneOrchestrator struct {
 	metricsService   metrics.MetricsService
 }
 
-var _ DataPlaneOrchestrator = (*RaftDataPlaneOrchestrator)(nil)
+var _ contract.DataPlaneOrchestrator = (*RaftDataPlaneOrchestrator)(nil)
 
 func NewRaftDataPlaneOrchestrator(comm communication.Communicator, endpointResolver *StaticEndpointResolver, chunkSize int64, cs pcs.ChunkService, metricsService metrics.MetricsService) *RaftDataPlaneOrchestrator {
 	return &RaftDataPlaneOrchestrator{
@@ -120,7 +120,7 @@ func (d *RaftDataPlaneOrchestrator) ExecuteWrite(
 	chunkID string,
 	offset int64,
 	data []byte,
-	targets []domain.ChunkLocation,
+	targets []contract.ChunkLocation,
 	isNewChunk bool,
 ) error {
 	start := time.Now()
@@ -147,7 +147,7 @@ func (d *RaftDataPlaneOrchestrator) ExecuteWrite(
 
 	for _, target := range targets {
 		wg.Add(1)
-		go func(target domain.ChunkLocation) {
+		go func(target contract.ChunkLocation) {
 			defer wg.Done()
 
 			msg := communication.Message{
@@ -198,7 +198,7 @@ func (d *RaftDataPlaneOrchestrator) ExecuteWrite(
 func (d *RaftDataPlaneOrchestrator) ExecuteRead(
 	ctx context.Context,
 	chunkID string,
-	targets []domain.ChunkLocation,
+	targets []contract.ChunkLocation,
 ) ([]byte, error) {
 	start := time.Now()
 	defer func() {
@@ -224,7 +224,7 @@ func (d *RaftDataPlaneOrchestrator) ExecuteRead(
 
 func (d *RaftDataPlaneOrchestrator) sendReadRPC(
 	ctx context.Context,
-	target domain.ChunkLocation,
+	target contract.ChunkLocation,
 	chunkID string,
 ) ([]byte, error) {
 	msg := communication.Message{
@@ -260,7 +260,7 @@ func (d *RaftDataPlaneOrchestrator) prepareWritePayload(
 	chunkID string,
 	offset int64,
 	data []byte,
-	targets []domain.ChunkLocation,
+	targets []contract.ChunkLocation,
 	isNewChunk bool,
 ) ([]byte, error) {
 	writeOffset := offset % d.chunkSize
@@ -295,7 +295,7 @@ func (d *RaftDataPlaneOrchestrator) prepareWritePayload(
 	return out, nil
 }
 
-func (d *RaftDataPlaneOrchestrator) resolveEndpoint(ctx context.Context, target domain.ChunkLocation) (string, error) {
+func (d *RaftDataPlaneOrchestrator) resolveEndpoint(ctx context.Context, target contract.ChunkLocation) (string, error) {
 	if d.endpointResolver == nil {
 		return target.PhysicalEndpoint, nil
 	}

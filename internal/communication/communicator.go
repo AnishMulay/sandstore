@@ -3,8 +3,6 @@ package communication
 
 import (
 	"context"
-
-	"github.com/AnishMulay/sandstore/internal/metadata_service"
 )
 
 type Message struct {
@@ -14,16 +12,11 @@ type Message struct {
 }
 
 const (
-	MessageTypeStoreFile       = "store_file"
-	MessageTypeReadFile        = "read_file"
-	MessageTypeDeleteFile      = "delete_file"
-	MessageTypeStoreChunk      = "store_chunk"
-	MessageTypeStoreMetadata   = "store_metadata"
-	MessageTypeDeleteMetadata  = "delete_metadata"
-	MessageTypeStopServer      = "stop_server"
-	MessageTypeRequestVote     = "request_vote"
-	MessageTypeAppendEntries   = "append_entries"
-	MessageTypeInstallSnapshot = "install_snapshot"
+	MessageTypeStoreFile  = "store_file"
+	MessageTypeReadFile   = "read_file"
+	MessageTypeDeleteFile = "delete_file"
+	MessageTypeStoreChunk = "store_chunk"
+	MessageTypeStopServer = "stop_server"
 	// Chunk Replication Messages
 	MessageTypeReadChunk    = "chunk_read"
 	MessageTypeDeleteChunk  = "chunk_delete"
@@ -75,39 +68,7 @@ type StoreChunkRequest struct {
 	Data    []byte
 }
 
-type StoreMetadataRequest struct {
-	Metadata metadata_service.MetadataOperation
-}
-
-type DeleteMetadataRequest struct {
-	Path string
-}
-
 type StopServerRequest struct {
-}
-
-type RequestVoteRequest struct {
-	Term         int64
-	CandidateID  string
-	LastLogIndex int64
-	LastLogTerm  int64
-}
-
-type AppendEntriesRequest struct {
-	Term         int64
-	LeaderID     string
-	PrevLogIndex int64
-	PrevLogTerm  int64
-	Entries      []byte // Serialized metadata log entries
-	LeaderCommit int64  // Leader's commit index
-}
-
-type InstallSnapshotRequest struct {
-	Term              int64
-	LeaderID          string
-	LastIncludedIndex int64
-	LastIncludedTerm  int64
-	Data              []byte
 }
 
 type SandCode string

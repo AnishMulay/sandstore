@@ -1,6 +1,6 @@
 package metadata_service
 
-import "github.com/AnishMulay/sandstore/internal/domain"
+import "github.com/AnishMulay/sandstore/topology/contract"
 
 // OpType identifies the intent of a replicated log entry.
 type OpType int
@@ -40,8 +40,8 @@ type MetadataOperation struct {
 	SetMTime *int64  `json:"setMtime,omitempty"`
 
 	// --- For UpdateInode (Write Support) ---
-	NewSize      *int64                   `json:"newSize,omitempty"`
-	NewChunkList []domain.ChunkDescriptor `json:"newChunkList,omitempty"`
+	NewSize      *int64                     `json:"newSize,omitempty"`
+	NewChunkList []contract.ChunkDescriptor `json:"newChunkList,omitempty"`
 
 	// --- Common ---
 	OpID      string `json:"opId"`

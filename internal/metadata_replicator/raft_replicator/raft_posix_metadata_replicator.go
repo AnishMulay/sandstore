@@ -13,6 +13,7 @@ import (
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/log_service"
 	pmr "github.com/AnishMulay/sandstore/internal/metadata_replicator"
+	"github.com/AnishMulay/sandstore/internal/orchestrators/protocol"
 )
 
 type RaftMetadataReplicator struct {
@@ -351,7 +352,7 @@ func (r *RaftMetadataReplicator) broadcastAppendEntries() {
 
 	for _, work := range workList {
 		go func(w peerState) {
-			// Serialize entries to match communication.AppendEntriesRequest
+			// Serialize entries to match protocol.AppendEntriesRequest
 			entriesBytes, err := json.Marshal(w.entries)
 			if err != nil {
 				r.ls.Error(log_service.LogEvent{
@@ -361,7 +362,7 @@ func (r *RaftMetadataReplicator) broadcastAppendEntries() {
 				return
 			}
 
-			args := communication.AppendEntriesRequest{
+			args := protocol.AppendEntriesRequest{
 				Term:         savedTerm,
 				LeaderID:     leaderID,
 				PrevLogIndex: w.prevLogIndex,
@@ -477,7 +478,7 @@ func (r *RaftMetadataReplicator) HandleRequestVote(args RequestVoteArgs) (*Reque
 	return reply, nil
 }
 
-func (r *RaftMetadataReplicator) HandleAppendEntries(req communication.AppendEntriesRequest) (*AppendEntriesReply, error) {
+func (r *RaftMetadataReplicator) HandleAppendEntries(req protocol.AppendEntriesRequest) (*AppendEntriesReply, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 

@@ -15,12 +15,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/AnishMulay/sandstore/internal/domain"
 	pmr "github.com/AnishMulay/sandstore/internal/metadata_replicator"
 	rr "github.com/AnishMulay/sandstore/internal/metadata_replicator/raft_replicator"
 	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
 	inmemoryms "github.com/AnishMulay/sandstore/internal/metadata_service/inmemory"
 	"github.com/AnishMulay/sandstore/internal/metrics"
+	"github.com/AnishMulay/sandstore/topology/contract"
 	"github.com/google/uuid"
 	"go.etcd.io/bbolt"
 )
@@ -1217,7 +1217,7 @@ func (s *BoltMetadataService) SetAttributes(ctx context.Context, inodeID string,
 	return s.GetAttributes(ctx, inodeID)
 }
 
-func (s *BoltMetadataService) UpdateInode(ctx context.Context, inodeID string, newSize int64, newChunkList []domain.ChunkDescriptor, mtime int64) error {
+func (s *BoltMetadataService) UpdateInode(ctx context.Context, inodeID string, newSize int64, newChunkList []contract.ChunkDescriptor, mtime int64) error {
 	if _, err := s.GetInode(ctx, inodeID); err != nil {
 		return err
 	}
@@ -1626,26 +1626,26 @@ func loadStoredInode(inodes *bbolt.Bucket, inodeKey []byte, inodeID string) (*pm
 	return &inode, nil
 }
 
-func loadChunkList(chunkMap *bbolt.Bucket, inodeKey []byte) ([]domain.ChunkDescriptor, error) {
+func loadChunkList(chunkMap *bbolt.Bucket, inodeKey []byte) ([]contract.ChunkDescriptor, error) {
 	if chunkMap == nil {
 		return nil, fmt.Errorf("bolt metadata schema is not initialized")
 	}
 
 	cursor := chunkMap.Cursor()
-	chunkList := make([]domain.ChunkDescriptor, 0)
+	chunkList := make([]contract.ChunkDescriptor, 0)
 	for key, value := cursor.Seek(inodeKey); key != nil && bytes.HasPrefix(key, inodeKey); key, value = cursor.Next() {
 		if len(key) != len(inodeKey)+8 {
 			return nil, fmt.Errorf("invalid chunk map key length: got %d", len(key))
 		}
 
 		index := binary.BigEndian.Uint64(key[len(inodeKey):])
-		var chunkDescriptor domain.ChunkDescriptor
+		var chunkDescriptor contract.ChunkDescriptor
 		if err := decodeGob(value, &chunkDescriptor); err != nil {
 			return nil, fmt.Errorf("decode chunk descriptor at index %d: %w", index, err)
 		}
 
 		for uint64(len(chunkList)) <= index {
-			chunkList = append(chunkList, domain.ChunkDescriptor{})
+			chunkList = append(chunkList, contract.ChunkDescriptor{})
 		}
 		chunkList[index] = chunkDescriptor
 	}
@@ -1653,7 +1653,7 @@ func loadChunkList(chunkMap *bbolt.Bucket, inodeKey []byte) ([]domain.ChunkDescr
 	return chunkList, nil
 }
 
-func replaceChunkList(chunkMap *bbolt.Bucket, inodeKey []byte, chunkList []domain.ChunkDescriptor) error {
+func replaceChunkList(chunkMap *bbolt.Bucket, inodeKey []byte, chunkList []contract.ChunkDescriptor) error {
 	if err := deleteChunkList(chunkMap, inodeKey); err != nil {
 		return err
 	}
