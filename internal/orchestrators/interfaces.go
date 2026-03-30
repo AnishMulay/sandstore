@@ -49,5 +49,4 @@ type DataPlaneOrchestrator interface {
 	HandleAbortChunk(ctx context.Context, txnID string, chunkID string) error
 	HandleReadChunk(ctx context.Context, chunkID string) ([]byte, error)
 	HandleDeleteChunk(ctx context.Context, chunkID string) error
-	HandleLegacyChunkWrite(ctx context.Context, chunkID string, data []byte) error
 }

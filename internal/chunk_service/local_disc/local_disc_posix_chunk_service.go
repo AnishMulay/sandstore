@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/AnishMulay/sandstore/internal/chunk_replicator"
 	"github.com/AnishMulay/sandstore/internal/log_service"
 	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
 	"github.com/AnishMulay/sandstore/internal/metrics"
@@ -39,7 +38,6 @@ type LocalDiscChunkService struct {
 	baseDir           string
 	ls                log_service.LogService
 	replicationFactor int
-	replicator        chunk_replicator.ChunkReplicator
 	ms                pms.MetadataService
 	metricsService    metrics.MetricsService
 

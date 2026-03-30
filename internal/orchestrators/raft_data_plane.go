@@ -114,28 +114,6 @@ func (d *RaftDataPlaneOrchestrator) HandleDeleteChunk(ctx context.Context, chunk
 	return d.cs.DeleteChunkLocal(ctx, chunkID)
 }
 
-func (d *RaftDataPlaneOrchestrator) HandleLegacyChunkWrite(ctx context.Context, chunkID string, data []byte) error {
-	start := time.Now()
-	defer func() {
-		if d == nil || d.metricsService == nil {
-			return
-		}
-		elapsed := time.Since(start).Seconds()
-		d.metricsService.Observe(metrics.RaftDataPlaneHandleLegacyChunkWriteLatency, elapsed, metrics.MetricTags{
-			Operation: "handle_legacy_chunk_write",
-			Service:   "RaftDataPlaneOrchestrator",
-		})
-	}()
-
-	txnID := "legacy-" + chunkID + "-" + time.Now().Format("20060102150405.000000000")
-	checksum := d.calculateChecksum(data)
-	err := d.cs.PrepareChunk(ctx, txnID, chunkID, data, checksum)
-	if err == nil {
-		err = d.cs.CommitChunk(ctx, txnID, chunkID)
-	}
-	return err
-}
-
 func (d *RaftDataPlaneOrchestrator) ExecuteWrite(
 	ctx context.Context,
 	txnID string,

@@ -99,11 +99,9 @@ func (s *HyperconvergedServer) registerPayloads() {
 	s.comm.RegisterPayloadType(ps.MsgRaftInstallSnapshot, reflect.TypeOf(communication.InstallSnapshotRequest{}))
 
 	// Chunk Replication Payloads
-	s.comm.RegisterPayloadType(ps.MsgChunkWrite, reflect.TypeOf(communication.WriteChunkRequest{}))
 	s.comm.RegisterPayloadType(ps.MsgChunkRead, reflect.TypeOf(communication.ReadChunkRequest{}))
 	s.comm.RegisterPayloadType(ps.MsgChunkDelete, reflect.TypeOf(communication.DeleteChunkRequest{}))
-	// Also register the communication constants used by the chunk replicator
-	s.comm.RegisterPayloadType(communication.MessageTypeWriteChunk, reflect.TypeOf(communication.WriteChunkRequest{}))
+	// Also register the communication constants used by chunk handling.
 	s.comm.RegisterPayloadType(communication.MessageTypeReadChunk, reflect.TypeOf(communication.ReadChunkRequest{}))
 	s.comm.RegisterPayloadType(communication.MessageTypeDeleteChunk, reflect.TypeOf(communication.DeleteChunkRequest{}))
 	s.comm.RegisterPayloadType(communication.MessageTypePrepareChunk, reflect.TypeOf(communication.PrepareChunkRequest{}))
@@ -188,9 +186,6 @@ func (s *HyperconvergedServer) handleMessage(ctx context.Context, msg communicat
 	case communication.MessageTypeAbortChunk:
 		operation = "handle_abort_chunk"
 		return s.handleAbortChunk(ctx, msg)
-	case ps.MsgChunkWrite:
-		operation = "handle_chunk_write"
-		return s.handleChunkWrite(ctx, msg)
 	case ps.MsgChunkRead:
 		operation = "handle_chunk_read"
 		return s.handleChunkRead(ctx, msg)
@@ -380,12 +375,6 @@ func (s *HyperconvergedServer) handleCommitChunk(ctx context.Context, msg commun
 func (s *HyperconvergedServer) handleAbortChunk(ctx context.Context, msg communication.Message) (*communication.Response, error) {
 	req := msg.Payload.(communication.AbortChunkRequest)
 	err := s.dpo.HandleAbortChunk(ctx, req.TxnID, req.ChunkID)
-	return s.respond(nil, err)
-}
-
-func (s *HyperconvergedServer) handleChunkWrite(ctx context.Context, msg communication.Message) (*communication.Response, error) {
-	req := msg.Payload.(communication.WriteChunkRequest)
-	err := s.dpo.HandleLegacyChunkWrite(ctx, req.ChunkID, req.Data)
 	return s.respond(nil, err)
 }
 

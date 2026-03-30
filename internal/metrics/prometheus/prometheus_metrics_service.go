@@ -148,7 +148,6 @@ func NewPrometheusMetricsService(port string, nodeName string) *PrometheusMetric
 		metrics.RaftDataPlaneHandleAbortChunkLatency:              raftDataPlaneLatencyHistogram,
 		metrics.RaftDataPlaneHandleReadChunkLatency:               raftDataPlaneLatencyHistogram,
 		metrics.RaftDataPlaneHandleDeleteChunkLatency:             raftDataPlaneLatencyHistogram,
-		metrics.RaftDataPlaneHandleLegacyChunkWriteLatency:        raftDataPlaneLatencyHistogram,
 		metrics.ChunkServicePrepareChunkLatency:                   chunkServiceLatencyHistogram,
 		metrics.ChunkServiceCommitChunkLatency:                    chunkServiceLatencyHistogram,
 		metrics.ChunkServiceAbortChunkLatency:                     chunkServiceLatencyHistogram,

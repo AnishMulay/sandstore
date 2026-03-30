@@ -25,18 +25,12 @@ const (
 	MessageTypeAppendEntries   = "append_entries"
 	MessageTypeInstallSnapshot = "install_snapshot"
 	// Chunk Replication Messages
-	MessageTypeWriteChunk   = "chunk_write" // Replaces "store_chunk"
 	MessageTypeReadChunk    = "chunk_read"
 	MessageTypeDeleteChunk  = "chunk_delete"
 	MessageTypePrepareChunk = "chunk_prepare"
 	MessageTypeCommitChunk  = "chunk_commit"
 	MessageTypeAbortChunk   = "chunk_abort"
 )
-
-type WriteChunkRequest struct {
-	ChunkID string
-	Data    []byte
-}
 
 type ReadChunkRequest struct {
 	ChunkID string
