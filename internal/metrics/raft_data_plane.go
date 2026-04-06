@@ -8,5 +8,4 @@ const (
 	RaftDataPlaneHandleAbortChunkLatency       ObservationName = "raft_data_plane_handle_abort_chunk"
 	RaftDataPlaneHandleReadChunkLatency        ObservationName = "raft_data_plane_handle_read_chunk"
 	RaftDataPlaneHandleDeleteChunkLatency      ObservationName = "raft_data_plane_handle_delete_chunk"
-	RaftDataPlaneHandleLegacyChunkWriteLatency ObservationName = "raft_data_plane_handle_legacy_chunk_write"
 )

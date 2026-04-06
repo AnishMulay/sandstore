@@ -14,6 +14,7 @@ import (
 	"github.com/AnishMulay/sandstore/internal/communication"
 	internalerrors "github.com/AnishMulay/sandstore/internal/communication/internal"
 	"github.com/AnishMulay/sandstore/internal/log_service"
+	"github.com/AnishMulay/sandstore/internal/orchestrators/protocol"
 )
 
 type HTTPCommunicator struct {
@@ -41,12 +42,12 @@ func NewHTTPCommunicator(listenAddress string, ls log_service.LogService) *HTTPC
 	c.payloadTypes[communication.MessageTypeStoreChunk] = reflect.TypeOf((*communication.StoreChunkRequest)(nil)).Elem()
 	c.payloadTypes[communication.MessageTypeReadChunk] = reflect.TypeOf((*communication.ReadChunkRequest)(nil)).Elem()
 	c.payloadTypes[communication.MessageTypeDeleteChunk] = reflect.TypeOf((*communication.DeleteChunkRequest)(nil)).Elem()
-	c.payloadTypes[communication.MessageTypeStoreMetadata] = reflect.TypeOf((*communication.StoreMetadataRequest)(nil)).Elem()
-	c.payloadTypes[communication.MessageTypeDeleteMetadata] = reflect.TypeOf((*communication.DeleteMetadataRequest)(nil)).Elem()
+	c.payloadTypes[protocol.MessageTypeStoreMetadata] = reflect.TypeOf((*protocol.StoreMetadataRequest)(nil)).Elem()
+	c.payloadTypes[protocol.MessageTypeDeleteMetadata] = reflect.TypeOf((*protocol.DeleteMetadataRequest)(nil)).Elem()
 	c.payloadTypes[communication.MessageTypeStopServer] = reflect.TypeOf((*communication.StopServerRequest)(nil)).Elem()
-	c.payloadTypes[communication.MessageTypeRequestVote] = reflect.TypeOf((*communication.RequestVoteRequest)(nil)).Elem()
-	c.payloadTypes[communication.MessageTypeAppendEntries] = reflect.TypeOf((*communication.AppendEntriesRequest)(nil)).Elem()
-	c.payloadTypes[communication.MessageTypeInstallSnapshot] = reflect.TypeOf((*communication.InstallSnapshotRequest)(nil)).Elem()
+	c.payloadTypes[protocol.MessageTypeRequestVote] = reflect.TypeOf((*protocol.RequestVoteRequest)(nil)).Elem()
+	c.payloadTypes[protocol.MessageTypeAppendEntries] = reflect.TypeOf((*protocol.AppendEntriesRequest)(nil)).Elem()
+	c.payloadTypes[protocol.MessageTypeInstallSnapshot] = reflect.TypeOf((*protocol.InstallSnapshotRequest)(nil)).Elem()
 
 	return c
 }

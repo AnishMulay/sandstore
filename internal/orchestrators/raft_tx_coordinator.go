@@ -7,12 +7,12 @@ import (
 	"time"
 
 	"github.com/AnishMulay/sandstore/internal/communication"
-	"github.com/AnishMulay/sandstore/internal/domain"
 	log_service "github.com/AnishMulay/sandstore/internal/log_service"
 	pmr "github.com/AnishMulay/sandstore/internal/metadata_replicator"
 	rr "github.com/AnishMulay/sandstore/internal/metadata_replicator/raft_replicator"
 	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
 	"github.com/AnishMulay/sandstore/internal/metrics"
+	"github.com/AnishMulay/sandstore/topology/contract"
 )
 
 const (
@@ -57,7 +57,7 @@ type RaftTxHandle struct {
 	metricsService metrics.MetricsService
 }
 
-func (h *RaftTxHandle) Init(ctx context.Context, chunkID string, participants []domain.ChunkLocation) error {
+func (h *RaftTxHandle) Init(ctx context.Context, chunkID string, participants []contract.ChunkLocation) error {
 	start := time.Now()
 	defer func() {
 		if h == nil || h.metricsService == nil {
@@ -76,7 +76,7 @@ func (h *RaftTxHandle) Init(ctx context.Context, chunkID string, participants []
 	return nil
 }
 
-func (h *RaftTxHandle) Commit(ctx context.Context, chunkID string, metaUpdate *pms.MetadataOperation, participants []domain.ChunkLocation) error {
+func (h *RaftTxHandle) Commit(ctx context.Context, chunkID string, metaUpdate *pms.MetadataOperation, participants []contract.ChunkLocation) error {
 	start := time.Now()
 	defer func() {
 		if h == nil || h.metricsService == nil {
@@ -114,7 +114,7 @@ func (h *RaftTxHandle) Commit(ctx context.Context, chunkID string, metaUpdate *p
 	return nil
 }
 
-func (h *RaftTxHandle) Abort(ctx context.Context, chunkID string, participants []domain.ChunkLocation) error {
+func (h *RaftTxHandle) Abort(ctx context.Context, chunkID string, participants []contract.ChunkLocation) error {
 	start := time.Now()
 	defer func() {
 		if h == nil || h.metricsService == nil {
@@ -133,7 +133,7 @@ func (h *RaftTxHandle) Abort(ctx context.Context, chunkID string, participants [
 	return nil
 }
 
-func (h *RaftTxHandle) broadcastCommitAsync(txnID string, chunkID string, participants []domain.ChunkLocation) {
+func (h *RaftTxHandle) broadcastCommitAsync(txnID string, chunkID string, participants []contract.ChunkLocation) {
 	start := time.Now()
 	defer func() {
 		if h == nil || h.metricsService == nil {
@@ -151,7 +151,7 @@ func (h *RaftTxHandle) broadcastCommitAsync(txnID string, chunkID string, partic
 		// consensus commit has already succeeded. Its lifetime is bounded by
 		// commitNotificationTimeout. Delivery failures are logged but not
 		// retried or otherwise tracked in this coordinator.
-		go func(participant domain.ChunkLocation) {
+		go func(participant contract.ChunkLocation) {
 			ctx, cancel := context.WithTimeout(context.Background(), commitNotificationTimeout)
 			defer cancel()
 
@@ -178,7 +178,7 @@ func (h *RaftTxHandle) broadcastCommitAsync(txnID string, chunkID string, partic
 	}
 }
 
-func (h *RaftTxHandle) broadcastAbortAsync(txnID string, chunkID string, participants []domain.ChunkLocation) {
+func (h *RaftTxHandle) broadcastAbortAsync(txnID string, chunkID string, participants []contract.ChunkLocation) {
 	start := time.Now()
 	defer func() {
 		if h == nil || h.metricsService == nil {
@@ -196,7 +196,7 @@ func (h *RaftTxHandle) broadcastAbortAsync(txnID string, chunkID string, partici
 		// transaction outcome has already been decided. Its lifetime is bounded
 		// by commitNotificationTimeout. Delivery failures are logged but not
 		// retried or otherwise tracked in this coordinator.
-		go func(participant domain.ChunkLocation) {
+		go func(participant contract.ChunkLocation) {
 			ctx, cancel := context.WithTimeout(context.Background(), commitNotificationTimeout)
 			defer cancel()
 
@@ -223,7 +223,7 @@ func (h *RaftTxHandle) broadcastAbortAsync(txnID string, chunkID string, partici
 	}
 }
 
-func extractParticipantIDs(participants []domain.ChunkLocation) []string {
+func extractParticipantIDs(participants []contract.ChunkLocation) []string {
 	nodeIDs := make([]string, 0, len(participants))
 	for _, participant := range participants {
 		nodeIDs = append(nodeIDs, participant.LogicalNodeAlias)

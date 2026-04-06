@@ -27,7 +27,6 @@ const (
 	MsgRaftInstallSnapshot = "raft_install_snapshot"
 
 	// Chunk Operations (for the Replicator)
-	MsgChunkWrite  = "chunk_write"
 	MsgChunkRead   = "chunk_read"
 	MsgChunkDelete = "chunk_delete"
 )

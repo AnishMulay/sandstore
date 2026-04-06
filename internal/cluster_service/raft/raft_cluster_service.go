@@ -4,13 +4,13 @@ import (
 	"context"
 	"errors"
 	"net"
-	"reflect"
 	"sync"
 	"time"
 
 	cluster "github.com/AnishMulay/sandstore/internal/cluster_service"
 	"github.com/AnishMulay/sandstore/internal/communication"
 	"github.com/AnishMulay/sandstore/internal/log_service"
+	"github.com/AnishMulay/sandstore/internal/orchestrators/protocol"
 	"golang.org/x/exp/rand"
 )
 
@@ -27,13 +27,6 @@ var (
 	ErrNoHealthyNodes = errors.New("no healthy nodes available")
 )
 
-// MetadataLogInterface defines the interface for accessing metadata log
-type MetadataLogInterface interface {
-	GetLastLogIndex() int64
-	GetLastLogTerm() int64
-	GetEntryAtIndex(index int64) interface{} // Returns entry with Index and Term fields
-}
-
 type RaftState int
 
 const (
@@ -41,10 +34,6 @@ const (
 	Follower
 	Candidate
 )
-
-type LogEntryProcessor interface {
-	ProcessReceivedEntries(entriesData []byte, prevLogIndex, prevLogTerm, leaderCommit int64) bool
-}
 
 type RaftClusterService struct {
 	nodes         []cluster.Node
@@ -65,9 +54,6 @@ type RaftClusterService struct {
 	nextIndex   map[string]int64 // next log index to send to each peer
 	matchIndex  map[string]int64 // highest log index replicated on each peer
 	commitIndex int64            // highest log entry known to be committed
-
-	// Log processing
-	logProcessor LogEntryProcessor
 
 	peerAddresses map[string]string
 }
@@ -95,10 +81,6 @@ func NewRaftClusterService(id string, nodes []cluster.Node, comm communication.C
 		commitIndex:   0,
 		peerAddresses: peerAddresses,
 	}
-}
-
-func (r *RaftClusterService) SetLogProcessor(processor LogEntryProcessor) {
-	r.logProcessor = processor
 }
 
 func (r *RaftClusterService) Start() {
@@ -277,7 +259,7 @@ func (r *RaftClusterService) sendRequestVote(nodeAddress string, term int64) boo
 		Metadata: map[string]any{"nodeAddress": nodeAddress, "term": term},
 	})
 
-	req := communication.RequestVoteRequest{
+	req := protocol.RequestVoteRequest{
 		Term:         term,
 		CandidateID:  r.id,
 		LastLogIndex: 0, // TODO(#dx-phase7): get from log service.
@@ -286,7 +268,7 @@ func (r *RaftClusterService) sendRequestVote(nodeAddress string, term int64) boo
 
 	msg := communication.Message{
 		From:    r.comm.Address(),
-		Type:    communication.MessageTypeRequestVote,
+		Type:    protocol.MessageTypeRequestVote,
 		Payload: req,
 	}
 
@@ -340,7 +322,7 @@ func (r *RaftClusterService) becomeLeader() {
 	r.startHeartbeats()
 }
 
-func (r *RaftClusterService) HandleRequestVote(req communication.RequestVoteRequest) (bool, error) {
+func (r *RaftClusterService) HandleRequestVote(req protocol.RequestVoteRequest) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -363,7 +345,7 @@ func (r *RaftClusterService) HandleRequestVote(req communication.RequestVoteRequ
 	return false, nil
 }
 
-func (r *RaftClusterService) HandleAppendEntries(req communication.AppendEntriesRequest) (bool, error) {
+func (r *RaftClusterService) HandleAppendEntries(req protocol.AppendEntriesRequest) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -411,17 +393,13 @@ func (r *RaftClusterService) HandleAppendEntries(req communication.AppendEntries
 			Metadata: map[string]any{"leaderID": req.LeaderID, "term": req.Term, "leaderCommit": req.LeaderCommit},
 		})
 
-		// Apply committed entries if leader's commit index is higher
-		if r.logProcessor != nil && req.LeaderCommit > r.commitIndex {
-			r.commitIndex = req.LeaderCommit
-			r.logProcessor.ProcessReceivedEntries([]byte{}, 0, 0, req.LeaderCommit)
-		}
-
 		return true, nil
 	}
 
-	// Process log entries
-	return r.processLogEntries(req)
+	r.ls.Warn(log_service.LogEvent{
+		Message: "No log processor set, cannot process entries",
+	})
+	return false, nil
 }
 
 func (r *RaftClusterService) startHeartbeats() {
@@ -471,67 +449,30 @@ func (r *RaftClusterService) sendHeartbeats(term int64) {
 		}
 
 		go func(n cluster.Node) {
-			r.sendAppendEntries(n.Address, []byte{}, nil) // Empty for heartbeat, no log needed
+			r.sendAppendEntries(n.Address, []byte{}) // Empty for heartbeat
 		}(node)
 	}
 }
 
-func (r *RaftClusterService) sendAppendEntries(nodeAddress string, entriesData []byte, metadataLog MetadataLogInterface) bool {
-	var prevLogIndex, prevLogTerm int64
-
-	if metadataLog != nil {
-		peerNextIndex := r.nextIndex[nodeAddress]
-		if peerNextIndex == 0 {
-			// For the first entry, nextIndex should be 1
-			peerNextIndex = 1
-		}
-		prevLogIndex = peerNextIndex - 1
-
-		if prevLogIndex > 0 {
-			if prevEntryInterface := metadataLog.GetEntryAtIndex(prevLogIndex); prevEntryInterface != nil {
-				prevLogTerm = getTermFromEntry(prevEntryInterface)
-			}
-		}
-	}
-
-	req := communication.AppendEntriesRequest{
+func (r *RaftClusterService) sendAppendEntries(nodeAddress string, entriesData []byte) bool {
+	req := protocol.AppendEntriesRequest{
 		Term:         r.currentTerm,
 		LeaderID:     r.id,
-		PrevLogIndex: prevLogIndex,
-		PrevLogTerm:  prevLogTerm,
+		PrevLogIndex: 0,
+		PrevLogTerm:  0,
 		Entries:      entriesData,
 		LeaderCommit: r.commitIndex,
 	}
 
 	msg := communication.Message{
 		From:    r.comm.Address(),
-		Type:    communication.MessageTypeAppendEntries,
+		Type:    protocol.MessageTypeAppendEntries,
 		Payload: req,
 	}
 
 	resp, err := r.comm.Send(context.Background(), nodeAddress, msg)
 
 	return err == nil && resp.Code == communication.CodeOK
-}
-
-// getTermFromEntry extracts Term field from any log entry using reflection
-func getTermFromEntry(entry interface{}) int64 {
-	if entry == nil {
-		return 0
-	}
-	v := reflect.ValueOf(entry)
-	if v.Kind() == reflect.Ptr {
-		v = v.Elem()
-	}
-	if v.Kind() == reflect.Struct {
-		termField := v.FieldByName("Term")
-		if termField.IsValid() && termField.CanInterface() {
-			if term, ok := termField.Interface().(int64); ok {
-				return term
-			}
-		}
-	}
-	return 0
 }
 
 func (r *RaftClusterService) IsLeader() bool {
@@ -615,38 +556,6 @@ func (r *RaftClusterService) GetCurrentTerm() int64 {
 	return r.currentTerm
 }
 
-func (r *RaftClusterService) processLogEntries(req communication.AppendEntriesRequest) (bool, error) {
-	r.ls.Info(log_service.LogEvent{
-		Message: "Processing log entries",
-		Metadata: map[string]any{
-			"prevLogIndex": req.PrevLogIndex,
-			"prevLogTerm":  req.PrevLogTerm,
-			"entriesSize":  len(req.Entries),
-			"leaderCommit": req.LeaderCommit,
-		},
-	})
-
-	if r.logProcessor == nil {
-		r.ls.Warn(log_service.LogEvent{
-			Message: "No log processor set, cannot process entries",
-		})
-		return false, nil
-	}
-
-	success := r.logProcessor.ProcessReceivedEntries(req.Entries, req.PrevLogIndex, req.PrevLogTerm, req.LeaderCommit)
-	if success {
-		r.ls.Info(log_service.LogEvent{
-			Message: "Log entries processed successfully",
-		})
-	} else {
-		r.ls.Warn(log_service.LogEvent{
-			Message: "Failed to process log entries",
-		})
-	}
-
-	return success, nil
-}
-
 func (r *RaftClusterService) UpdatePeerAddress(nodeID, rawAddress string) {
 	if nodeID == "" || rawAddress == "" {
 		return
@@ -674,7 +583,7 @@ func (r *RaftClusterService) UpdatePeerAddress(nodeID, rawAddress string) {
 	}
 }
 
-func (r *RaftClusterService) ReplicateEntries(entriesData []byte, logIndex int64, metadataLog MetadataLogInterface, callback func(int64, bool)) {
+func (r *RaftClusterService) ReplicateEntries(entriesData []byte, logIndex int64, callback func(int64, bool)) {
 	r.ls.Info(log_service.LogEvent{
 		Message: "Starting entry replication",
 		Metadata: map[string]any{
@@ -738,7 +647,7 @@ func (r *RaftClusterService) ReplicateEntries(entriesData []byte, logIndex int64
 				},
 			})
 
-			if r.sendAppendEntries(n.Address, entriesData, metadataLog) {
+			if r.sendAppendEntries(n.Address, entriesData) {
 				mu.Lock()
 				r.matchIndex[n.ID] = logIndex
 				r.nextIndex[n.ID] = logIndex + 1

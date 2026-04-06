@@ -234,7 +234,8 @@ func Build(opts Options) (runnable, error) {
 	endpointResolver := orchestrators.NewStaticEndpointResolver(clusterService)
 	dpo := orchestrators.NewRaftDataPlaneOrchestrator(comm, endpointResolver, cfg.ChunkSizeBytes, cs, metricsService)
 	txnCoordinator := orchestrators.NewRaftTransactionCoordinator(comm, metaRepl, ls, metricsService)
-	cpo := orchestrators.NewControlPlaneOrchestrator(ms, placementStrategy, txnCoordinator, metaRepl, metricsService, cfg.ChunkSizeBytes, cfg.ReplicaCount)
+	cpo := orchestrators.NewControlPlaneOrchestrator(ms, placementStrategy, txnCoordinator, metricsService, cfg.ChunkSizeBytes, cfg.ReplicaCount)
+	consensusHandler := orchestrators.NewConsensusHandler(metaRepl, metricsService)
 
 	// 6. Server (The Gateway)
 	var topology hyperconvergedserver.TopologyProvider = metaRepl
@@ -246,7 +247,7 @@ func Build(opts Options) (runnable, error) {
 			nodeID:           cfg.NodeID,
 		}
 	}
-	srv := hyperconvergedserver.NewHyperconvergedServer(comm, cpo, dpo, ls, topology, metricsService)
+	srv := hyperconvergedserver.NewHyperconvergedServer(comm, cpo, consensusHandler, dpo, ls, topology, metricsService)
 
 	return &singleNodeServer{
 		server:         srv,

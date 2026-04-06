@@ -5,12 +5,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/AnishMulay/sandstore/internal/communication"
-	"github.com/AnishMulay/sandstore/internal/domain"
-	durableraft "github.com/AnishMulay/sandstore/internal/metadata_replicator/durable_raft"
-	raft "github.com/AnishMulay/sandstore/internal/metadata_replicator/raft_replicator"
 	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
 	"github.com/AnishMulay/sandstore/internal/metrics"
+	"github.com/AnishMulay/sandstore/topology/contract"
 	"github.com/google/uuid"
 )
 
@@ -26,19 +23,17 @@ type controlPlaneOrchestrator struct {
 	metadataService   pms.MetadataService
 	placementStrategy *SortedPlacementStrategy
 	txnCoordinator    *RaftTransactionCoordinator
-	consensusHandler  *durableraft.DurableRaftReplicator
 	metricsService    metrics.MetricsService
 	chunkSize         int64
 	replicaCount      int
 }
 
-var _ ControlPlaneOrchestrator = (*controlPlaneOrchestrator)(nil)
+var _ contract.ControlPlaneOrchestrator = (*controlPlaneOrchestrator)(nil)
 
 func NewControlPlaneOrchestrator(
 	metadataService pms.MetadataService,
 	placementStrategy *SortedPlacementStrategy,
 	txnCoordinator *RaftTransactionCoordinator,
-	consensusHandler *durableraft.DurableRaftReplicator,
 	metricsService metrics.MetricsService,
 	chunkSize int64,
 	replicaCount int,
@@ -54,7 +49,6 @@ func NewControlPlaneOrchestrator(
 		metadataService:   metadataService,
 		placementStrategy: placementStrategy,
 		txnCoordinator:    txnCoordinator,
-		consensusHandler:  consensusHandler,
 		metricsService:    metricsService,
 		chunkSize:         chunkSize,
 		replicaCount:      replicaCount,
@@ -81,7 +75,7 @@ func (c *controlPlaneOrchestrator) Stop() error {
 	return c.metadataService.Stop()
 }
 
-func (c *controlPlaneOrchestrator) PrepareFileWrite(ctx context.Context, inodeID string, offset int64, length int64) (*domain.WriteContext, error) {
+func (c *controlPlaneOrchestrator) PrepareFileWrite(ctx context.Context, inodeID string, offset int64, length int64) (*contract.WriteContext, error) {
 	start := time.Now()
 	defer func() {
 		if c == nil || c.metricsService == nil {
@@ -113,7 +107,7 @@ func (c *controlPlaneOrchestrator) PrepareFileWrite(ctx context.Context, inodeID
 	isNewChunk := int(chunkIdx) >= len(inode.ChunkList)
 
 	var chunkID string
-	var targets []domain.ChunkLocation
+	var targets []contract.ChunkLocation
 
 	if isNewChunk {
 		chunkID = uuid.NewString()
@@ -132,7 +126,7 @@ func (c *controlPlaneOrchestrator) PrepareFileWrite(ctx context.Context, inodeID
 		return nil, err
 	}
 
-	return &domain.WriteContext{
+	return &contract.WriteContext{
 		TxnID:       txnID,
 		ChunkID:     chunkID,
 		TargetNodes: targets,
@@ -147,7 +141,7 @@ func (c *controlPlaneOrchestrator) CommitFileWrite(
 	chunkID string,
 	newEOF int64,
 	isNewChunk bool,
-	targets []domain.ChunkLocation,
+	targets []contract.ChunkLocation,
 ) error {
 	start := time.Now()
 	defer func() {
@@ -168,11 +162,11 @@ func (c *controlPlaneOrchestrator) CommitFileWrite(
 		return err
 	}
 
-	newChunkList := make([]domain.ChunkDescriptor, len(inode.ChunkList))
+	newChunkList := make([]contract.ChunkDescriptor, len(inode.ChunkList))
 	copy(newChunkList, inode.ChunkList)
 
 	if isNewChunk {
-		newChunkList = append(newChunkList, domain.ChunkDescriptor{
+		newChunkList = append(newChunkList, contract.ChunkDescriptor{
 			ChunkID:   chunkID,
 			Locations: targets,
 		})
@@ -197,7 +191,7 @@ func (c *controlPlaneOrchestrator) CommitFileWrite(
 	return handle.Commit(ctx, chunkID, metaUpdate, targets)
 }
 
-func (c *controlPlaneOrchestrator) AbortFileWrite(ctx context.Context, txnID string, chunkID string, targets []domain.ChunkLocation) error {
+func (c *controlPlaneOrchestrator) AbortFileWrite(ctx context.Context, txnID string, chunkID string, targets []contract.ChunkLocation) error {
 	start := time.Now()
 	defer func() {
 		if c == nil || c.metricsService == nil {
@@ -214,7 +208,7 @@ func (c *controlPlaneOrchestrator) AbortFileWrite(ctx context.Context, txnID str
 	return handle.Abort(ctx, chunkID, targets)
 }
 
-func (c *controlPlaneOrchestrator) PrepareFileRead(ctx context.Context, inodeID string, offset int64) (*domain.ReadContext, error) {
+func (c *controlPlaneOrchestrator) PrepareFileRead(ctx context.Context, inodeID string, offset int64) (*contract.ReadContext, error) {
 	start := time.Now()
 	defer func() {
 		if c == nil || c.metricsService == nil {
@@ -232,17 +226,17 @@ func (c *controlPlaneOrchestrator) PrepareFileRead(ctx context.Context, inodeID 
 		return nil, err
 	}
 	if offset >= inode.FileSize {
-		return &domain.ReadContext{}, nil
+		return &contract.ReadContext{}, nil
 	}
 
 	chunkIdx := offset / c.chunkSize
 	if int(chunkIdx) >= len(inode.ChunkList) {
-		return &domain.ReadContext{}, nil
+		return &contract.ReadContext{}, nil
 	}
 
 	targetChunk := inode.ChunkList[chunkIdx]
 
-	return &domain.ReadContext{
+	return &contract.ReadContext{
 		ChunkID:     targetChunk.ChunkID,
 		TargetNodes: targetChunk.Locations,
 	}, nil
@@ -470,66 +464,6 @@ func (c *controlPlaneOrchestrator) GetFsInfo(ctx context.Context) (*pms.FileSyst
 	}()
 
 	return c.metadataService.GetFsInfo(ctx)
-}
-
-func (c *controlPlaneOrchestrator) HandleConsensusRequestVote(ctx context.Context, req raft.RequestVoteArgs) (*raft.RequestVoteReply, error) {
-	start := time.Now()
-	defer func() {
-		if c == nil || c.metricsService == nil {
-			return
-		}
-		elapsed := time.Since(start).Seconds()
-		c.metricsService.Observe(metrics.ControlPlaneHandleConsensusRequestVoteLatency, elapsed, metrics.MetricTags{
-			Operation: "handle_consensus_request_vote",
-			Service:   "controlPlaneOrchestrator",
-		})
-	}()
-
-	if c.consensusHandler == nil {
-		return nil, errors.New("consensus handler not configured")
-	}
-
-	return c.consensusHandler.HandleRequestVote(ctx, req)
-}
-
-func (c *controlPlaneOrchestrator) HandleConsensusAppendEntries(ctx context.Context, req communication.AppendEntriesRequest) (*raft.AppendEntriesReply, error) {
-	start := time.Now()
-	defer func() {
-		if c == nil || c.metricsService == nil {
-			return
-		}
-		elapsed := time.Since(start).Seconds()
-		c.metricsService.Observe(metrics.ControlPlaneHandleConsensusAppendEntriesLatency, elapsed, metrics.MetricTags{
-			Operation: "handle_consensus_append_entries",
-			Service:   "controlPlaneOrchestrator",
-		})
-	}()
-
-	if c.consensusHandler == nil {
-		return nil, errors.New("consensus handler not configured")
-	}
-
-	return c.consensusHandler.HandleAppendEntries(ctx, req)
-}
-
-func (c *controlPlaneOrchestrator) HandleConsensusInstallSnapshot(ctx context.Context, req communication.InstallSnapshotRequest) (*raft.InstallSnapshotReply, error) {
-	start := time.Now()
-	defer func() {
-		if c == nil || c.metricsService == nil {
-			return
-		}
-		elapsed := time.Since(start).Seconds()
-		c.metricsService.Observe(metrics.ControlPlaneHandleConsensusInstallSnapshotLatency, elapsed, metrics.MetricTags{
-			Operation: "handle_consensus_install_snapshot",
-			Service:   "controlPlaneOrchestrator",
-		})
-	}()
-
-	if c.consensusHandler == nil {
-		return nil, errors.New("consensus handler not configured")
-	}
-
-	return c.consensusHandler.HandleInstallSnapshot(ctx, req)
 }
 
 func (c *controlPlaneOrchestrator) isWithinChunkBoundary(offset int64, length int64) bool {

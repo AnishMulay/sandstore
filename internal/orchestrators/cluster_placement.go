@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/AnishMulay/sandstore/internal/cluster_service"
-	"github.com/AnishMulay/sandstore/internal/domain"
 	"github.com/AnishMulay/sandstore/internal/metrics"
+	"github.com/AnishMulay/sandstore/topology/contract"
 )
 
 const defaultReplicaCount = 3
@@ -31,7 +31,7 @@ func NewSortedPlacementStrategy(clusterService cluster_service.ClusterService, r
 	}
 }
 
-func (s *SortedPlacementStrategy) SelectTargets(ctx context.Context, chunkID string, replicaCount int) ([]domain.ChunkLocation, error) {
+func (s *SortedPlacementStrategy) SelectTargets(ctx context.Context, chunkID string, replicaCount int) ([]contract.ChunkLocation, error) {
 	start := time.Now()
 	defer func() {
 		if s == nil || s.metricsService == nil {
@@ -76,9 +76,9 @@ func (s *SortedPlacementStrategy) SelectTargets(ctx context.Context, chunkID str
 
 	sort.Slice(filtered, func(i, j int) bool { return filtered[i].ID < filtered[j].ID })
 
-	targets := make([]domain.ChunkLocation, replicaCount)
+	targets := make([]contract.ChunkLocation, replicaCount)
 	for i, node := range filtered[:replicaCount] {
-		targets[i] = domain.ChunkLocation{
+		targets[i] = contract.ChunkLocation{
 			LogicalNodeAlias: node.ID,
 			PhysicalEndpoint: node.Address,
 		}

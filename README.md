@@ -19,6 +19,8 @@
 
 [sandstore-eta.vercel.app](https://sandstore-eta.vercel.app/)
 
+[Watch the demo](https://youtu.be/7gjHoSjpo3Q)
+
 </div>
 
 Sandstore lets you assemble a distributed storage system from well-defined, swappable components. Choose your metadata engine, consensus mechanism, chunk storage, cluster membership, and transport, then deploy and test the result against a real multi-node cluster in minutes.

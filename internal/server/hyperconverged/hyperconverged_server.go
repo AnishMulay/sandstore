@@ -15,38 +15,48 @@ import (
 	raft "github.com/AnishMulay/sandstore/internal/metadata_replicator/raft_replicator"
 	inmemoryms "github.com/AnishMulay/sandstore/internal/metadata_service/inmemory"
 	"github.com/AnishMulay/sandstore/internal/metrics"
-	"github.com/AnishMulay/sandstore/internal/orchestrators"
+	"github.com/AnishMulay/sandstore/internal/orchestrators/protocol"
 	ps "github.com/AnishMulay/sandstore/internal/server"
+	"github.com/AnishMulay/sandstore/topology/contract"
 )
 
 type TopologyProvider interface {
 	GetLeaderAddress() string
 }
 
+type consensusHandler interface {
+	HandleConsensusRequestVote(ctx context.Context, req raft.RequestVoteArgs) (*raft.RequestVoteReply, error)
+	HandleConsensusAppendEntries(ctx context.Context, req protocol.AppendEntriesRequest) (*raft.AppendEntriesReply, error)
+	HandleConsensusInstallSnapshot(ctx context.Context, req protocol.InstallSnapshotRequest) (*raft.InstallSnapshotReply, error)
+}
+
 type HyperconvergedServer struct {
-	comm           *grpccomm.GRPCCommunicator
-	cpo            orchestrators.ControlPlaneOrchestrator
-	dpo            orchestrators.DataPlaneOrchestrator
-	ls             log_service.LogService
-	topology       TopologyProvider
-	metricsService metrics.MetricsService
+	comm             *grpccomm.GRPCCommunicator
+	cpo              contract.ControlPlaneOrchestrator
+	consensusHandler consensusHandler
+	dpo              contract.DataPlaneOrchestrator
+	ls               log_service.LogService
+	topology         TopologyProvider
+	metricsService   metrics.MetricsService
 }
 
 func NewHyperconvergedServer(
 	comm *grpccomm.GRPCCommunicator,
-	cpo orchestrators.ControlPlaneOrchestrator,
-	dpo orchestrators.DataPlaneOrchestrator,
+	cpo contract.ControlPlaneOrchestrator,
+	consensusHandler consensusHandler,
+	dpo contract.DataPlaneOrchestrator,
 	ls log_service.LogService,
 	topology TopologyProvider,
 	metricsService metrics.MetricsService,
 ) *HyperconvergedServer {
 	return &HyperconvergedServer{
-		comm:           comm,
-		cpo:            cpo,
-		dpo:            dpo,
-		ls:             ls,
-		topology:       topology,
-		metricsService: metricsService,
+		comm:             comm,
+		cpo:              cpo,
+		consensusHandler: consensusHandler,
+		dpo:              dpo,
+		ls:               ls,
+		topology:         topology,
+		metricsService:   metricsService,
 	}
 }
 
@@ -95,15 +105,13 @@ func (s *HyperconvergedServer) registerPayloads() {
 
 	// Replicator Payloads
 	s.comm.RegisterPayloadType(ps.MsgRaftRequestVote, reflect.TypeOf(raft.RequestVoteArgs{}))
-	s.comm.RegisterPayloadType(ps.MsgRaftAppendEntries, reflect.TypeOf(communication.AppendEntriesRequest{}))
-	s.comm.RegisterPayloadType(ps.MsgRaftInstallSnapshot, reflect.TypeOf(communication.InstallSnapshotRequest{}))
+	s.comm.RegisterPayloadType(ps.MsgRaftAppendEntries, reflect.TypeOf(protocol.AppendEntriesRequest{}))
+	s.comm.RegisterPayloadType(ps.MsgRaftInstallSnapshot, reflect.TypeOf(protocol.InstallSnapshotRequest{}))
 
 	// Chunk Replication Payloads
-	s.comm.RegisterPayloadType(ps.MsgChunkWrite, reflect.TypeOf(communication.WriteChunkRequest{}))
 	s.comm.RegisterPayloadType(ps.MsgChunkRead, reflect.TypeOf(communication.ReadChunkRequest{}))
 	s.comm.RegisterPayloadType(ps.MsgChunkDelete, reflect.TypeOf(communication.DeleteChunkRequest{}))
-	// Also register the communication constants used by the chunk replicator
-	s.comm.RegisterPayloadType(communication.MessageTypeWriteChunk, reflect.TypeOf(communication.WriteChunkRequest{}))
+	// Also register the communication constants used by chunk handling.
 	s.comm.RegisterPayloadType(communication.MessageTypeReadChunk, reflect.TypeOf(communication.ReadChunkRequest{}))
 	s.comm.RegisterPayloadType(communication.MessageTypeDeleteChunk, reflect.TypeOf(communication.DeleteChunkRequest{}))
 	s.comm.RegisterPayloadType(communication.MessageTypePrepareChunk, reflect.TypeOf(communication.PrepareChunkRequest{}))
@@ -188,9 +196,6 @@ func (s *HyperconvergedServer) handleMessage(ctx context.Context, msg communicat
 	case communication.MessageTypeAbortChunk:
 		operation = "handle_abort_chunk"
 		return s.handleAbortChunk(ctx, msg)
-	case ps.MsgChunkWrite:
-		operation = "handle_chunk_write"
-		return s.handleChunkWrite(ctx, msg)
 	case ps.MsgChunkRead:
 		operation = "handle_chunk_read"
 		return s.handleChunkRead(ctx, msg)
@@ -383,12 +388,6 @@ func (s *HyperconvergedServer) handleAbortChunk(ctx context.Context, msg communi
 	return s.respond(nil, err)
 }
 
-func (s *HyperconvergedServer) handleChunkWrite(ctx context.Context, msg communication.Message) (*communication.Response, error) {
-	req := msg.Payload.(communication.WriteChunkRequest)
-	err := s.dpo.HandleLegacyChunkWrite(ctx, req.ChunkID, req.Data)
-	return s.respond(nil, err)
-}
-
 func (s *HyperconvergedServer) handleChunkRead(ctx context.Context, msg communication.Message) (*communication.Response, error) {
 	req := msg.Payload.(communication.ReadChunkRequest)
 	data, err := s.dpo.HandleReadChunk(ctx, req.ChunkID)
@@ -409,19 +408,19 @@ func (s *HyperconvergedServer) handleChunkDelete(ctx context.Context, msg commun
 
 func (s *HyperconvergedServer) handleRaftRequestVote(ctx context.Context, msg communication.Message) (*communication.Response, error) {
 	req := msg.Payload.(raft.RequestVoteArgs)
-	res, err := s.cpo.HandleConsensusRequestVote(ctx, req)
+	res, err := s.consensusHandler.HandleConsensusRequestVote(ctx, req)
 	return s.respond(res, err)
 }
 
 func (s *HyperconvergedServer) handleRaftAppendEntries(ctx context.Context, msg communication.Message) (*communication.Response, error) {
-	req := msg.Payload.(communication.AppendEntriesRequest)
-	res, err := s.cpo.HandleConsensusAppendEntries(ctx, req)
+	req := msg.Payload.(protocol.AppendEntriesRequest)
+	res, err := s.consensusHandler.HandleConsensusAppendEntries(ctx, req)
 	return s.respond(res, err)
 }
 
 func (s *HyperconvergedServer) handleRaftInstallSnapshot(ctx context.Context, msg communication.Message) (*communication.Response, error) {
-	req := msg.Payload.(communication.InstallSnapshotRequest)
-	res, err := s.cpo.HandleConsensusInstallSnapshot(ctx, req)
+	req := msg.Payload.(protocol.InstallSnapshotRequest)
+	res, err := s.consensusHandler.HandleConsensusInstallSnapshot(ctx, req)
 	return s.respond(res, err)
 }
 

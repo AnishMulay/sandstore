@@ -17,6 +17,7 @@ import (
 	"github.com/AnishMulay/sandstore/internal/metadata_replicator/raft_replicator"
 	pms "github.com/AnishMulay/sandstore/internal/metadata_service"
 	"github.com/AnishMulay/sandstore/internal/metrics"
+	"github.com/AnishMulay/sandstore/internal/orchestrators/protocol"
 	ps "github.com/AnishMulay/sandstore/internal/server"
 )
 
@@ -387,7 +388,7 @@ type appendWork struct {
 
 type snapshotWork struct {
 	node cluster_service.Node
-	req  communication.InstallSnapshotRequest
+	req  protocol.InstallSnapshotRequest
 	term uint64
 }
 
@@ -445,7 +446,7 @@ func (r *DurableRaftReplicator) broadcastAppendEntries() {
 			}
 			snapshotWorkList = append(snapshotWorkList, snapshotWork{
 				node: node,
-				req: communication.InstallSnapshotRequest{
+				req: protocol.InstallSnapshotRequest{
 					Term:              int64(savedTerm),
 					LeaderID:          r.id,
 					LastIncludedIndex: int64(snapshotMeta.LastIncludedIndex),
@@ -467,7 +468,7 @@ func (r *DurableRaftReplicator) broadcastAppendEntries() {
 				if errors.Is(err, ErrLogCompacted) && snapshotMeta.LastIncludedIndex > 0 {
 					snapshotWorkList = append(snapshotWorkList, snapshotWork{
 						node: node,
-						req: communication.InstallSnapshotRequest{
+						req: protocol.InstallSnapshotRequest{
 							Term:              int64(savedTerm),
 							LeaderID:          r.id,
 							LastIncludedIndex: int64(snapshotMeta.LastIncludedIndex),
@@ -533,7 +534,7 @@ func (r *DurableRaftReplicator) replicateAppendEntries(w appendWork) {
 		return
 	}
 
-	args := communication.AppendEntriesRequest{
+	args := protocol.AppendEntriesRequest{
 		Term:         int64(w.term),
 		LeaderID:     r.id,
 		PrevLogIndex: w.prevLogIndex,
@@ -727,7 +728,7 @@ func (r *DurableRaftReplicator) applyLogsLocked() {
 	}
 }
 
-func (r *DurableRaftReplicator) HandleAppendEntries(ctx context.Context, req communication.AppendEntriesRequest) (*raft_replicator.AppendEntriesReply, error) {
+func (r *DurableRaftReplicator) HandleAppendEntries(ctx context.Context, req protocol.AppendEntriesRequest) (*raft_replicator.AppendEntriesReply, error) {
 	start := time.Now()
 	defer func() {
 		if r == nil || r.metricsService == nil {
@@ -901,7 +902,7 @@ func (r *DurableRaftReplicator) HandleRequestVote(ctx context.Context, req raft_
 	return reply, nil
 }
 
-func (r *DurableRaftReplicator) HandleInstallSnapshot(ctx context.Context, req communication.InstallSnapshotRequest) (*raft_replicator.InstallSnapshotReply, error) {
+func (r *DurableRaftReplicator) HandleInstallSnapshot(ctx context.Context, req protocol.InstallSnapshotRequest) (*raft_replicator.InstallSnapshotReply, error) {
 	start := time.Now()
 	defer func() {
 		if r == nil || r.metricsService == nil {
